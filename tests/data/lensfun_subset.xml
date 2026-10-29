@@ -1,0 +1,51 @@
+<!-- Excerpt from the lensfun database (CC BY-SA 3.0), used only for tests. -->
+<lensdatabase version="2">
+
+
+    <camera>
+        <maker>Nikon Corporation</maker>
+        <maker lang="en">Nikon</maker>
+        <model>Nikon D850</model>
+        <model lang="en">D850</model>
+        <mount>Nikon F AF</mount>
+        <cropfactor>1</cropfactor>
+    </camera>
+
+    <lens>
+        <maker>Nikon</maker>
+        <model>Nikon AF-S Nikkor 80-400mm f/4.5-5.6G ED VR</model>
+		<model lang="en">Nikkor AF-S 80-400mm f/4.5-5.6G ED VR</model>
+        <mount>Nikon F AF</mount>
+        <cropfactor>1.0</cropfactor>
+        <calibration>
+            <vignetting model="pa" focal="300.0" aperture="5.6" distance="1000" k1="-0.0656913" k2="-0.4430313" k3="0.1786427" />
+            <vignetting model="pa" focal="300.0" aperture="8.0" distance="1000" k1="0.0602756" k2="-0.2592874" k3="0.0603400" />
+            <vignetting model="pa" focal="300.0" aperture="11.0" distance="1000" k1="-0.0489292" k2="0.1259387" k3="-0.1504118" />
+            <vignetting model="pa" focal="400.0" aperture="5.6" distance="1000" k1="-0.3678867" k2="0.0054641" k3="-0.0222676" />
+            <vignetting model="pa" focal="400.0" aperture="8.0" distance="1000" k1="0.0723851" k2="-0.5104349" k3="0.2628477" />
+            <vignetting model="pa" focal="400.0" aperture="11.0" distance="1000" k1="0.0070833" k2="-0.0499915" k3="-0.0621941" />
+        </calibration>
+    </lens>
+
+    <lens>
+        <maker>Nikon</maker>
+        <model>Nikon AF Zoom-Nikkor 80-400mm f/4.5-5.6D ED VR 183</model>
+        <model lang="en">Nikkor AF 80-400mm f/4.5-5.6D ED VR</model>
+        <mount>Nikon F AF</mount>
+        <!-- Average crop factor of Nikon APS-C cameras -->
+        <cropfactor>1.528</cropfactor>
+        <calibration>
+        </calibration>
+    </lens>
+
+    <lens>
+        <maker>Sigma</maker>
+        <model>Sigma 80-400mm f/4.5-5.6 EX DG OS</model>
+        <mount>Canon EF</mount>
+        <mount>Nikon F AF</mount>
+        <cropfactor>1</cropfactor>
+        <calibration>
+            <!-- Taken with Canon 5D Mark III -->
+        </calibration>
+    </lens>
+</lensdatabase>

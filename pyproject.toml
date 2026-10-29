@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "solar-eclipse-toolkit"
+version = "0.1.0"
+description = "Alignment, HDR stacking and coronal enhancement for DSLR total solar eclipse images, built to run inside Siril."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Andy" }]
+dependencies = [
+    "numpy>=1.24",
+    "exifread>=3.0",
+]
+
+[project.optional-dependencies]
+# rawpy (LibRaw) gives exact black and white levels; strongly recommended.
+raw = ["rawpy>=0.19"]
+gui = ["PyQt6>=6.5"]
+dev = ["pytest>=7"]
+all = ["rawpy>=0.19", "PyQt6>=6.5"]
+
+[project.scripts]
+tse = "tse_core.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
