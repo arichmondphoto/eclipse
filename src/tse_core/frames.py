@@ -168,6 +168,30 @@ def _parse_offset(text: str) -> Optional[timezone]:
     return timezone(sign * timedelta(hours=hours, minutes=minutes))
 
 
+def parse_duration(text: str | float | int) -> float:
+    """Seconds from '+3848', '-64:08', '1:04:08', '1h4m8s' or '-4m'."""
+    if isinstance(text, (int, float)):
+        return float(text)
+    t = str(text).strip().replace(" ", "")
+    sign = -1.0 if t.startswith("-") else 1.0
+    t = t.lstrip("+-")
+    if not t:
+        raise ValueError("empty duration")
+    if any(c in t for c in "hms"):
+        import re
+
+        m = re.fullmatch(r"(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?", t)
+        if not m or not any(m.groups()):
+            raise ValueError(f"cannot read duration {text!r}")
+        h, mi, s = (float(g) if g else 0.0 for g in m.groups())
+        return sign * (h * 3600 + mi * 60 + s)
+    parts = [float(p) for p in t.split(":")]
+    total = 0.0
+    for p in parts:
+        total = total * 60 + p
+    return sign * total
+
+
 def parse_iso(text: str) -> Optional[datetime]:
     try:
         return datetime.fromisoformat(text)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .brackets import detect_brackets
 from .calibration import CalibrationFrames, plan_calibration
-from .frames import format_exposure
+from .frames import format_exposure, parse_duration
 from .inventory import Inventory, find_raw_files
 from .lensfun import LensfunDatabase, corner_falloff, download_database, import_database
 from .metadata import ExifToolReader, rawpy_available, read_frames
@@ -28,8 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--project", help="create or update this project file (.json)")
     p.add_argument("--lens", help="force this lensfun lens profile")
     p.add_argument("--no-exiftool", action="store_true", help="do not use exiftool even if installed")
-    p.add_argument("--c2", help="second contact, camera clock time, e.g. 2024-04-08T13:48:10")
-    p.add_argument("--c3", help="third contact, camera clock time")
+    p.add_argument("--c2", help="second contact, e.g. 2024-04-08T13:47:33 (camera time, or true time with --clock-offset)")
+    p.add_argument("--c3", help="third contact")
+    p.add_argument("--clock-offset", help="add this to the camera clock to get true time, e.g. +1:04:08, -45s, 1h")
     p.add_argument("--bias", help="folder of bias frames")
     p.add_argument("--darks", help="folder of dark frames")
     p.add_argument("--flats", help="folder of flat frames")
@@ -93,8 +94,15 @@ def cmd_inventory(args) -> int:
     print(f"Reading {len(files)} RAW file(s)...")
     inv = Inventory.from_paths(files, use_exiftool=not args.no_exiftool)
 
+    offset = parse_duration(args.clock_offset) if args.clock_offset else None
+    if args.project and offset is None and Path(args.project).exists():
+        offset = EventProject.load(args.project).camera_clock_offset_s
+    if offset:
+        print(f"Camera clock offset: {offset:+.0f} s")
     if args.c2 and args.c3:
-        changed = inv.mark_outside(datetime.fromisoformat(args.c2), datetime.fromisoformat(args.c3))
+        changed = inv.mark_outside(
+            datetime.fromisoformat(args.c2), datetime.fromisoformat(args.c3), clock_offset_s=offset or 0.0
+        )
         print(f"{changed} frame(s) marked as outside totality")
 
     report = detect_brackets(inv.frames)
@@ -128,6 +136,8 @@ def cmd_inventory(args) -> int:
             project.second_contact = args.c2
         if args.c3:
             project.third_contact = args.c3
+        if args.clock_offset:
+            project.camera_clock_offset_s = offset
         project.set_inventory(inv)
         project.save(path)
         print(f"Project saved to {path}")

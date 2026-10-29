@@ -76,8 +76,15 @@ class Inventory:
         times = [f.datetime() for f in self.frames if f.datetime()]
         return (min(times), max(times)) if times else (None, None)
 
-    def mark_outside(self, second_contact: datetime, third_contact: datetime, margin_s: float = 0.0) -> int:
-        """Mark frames taken outside totality as 'partial'. Returns how many changed."""
+    def mark_outside(
+        self, second_contact: datetime, third_contact: datetime, margin_s: float = 0.0, clock_offset_s: float = 0.0
+    ) -> int:
+        """Mark frames taken outside totality as 'partial'. Returns how many changed.
+
+        ``clock_offset_s`` is added to each frame's camera time before the
+        comparison, so contact times can be given in true time when the
+        camera clock was wrong. With no offset, give them in camera time.
+        """
         changed = 0
         for f in self.frames:
             dt = f.datetime()
@@ -85,7 +92,7 @@ class Inventory:
                 continue
             a = _naive(second_contact)
             b = _naive(third_contact)
-            t = _naive(dt)
+            t = _naive(dt) + _seconds(clock_offset_s)
             inside = (a - _seconds(margin_s)) <= t <= (b + _seconds(margin_s))
             new_role = "light" if inside else "partial"
             if new_role != f.role:

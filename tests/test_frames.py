@@ -45,3 +45,27 @@ def test_overrides_are_recorded():
     assert f.iso == 200 and f.overrides == ["iso"]
     with pytest.raises(KeyError):
         f.apply_override("nonsense", 1)
+
+
+@pytest.mark.parametrize("text,seconds", [
+    ("+3848", 3848), ("-64:08", -3848), ("1:04:08", 3848), ("1h4m8s", 3848), ("-4m", -240), ("45s", 45), (90, 90),
+])
+def test_parse_duration(text, seconds):
+    from tse_core.frames import parse_duration
+
+    assert parse_duration(text) == seconds
+
+
+def test_clock_offset_moves_frames_into_totality():
+    from datetime import datetime
+
+    from conftest import make_frames
+    from tse_core.inventory import Inventory
+
+    # Camera clock an hour behind (standard time) and 4 minutes slow.
+    inv = Inventory(make_frames(ECLIPSE_2024, start=datetime(2024, 4, 8, 12, 43, 40)))
+    c2, c3 = datetime(2024, 4, 8, 13, 47, 33), datetime(2024, 4, 8, 13, 51, 50)
+    inv.mark_outside(c2, c3)
+    assert all(f.role == "partial" for f in inv.frames)
+    inv.mark_outside(c2, c3, clock_offset_s=3600 + 4 * 60)
+    assert all(f.role == "light" for f in inv.frames)

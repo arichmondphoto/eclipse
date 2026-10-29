@@ -51,7 +51,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
 
 from tse_core.brackets import detect_brackets  # noqa: E402
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
-from tse_core.frames import format_exposure  # noqa: E402
+from tse_core.frames import format_exposure, parse_duration  # noqa: E402
 from tse_core.inventory import Inventory, find_raw_files  # noqa: E402
 from tse_core.lensfun import LensfunDatabase, download_database  # noqa: E402
 from tse_core.metadata import read_frames  # noqa: E402
@@ -152,9 +152,12 @@ class FramesTab(QWidget):
         self.lens_combo.currentIndexChanged.connect(lambda _: self.replan())
         form.addRow("Lens profile:", self.lens_combo)
         self.c2 = QLineEdit()
-        self.c2.setPlaceholderText("camera time, e.g. 2024-04-08T13:48:10")
+        self.c2.setPlaceholderText("e.g. 2024-04-08T13:47:33")
         self.c3 = QLineEdit()
         self.c3.setPlaceholderText("optional")
+        self.clock = QLineEdit()
+        self.clock.setPlaceholderText("added to camera time, e.g. +1:04:08 (blank = clock was right)")
+        form.addRow("Clock offset:", self.clock)
         form.addRow("Second contact:", self.c2)
         form.addRow("Third contact:", self.c3)
         self.bias_dir, self.dark_dir, self.flat_dir = QLineEdit(), QLineEdit(), QLineEdit()
@@ -224,9 +227,14 @@ class FramesTab(QWidget):
         if not self.inventory.frames:
             return
         c2, c3 = self.c2.text().strip(), self.c3.text().strip()
+        try:
+            self.project.camera_clock_offset_s = parse_duration(self.clock.text()) if self.clock.text().strip() else 0.0
+        except ValueError:
+            QMessageBox.warning(self, "Clock offset", "Use a form like +1:04:08, -45s or 1h.")
         if c2 and c3:
             try:
-                self.inventory.mark_outside(datetime.fromisoformat(c2), datetime.fromisoformat(c3))
+                self.inventory.mark_outside(datetime.fromisoformat(c2), datetime.fromisoformat(c3),
+                                            clock_offset_s=self.project.camera_clock_offset_s)
             except ValueError:
                 QMessageBox.warning(self, "Contact times", "Use the form 2024-04-08T13:48:10 for contact times.")
         self.project.second_contact, self.project.third_contact = c2, c3
@@ -377,6 +385,8 @@ class FramesTab(QWidget):
         self.folder.setText(self.project.raw_folder)
         self.c2.setText(self.project.second_contact)
         self.c3.setText(self.project.third_contact)
+        offset = self.project.camera_clock_offset_s
+        self.clock.setText(f"{offset:+.0f}s" if offset else "")
         self._refresh_lens_choices()
         if not self.project.use_lensfun:
             self.lens_combo.setCurrentText(NO_PROFILE)

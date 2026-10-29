@@ -83,7 +83,10 @@ tse frame DSC_4100.NEF                       # show everything read from one fil
 missing shutter speeds), and the calibration plan: which vignetting source
 each frame uses, how darks and bias are matched, and the corner falloff.
 
-Contact times are in the camera's clock, which may differ from true time.
+Contact times are compared with the camera's clock. If the clock was wrong,
+give the correction with `--clock-offset` (added to camera time, for example
+`+1:04:08`) and enter the contact times in true time. Bracket detection and
+Moon tracking only use time differences, so a wrong clock never affects them.
 
 ## Calibration rules
 
