@@ -23,7 +23,10 @@ import json
 import math
 import os
 import re
+import shutil
+import ssl
 import urllib.request
+import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -318,22 +321,80 @@ def default_database_dirs() -> list[Path]:
 
 
 def download_database(dest: Optional[str | os.PathLike] = None, timeout: float = 30.0) -> Path:
-    """Download the current lensfun XML files from GitHub into the cache."""
+    """Download the current lensfun XML files from GitHub into the cache.
+
+    Uses certifi's certificate list when it is installed, so it also works
+    with Python installs that cannot see the system certificates (common
+    with the python.org installer on macOS).
+    """
     target = Path(dest) if dest else CACHE_DIR / "lensfun"
     target.mkdir(parents=True, exist_ok=True)
+    ctx = _ssl_context()
     req = urllib.request.Request(GITHUB_DB_API, headers={"Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
         listing = json.load(resp)
     for item in listing:
         name = item.get("name", "")
         url = item.get("download_url")
         if not name.endswith(".xml") or not url:
             continue
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(url, timeout=timeout, context=ctx) as resp:
             data = resp.read()
         ET.fromstring(data)  # refuse to save anything that is not valid XML
         (target / name).write_bytes(data)
     return target
+
+
+def import_database(source: str | os.PathLike, dest: Optional[str | os.PathLike] = None) -> Path:
+    """Install lensfun XML files from a folder or a downloaded .zip.
+
+    Works offline: download the lensfun repository as a zip in a browser
+    (github.com/lensfun/lensfun, Code, Download ZIP) and pass its path, or
+    point at any folder holding the database's .xml files.
+    """
+    src = Path(source)
+    target = Path(dest) if dest else CACHE_DIR / "lensfun"
+    target.mkdir(parents=True, exist_ok=True)
+    count = 0
+    if src.is_file() and zipfile.is_zipfile(src):
+        with zipfile.ZipFile(src) as zf:
+            names = [n for n in zf.namelist() if n.endswith(".xml") and "/data/db/" in "/" + n]
+            if not names:
+                names = [n for n in zf.namelist() if n.endswith(".xml")]
+            for n in names:
+                data = zf.read(n)
+                if _is_lensfun_xml(data):
+                    (target / Path(n).name).write_bytes(data)
+                    count += 1
+    elif src.is_dir():
+        db = src / "data" / "db"
+        folder = db if db.is_dir() else src
+        for p in folder.glob("*.xml"):
+            data = p.read_bytes()
+            if _is_lensfun_xml(data):
+                shutil.copyfile(p, target / p.name)
+                count += 1
+    else:
+        raise FileNotFoundError(f"{src} is not a folder or a .zip file")
+    if count == 0:
+        raise ValueError(f"no lensfun database files found in {src}")
+    return target
+
+
+def _is_lensfun_xml(data: bytes) -> bool:
+    try:
+        return ET.fromstring(data).tag == "lensdatabase"
+    except ET.ParseError:
+        return False
+
+
+def _ssl_context() -> ssl.SSLContext:
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 # ---------------------------------------------------------------------------

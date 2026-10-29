@@ -100,7 +100,7 @@ def test_download_database_saves_only_xml(tmp_path, monkeypatch):
         def __exit__(self, *a):
             return False
 
-    def fake_urlopen(req, timeout=0):
+    def fake_urlopen(req, timeout=0, **kw):
         url = getattr(req, "full_url", req)
         return Resp(_json.dumps(listing).encode() if url == lensfun.GITHUB_DB_API else xml)
 
@@ -108,3 +108,35 @@ def test_download_database_saves_only_xml(tmp_path, monkeypatch):
     path = lensfun.download_database(tmp_path / "db")
     assert [p.name for p in path.iterdir()] == ["slr-nikon.xml"]
     assert len(lensfun.LensfunDatabase.load([path]).lenses) == 3
+
+
+def test_import_database_from_zip_and_folder(tmp_path):
+    import zipfile
+
+    from tse_core import lensfun
+
+    xml = (DATA / "lensfun_subset.xml").read_bytes()
+    zpath = tmp_path / "lensfun-master.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("lensfun-master/data/db/slr-nikon.xml", xml)
+        zf.writestr("lensfun-master/data/db/lensfun-database.dtd", "x")
+        zf.writestr("lensfun-master/docs/other.xml", "<notlensfun/>")
+    out = lensfun.import_database(zpath, tmp_path / "a")
+    assert [p.name for p in out.iterdir()] == ["slr-nikon.xml"]
+    out2 = lensfun.import_database(out, tmp_path / "b")
+    assert len(lensfun.LensfunDatabase.load([out2]).lenses) == 3
+
+
+def test_lensfun_update_explains_certificate_errors(monkeypatch, capsys):
+    import ssl
+    import urllib.error
+
+    from tse_core import cli
+
+    def boom(dest=None):
+        raise urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed: unable to get local issuer certificate"))
+
+    monkeypatch.setattr(cli, "download_database", boom)
+    assert cli.main(["lensfun-update"]) == 1
+    out = capsys.readouterr().out
+    assert "certifi" in out and "--from" in out

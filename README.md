@@ -47,6 +47,16 @@ tse doctor                   # shows which readers are available
 tse lensfun-update           # downloads the lensfun lens database once
 ```
 
+If the download fails with a certificate error, run `pip install --upgrade certifi`
+and try again (on macOS you can also run *Install Certificates.command* in the
+Python folder in Applications). Or download
+<https://github.com/lensfun/lensfun/archive/refs/heads/master.zip> in a browser
+and install it offline:
+
+```bash
+tse lensfun-update --from ~/Downloads/lensfun-master.zip
+```
+
 ### In Siril
 
 1. In Siril, open **Preferences → Scripts** and add this repository's

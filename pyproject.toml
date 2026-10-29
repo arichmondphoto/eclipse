@@ -13,6 +13,7 @@ authors = [{ name = "Andy" }]
 dependencies = [
     "numpy>=1.24",
     "exifread>=3.0",
+    "certifi",
 ]
 
 [project.optional-dependencies]

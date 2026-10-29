@@ -11,7 +11,7 @@ from .brackets import detect_brackets
 from .calibration import CalibrationFrames, plan_calibration
 from .frames import format_exposure
 from .inventory import Inventory, find_raw_files
-from .lensfun import LensfunDatabase, corner_falloff, download_database
+from .lensfun import LensfunDatabase, corner_falloff, download_database, import_database
 from .metadata import ExifToolReader, rawpy_available, read_frames
 from .project import EventProject
 
@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("lensfun-update", help="download the lensfun database from GitHub")
     p.add_argument("--dest")
+    p.add_argument("--from", dest="source", help="install from a downloaded lensfun .zip or a folder instead")
 
     sub.add_parser("doctor", help="show which optional readers are available")
 
@@ -52,9 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "lens":
         return cmd_lens(args)
     if args.command == "lensfun-update":
-        path = download_database(args.dest)
-        print(f"lensfun database saved to {path}")
-        return 0
+        return cmd_lensfun_update(args)
     if args.command == "doctor":
         return cmd_doctor()
     return 1
@@ -108,6 +107,30 @@ def cmd_inventory(args) -> int:
         project.set_inventory(inv)
         project.save(path)
         print(f"Project saved to {path}")
+    return 0
+
+
+def cmd_lensfun_update(args) -> int:
+    import urllib.error
+
+    try:
+        path = import_database(args.source, args.dest) if args.source else download_database(args.dest)
+    except urllib.error.URLError as exc:
+        print(f"Download failed: {exc.reason}")
+        if "CERTIFICATE" in str(exc.reason).upper():
+            print(
+                "Python could not verify GitHub's certificate. Fix it with either:\n"
+                "  pip install --upgrade certifi      (then run this command again), or\n"
+                "  on macOS, run 'Install Certificates.command' in your Python folder in Applications.\n"
+                "Or download https://github.com/lensfun/lensfun/archive/refs/heads/master.zip in a browser\n"
+                "and run:  tse lensfun-update --from <path to the zip>"
+            )
+        return 1
+    except (FileNotFoundError, ValueError) as exc:
+        print(exc)
+        return 1
+    db = LensfunDatabase.load([path])
+    print(f"lensfun database saved to {path} ({len(db.lenses)} lenses)")
     return 0
 
 
