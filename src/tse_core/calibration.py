@@ -2,9 +2,11 @@
 
 Rules, from the development plan:
 
-* **Vignetting**: the user's own master flat if one matches the frame's
-  aperture and focal length, otherwise a lensfun profile, otherwise none.
-  Only one is ever applied.
+* **Vignetting**, first match wins and only one is ever applied:
+  a profile the user chose explicitly; the user's own master flat if one
+  matches the frame's aperture and focal length; a saved profile fitted
+  from the user's flats (``tse flat-profile``) for the same lens and
+  settings; a lensfun profile; otherwise none.
 * **Darks**: matched to each light by exposure time and ISO. Without a
   match, hot pixels are removed by cosmetic correction instead.
 * **Bias**: matched by ISO. Without bias frames, the black level read from
@@ -28,6 +30,7 @@ import numpy as np
 from .fits import write_fits
 from .frames import FrameMeta, format_exposure
 from .lensfun import Lens, LensfunDatabase, corner_falloff, vignetting_map
+from .vignetting_profile import VignettingProfile, match_profile, profile_map
 
 
 @dataclass
@@ -46,10 +49,12 @@ class CalibrationFrames:
 @dataclass
 class FrameCalibration:
     frame_index: int
-    vignetting: str  # "flat", "lensfun", "none"
+    vignetting: str  # "profile", "flat", "lensfun", "none"
     flat_group: Optional[str] = None
-    lens_label: str = ""
+    lens_label: str = ""  # lensfun lens or own-flats profile used
     lens_terms: Optional[tuple[float, float, float]] = None
+    channel_terms: Optional[dict[str, tuple[float, float, float]]] = None
+    profile_crop: float = 1.0  # crop factor of the camera the profile was measured on
     corner_brightness: Optional[float] = None
     corner_stops: Optional[float] = None
     dark_group: Optional[str] = None
@@ -74,6 +79,9 @@ class CalibrationPlan:
         counts = defaultdict(int)
         for fc in self.frames:
             counts[fc.vignetting] += 1
+        own = sorted({fc.lens_label for fc in self.frames if fc.vignetting == "profile"})
+        for label in own:
+            lines.append(f"Own-flats profile: {label}")
         if self.lens:
             lines.append(f"Lens profile: {self.lens.label()} ({self.lens.source_file})")
         elif self.lens_candidates:
@@ -104,6 +112,8 @@ def plan_calibration(
     lens_name: Optional[str] = None,
     use_lensfun: bool = True,
     use_focus_distance: bool = False,
+    profile: Optional[VignettingProfile] = None,
+    profiles: Optional[list[VignettingProfile]] = None,
 ) -> CalibrationPlan:
     """Choose flat, dark and bias handling for every light frame.
 
@@ -114,6 +124,9 @@ def plan_calibration(
     The eclipse is always focused at infinity, so the EXIF focus distance is
     ignored unless ``use_focus_distance`` is set. Cameras report it coarsely
     and a wrong value would change the vignetting profile.
+
+    ``profile`` forces one own-flats profile for every frame; ``profiles``
+    is the saved library, searched per frame for the same lens and settings.
     """
     calib = calib or CalibrationFrames()
     warnings: list[str] = []
@@ -135,7 +148,18 @@ def plan_calibration(
     for f in lights:
         fc = FrameCalibration(frame_index=f.index, vignetting="none")
         fkey = _flat_key(f)
-        if fkey in flat_groups:
+        own = profile if profile is not None else None
+        if own is None and fkey not in flat_groups and profiles:
+            own = match_profile(f, profiles)
+        if own is not None:
+            crop = f.crop_factor or camera_crop or 1.0
+            fc.vignetting = "profile"
+            fc.lens_label = own.label()
+            fc.lens_terms = own.terms
+            fc.channel_terms = dict(own.channel_terms) or None
+            fc.profile_crop = own.crop_factor
+            fc.corner_brightness, fc.corner_stops = own.corner(crop)
+        elif fkey in flat_groups:
             fc.vignetting, fc.flat_group = "flat", fkey
         elif lens is not None and f.focal_length_mm and f.aperture_f:
             distance = 1000.0
@@ -148,6 +172,7 @@ def plan_calibration(
                 fc.vignetting = "lensfun"
                 fc.lens_label = lens.label()
                 fc.lens_terms = terms
+                fc.profile_crop = lens.crop_factor
                 fc.corner_brightness, fc.corner_stops = brightness, stops
             else:
                 fc.notes.append(
@@ -175,7 +200,10 @@ def plan_calibration(
         )
     no_vign = [fc.frame_index for fc in results if fc.vignetting == "none"]
     if no_vign:
-        warnings.append(f"{len(no_vign)} light frame(s) will not be corrected for vignetting")
+        warnings.append(
+            f"{len(no_vign)} light frame(s) will not be corrected for vignetting; shoot flats with the same lens, "
+            "focal length and aperture, then run 'tse flat-profile <flats folder>'"
+        )
 
     return CalibrationPlan(
         frames=results,
@@ -227,17 +255,25 @@ def write_synthetic_flat(
     terms: tuple[float, float, float],
     image_crop: float = 1.0,
     calib_crop: float = 1.0,
+    channel_terms: Optional[dict[str, tuple[float, float, float]]] = None,
+    cfa_pattern: str = "",
 ) -> Path:
-    """Write the lensfun vignetting map as a 32-bit FITS master flat.
+    """Write a vignetting correction (lensfun or own flats) as a FITS master flat.
 
     The flat is the relative illumination itself (1.0 at the centre), so
-    Siril's flat division applies exactly the lensfun correction.
+    Siril's flat division applies exactly this correction. With per-channel
+    terms and a Bayer pattern such as "RGGB", each CFA pixel gets its own
+    channel's falloff.
     """
-    flat = vignetting_map(width, height, terms, image_crop, calib_crop)
+    if channel_terms and len(cfa_pattern) == 4:
+        prof = VignettingProfile("", 0.0, 0.0, terms, channel_terms, calib_crop)
+        flat = profile_map(prof, width, height, image_crop, cfa_pattern)
+    else:
+        flat = vignetting_map(width, height, terms, image_crop, calib_crop)
     write_fits(
         path,
         flat,
-        {"IMAGETYP": "Master Flat", "COMMENT": "Synthetic flat from lensfun vignetting profile",
+        {"IMAGETYP": "Master Flat", "COMMENT": "Synthetic flat from a smooth vignetting profile",
          "LF_K1": terms[0], "LF_K2": terms[1], "LF_K3": terms[2]},
     )
     return Path(path)

@@ -74,6 +74,9 @@ tse inventory RAW --c2 2024-04-08T13:47:30 --c3 2024-04-08T13:51:45   # mark fra
 tse inventory RAW --flats FLATS --darks DARKS --bias BIAS              # optional calibration frames
 tse inventory RAW --lens "Nikon AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" # force a lens profile
 tse lens "AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" --focal 400 --aperture 8
+tse flat-profile FLATS                       # fit and save a vignetting profile from your own flats
+tse inventory RAW --profile my_profile.json  # use one profile for every frame
+tse frame DSC_4100.NEF                       # show everything read from one file
 ```
 
 `inventory` prints the frame table, the detected brackets (step size, range,
@@ -84,14 +87,42 @@ Contact times are in the camera's clock, which may differ from true time.
 
 ## Calibration rules
 
-* **Vignetting:** your own master flat if one matches the frame's aperture
-  and focal length, otherwise the lensfun profile, otherwise none. Only one
-  is ever applied. The lensfun profile can be written as a synthetic FITS
-  master flat for Siril. The eclipse is assumed focused at infinity.
+* **Vignetting**, first match wins and only one is ever applied:
+  1. a profile you name with `--profile`;
+  2. your own flats (`--flats`), used directly when they match the frame's
+     aperture and focal length;
+  3. a saved own-flats profile for the same lens, within 5% focal length
+     and 1/3 stop;
+  4. the lensfun profile;
+  5. none, with a warning.
+
+  Profiles of either kind can be written as a synthetic FITS master flat
+  for Siril. The eclipse is assumed focused at infinity.
 * **Darks:** matched by exposure time and ISO; without a match, hot pixels
   are found from the light frames.
 * **Bias:** matched by ISO; without bias frames, each file's black level is
   used as a synthetic bias.
+
+## Own-flats profiles
+
+When lensfun has no vignetting data for your lens, shoot flats and fit a
+profile once:
+
+1. Same lens, focal length, aperture and focus (infinity) as the eclipse
+   frames; any ISO; any camera with the same sensor size.
+2. An even light source filling the frame: a light panel, a white screen,
+   or a twilight sky through a white T-shirt. Expose so the histogram peak
+   is near the middle. 20 to 30 frames.
+3. `tse flat-profile FLATS` fits a smooth, radially symmetric profile per
+   colour channel and saves it to your profile library
+   (`~/.solar-eclipse-toolkit/profiles`, or `TSE_PROFILE_DIR`).
+
+The profile keeps only the lens's falloff: dust in the flats is rejected,
+and a light source that is brighter on one side is fitted as a tilt and
+removed. Because the profile is measured on the sensor in millimetres, it
+corrects any camera with the same lens, so one set of flats serves both a
+D800 and a D850. `tse inventory` then picks it up automatically. A FITS
+master flat stacked in Siril can be used instead of RAW flats.
 
 ## Tests
 

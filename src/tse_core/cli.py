@@ -14,6 +14,7 @@ from .inventory import Inventory, find_raw_files
 from .lensfun import LensfunDatabase, corner_falloff, download_database, import_database
 from .metadata import ExifToolReader, rawpy_available, read_frames
 from .project import EventProject
+from .vignetting_profile import VignettingProfile, fit_profile_from_files, load_profile_library
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,6 +34,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--darks", help="folder of dark frames")
     p.add_argument("--flats", help="folder of flat frames")
     p.add_argument("--lensfun-db", help="folder holding lensfun XML files")
+    p.add_argument("--profile", help="use this own-flats vignetting profile (.json) for every frame")
+    p.add_argument("--profile-dir", help="folder of saved own-flats profiles (default: your profile library)")
+
+    p = sub.add_parser("flat-profile", help="fit a smooth vignetting profile from your own flat frames")
+    p.add_argument("source", help="folder of RAW flats, or a FITS master flat")
+    p.add_argument("--name", default="", help="a name for the profile")
+    p.add_argument("--output", "-o", help="save to this .json file instead of the profile library")
+    p.add_argument("--block", type=int, default=32, help="block size in pixels for the fit (default 32)")
+    p.add_argument("--crop", type=float, help="crop factor of the camera that took the flats (default: from lensfun, else 1.0)")
+    p.add_argument("--lens", help="lens name to store, if the files do not say")
+    p.add_argument("--focal", type=float, help="focal length to store, if the files do not say")
+    p.add_argument("--aperture", type=float, help="aperture to store, if the files do not say")
+    p.add_argument("--lensfun-db")
 
     p = sub.add_parser("lens", help="find a lensfun profile and show its vignetting")
     p.add_argument("name", nargs="?", default="")
@@ -62,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_doctor()
     if args.command == "frame":
         return cmd_frame(args)
+    if args.command == "flat-profile":
+        return cmd_flat_profile(args)
     return 1
 
 
@@ -94,7 +110,9 @@ def cmd_inventory(args) -> int:
         flats=read_frames(find_raw_files(args.flats)) if args.flats else [],
     )
     db = _db(args.lensfun_db)
-    plan = plan_calibration(inv.lights(), db, calib, lens_name=args.lens)
+    forced = VignettingProfile.load(args.profile) if args.profile else None
+    library = load_profile_library(args.profile_dir)
+    plan = plan_calibration(inv.lights(), db, calib, lens_name=args.lens, profile=forced, profiles=library)
     print()
     print(plan.describe())
 
@@ -113,6 +131,60 @@ def cmd_inventory(args) -> int:
         project.set_inventory(inv)
         project.save(path)
         print(f"Project saved to {path}")
+    return 0
+
+
+def cmd_flat_profile(args) -> int:
+    src = Path(args.source)
+    if src.is_dir():
+        paths = find_raw_files(src)
+        if not paths:
+            print(f"No RAW flats found in {src}")
+            return 1
+        meta = read_frames(paths)
+    elif src.is_file():
+        paths, meta = [str(src)], []
+    else:
+        print(f"{src} not found")
+        return 1
+
+    if meta:
+        settings = {(f.lens_model, f.focal_length_mm, f.aperture_f) for f in meta}
+        if len(settings) > 1:
+            print("The flats were not all taken with the same lens, focal length and aperture:")
+            for s in sorted(settings, key=str):
+                print(f"  {s}")
+            print("Put each set of settings in its own folder.")
+            return 1
+    try:
+        import rawpy  # noqa: F401
+    except ImportError:
+        if any(not p.lower().endswith((".fit", ".fits", ".fts")) for p in paths):
+            print("Reading RAW flats needs rawpy: pip install rawpy")
+            return 1
+
+    crop = args.crop
+    if crop is None and meta:
+        cam = _db(args.lensfun_db).find_camera(meta[0].camera_make, meta[0].camera_model)
+        crop = cam.crop_factor if cam else (meta[0].crop_factor or 1.0)
+    print(f"Fitting a vignetting profile from {len(paths)} flat(s)...")
+    try:
+        profile = fit_profile_from_files(paths, meta, crop_factor=crop or 1.0, block=args.block)
+    except ValueError as exc:
+        print(exc)
+        return 1
+    profile.name = args.name
+    if args.lens:
+        profile.lens_model = args.lens
+    if args.focal:
+        profile.focal_length_mm = args.focal
+    if args.aperture:
+        profile.aperture_f = args.aperture
+    if not (profile.lens_model and profile.focal_length_mm and profile.aperture_f):
+        print("Warning: lens, focal length or aperture unknown; set them with --lens, --focal and --aperture")
+    print(profile.describe())
+    path = profile.save(args.output)
+    print(f"Profile saved to {path}")
     return 0
 
 

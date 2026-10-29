@@ -56,6 +56,7 @@ from tse_core.inventory import Inventory, find_raw_files  # noqa: E402
 from tse_core.lensfun import LensfunDatabase, download_database  # noqa: E402
 from tse_core.metadata import read_frames  # noqa: E402
 from tse_core.project import EventProject  # noqa: E402
+from tse_core.vignetting_profile import load_profile_library  # noqa: E402
 
 COLUMNS = ["#", "File", "Time", "Exposure", "f/", "ISO", "Focal", "Black", "White", "Bracket", "Role", "Notes"]
 AUTOMATIC = "Automatic (from EXIF)"
@@ -169,7 +170,7 @@ class FramesTab(QWidget):
         buttons = QHBoxLayout()
         for text, slot in (
             ("Apply", self.apply_settings),
-            ("Write lensfun flat", self.write_flat),
+            ("Write synthetic flat", self.write_flat),
             ("Update lensfun", self.update_lensfun),
         ):
             b = QPushButton(text)
@@ -250,6 +251,7 @@ class FramesTab(QWidget):
             calib,
             lens_name=None if choice in (AUTOMATIC, NO_PROFILE) else choice,
             use_lensfun=choice != NO_PROFILE,
+            profiles=load_profile_library(),
         )
         self.project.lens_profile = "" if choice == AUTOMATIC else choice
         self.project.use_lensfun = choice != NO_PROFILE
@@ -314,9 +316,9 @@ class FramesTab(QWidget):
     def write_flat(self) -> None:
         if not self.plan:
             return
-        lensfun_frames = [fc for fc in self.plan.frames if fc.vignetting == "lensfun"]
+        lensfun_frames = [fc for fc in self.plan.frames if fc.vignetting in ("lensfun", "profile")]
         if not lensfun_frames:
-            QMessageBox.information(self, "Lensfun flat", "No frame uses a lensfun profile.")
+            QMessageBox.information(self, "Lensfun flat", "No frame uses a lensfun or own-flats profile.")
             return
         by_index = {f.index: f for f in self.inventory.frames}
         written = set()
@@ -329,9 +331,10 @@ class FramesTab(QWidget):
             key = (f.width, f.height, fc.lens_terms)
             if key in written:
                 continue
-            name = f"tse_lensfun_flat_f{f.aperture_f:g}_{f.focal_length_mm:g}mm.fit"
+            kind = "profile" if fc.vignetting == "profile" else "lensfun"
+            name = f"tse_{kind}_flat_f{f.aperture_f:g}_{f.focal_length_mm:g}mm.fit"
             write_synthetic_flat(out_dir / name, f.width, f.height, fc.lens_terms, f.crop_factor or 1.0,
-                                 self.plan.lens.crop_factor if self.plan.lens else 1.0)
+                                 fc.profile_crop, fc.channel_terms, f.cfa_pattern)
             written.add(key)
             self.link.log(f"Solar Eclipse Toolkit: wrote {name}")
         QMessageBox.information(self, "Lensfun flat", f"Wrote {len(written)} synthetic flat(s) to\n{out_dir}")
