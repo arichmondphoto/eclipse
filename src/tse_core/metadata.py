@@ -103,8 +103,10 @@ def _finalise(frame: FrameMeta) -> None:
         frame.warnings.append("missing " + ", ".join(missing))
     if frame.black_level is None or frame.white_level is None:
         frame.warnings.append(
-            "black/white level unknown (install rawpy or exiftool for exact values)"
+            "black/white level unknown (install rawpy for exact values)"
         )
+    elif "rawpy" not in frame.sources:
+        frame.warnings.append("white level is nominal (from bit depth); install rawpy for the exact value")
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +265,23 @@ def read_with_exifread(path: str) -> dict[str, Any]:
 
     shutter = values(get("ShutterCount", "TotalShutterReleases"))
     iso = to_float(values(get("ISOSpeedRatings", "PhotographicSensitivity"))[:1] or None)
+
+    # Sensor levels when rawpy is not installed. Nikon stores the black level
+    # in its maker notes; the white level is taken as the full range of the
+    # raw data's bit depth, a nominal value the HDR stage refines.
+    black = [v for v in (to_float(x) for x in values(tags.get("MakerNote BlackLevel"))) if v is not None]
+    bits = []
+    for key, tag in tags.items():
+        if key.endswith("BitsPerSample") and "Thumbnail" not in key:
+            ifd = key[: -len("BitsPerSample")]
+            compression = str(tags.get(ifd + "Compression", ""))
+            if "JPEG" in compression.upper():
+                continue
+            bits += [int(v) for v in values(tag) if isinstance(v, int) and 10 <= v <= 16]
     return {
+        "black_level_per_channel": black or None,
+        "black_level": sum(black) / len(black) if black else None,
+        "white_level": float(2 ** max(bits) - 1) if bits else None,
         "camera_make": _clean(get("Make")),
         "camera_model": _clean(get("Model")),
         "serial_number": _clean(get("BodySerialNumber", "SerialNumber")),
