@@ -11,12 +11,12 @@ def test_2024_single_bracket(frames_2024):
     assert report.sequence_count == 1
     assert len(report.brackets) == 1
     b = report.brackets[0]
-    assert b.count == 36
+    assert b.count == 37
     assert b.step_stops == pytest.approx(1 / 3)
     assert b.range_stops == pytest.approx(12.6, abs=0.1)
     assert b.order == "ascending"
     assert b.shortest == "1/1600" and b.longest == "4.0"
-    assert [g.missing_speeds for g in b.gaps] == [["1/3", "1/2.5"], ["2"]]
+    assert [g.missing_speeds for g in b.gaps] == [["1/2.5"], ["2"]]
     assert all(f.bracket_id == 0 for f in frames_2024)
 
 
@@ -39,7 +39,7 @@ def test_partial_phase_frames_form_their_own_sequence():
     totality = make_frames(ECLIPSE_2024, start=datetime(2024, 4, 8, 13, 47, 30), first_index=3)
     report = detect_brackets(partial + totality)
     assert report.sequence_count == 2
-    assert report.brackets[-1].count == 36
+    assert report.brackets[-1].count == 37
     assert report.brackets[-1].sequence_id == 1
 
 
@@ -68,4 +68,4 @@ def test_frames_without_exposure_are_reported():
 def test_excluded_frames_are_ignored(frames_2024):
     frames_2024[5].role = "excluded"
     report = detect_brackets(frames_2024)
-    assert report.brackets[0].count == 35
+    assert report.brackets[0].count == 36

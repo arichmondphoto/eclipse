@@ -13,10 +13,10 @@ from tse_core.lensfun import LensfunDatabase  # noqa: E402
 
 DATA = Path(__file__).resolve().parent / "data"
 
-# The 2024 bracket as shot: Nikon D850, ISO 100, f/8, 400 mm.
+# The 2024 bracket as shot: Nikon D850, ISO 100, f/8, 400 mm, 37 frames.
 ECLIPSE_2024 = (
     "1/1600 1/1250 1/1000 1/800 1/640 1/500 1/400 1/320 1/250 1/200 1/160 1/125 1/100 "
-    "1/80 1/60 1/50 1/40 1/30 1/25 1/20 1/15 1/13 1/10 1/8 1/6 1/5 1/4 1/2 0.6 0.8 1.0 "
+    "1/80 1/60 1/50 1/40 1/30 1/25 1/20 1/15 1/13 1/10 1/8 1/6 1/5 1/4 1/3 1/2 0.6 0.8 1.0 "
     "1.3 1.6 2.5 3.0 4.0"
 ).split()
 

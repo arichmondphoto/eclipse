@@ -17,12 +17,12 @@ def test_inventory_command_end_to_end(tmp_path, monkeypatch, capsys):
                      "--csv", str(tmp_path / "frames.csv")])
     out = capsys.readouterr().out
     assert code == 0
-    assert "36 frames, 1/1600 to 4.0 s, 12.6 stops, 1/3-stop steps" in out
-    assert "missing 1/3, 1/2.5" in out and "missing 2)" in out
+    assert "37 frames, 1/1600 to 4.0 s, 12.6 stops, 1/3-stop steps" in out
+    assert "missing 1/2.5)" in out and "missing 2)" in out
     assert "corners at 82% of centre" in out
     saved = json.loads(project.read_text())
-    assert len(saved["frames"]) == 36 and saved["frames"][0]["bracket_id"] == 0
-    assert (tmp_path / "frames.csv").read_text().count("\n") == 37
+    assert len(saved["frames"]) == 37 and saved["frames"][0]["bracket_id"] == 0
+    assert (tmp_path / "frames.csv").read_text().count("\n") == 38
 
 
 def test_lens_command(capsys):
