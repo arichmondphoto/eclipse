@@ -214,7 +214,9 @@ def choose_lens(
     if best.score - runner_up < 1.0:
         return None, labels, f"lens '{name}' matches several profiles equally well; choose one"
     if not best.lens.has_vignetting:
-        return None, labels, f"'{best.lens.label()}' has no vignetting data in lensfun"
+        others = [m.lens.label() for m in matches[1:] if m.lens.has_vignetting]
+        hint = f"; if your lens is the {others[0]}, choose it with --lens \"{others[0]}\"" if others else ""
+        return None, labels, f"'{best.lens.label()}' has no vignetting data in lensfun{hint}"
     return best.lens, labels, ""
 
 

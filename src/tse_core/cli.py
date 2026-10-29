@@ -45,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dest")
     p.add_argument("--from", dest="source", help="install from a downloaded lensfun .zip or a folder instead")
 
+    p = sub.add_parser("frame", help="show everything read from one RAW file (for troubleshooting)")
+    p.add_argument("file")
+    p.add_argument("--lensfun-db")
+
     sub.add_parser("doctor", help="show which optional readers are available")
 
     args = parser.parse_args(argv)
@@ -56,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_lensfun_update(args)
     if args.command == "doctor":
         return cmd_doctor()
+    if args.command == "frame":
+        return cmd_frame(args)
     return 1
 
 
@@ -151,6 +157,35 @@ def cmd_lens(args) -> int:
         else:
             vign = "no vignetting data for these settings"
         print(f"{m.score:5.1f}  {m.lens.label()}  [{m.lens.source_file}]  {vign}")
+    return 0
+
+
+def cmd_frame(args) -> int:
+    """Print the parsed metadata, the raw lens tags and the lens matches."""
+    frame = read_frames([args.file])[0]
+    print("Parsed metadata:")
+    for key, value in frame.to_dict().items():
+        if value not in (None, "", []):
+            print(f"  {key}: {value}")
+    try:
+        import exifread
+
+        with open(args.file, "rb") as fh:
+            tags = exifread.process_file(fh, details=True)
+        print("Lens-related tags (exifread):")
+        for key in sorted(tags):
+            if "lens" in key.lower() or key.endswith(("Make", "Model", "FocalLength", "FNumber")):
+                tag = tags[key]
+                print(f"  {key}: {getattr(tag, 'printable', tag)}  (raw: {getattr(tag, 'values', '')})")
+    except Exception as exc:
+        print(f"exifread could not read the file: {exc}")
+    db = _db(args.lensfun_db)
+    if not db.empty:
+        print("lensfun matches:")
+        maker = frame.lens_make or frame.camera_make
+        for m in db.match_lens(frame.lens_model, frame.lens_spec, frame.focal_length_mm, maker):
+            vign = "vignetting data" if m.lens.has_vignetting else "NO vignetting data"
+            print(f"  {m.score:5.1f}  {m.lens.label()}  ({vign}; {', '.join(m.reasons)})")
     return 0
 
 
