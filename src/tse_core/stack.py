@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Sequence
@@ -45,7 +46,7 @@ Say = Callable[[str], None]
 
 @dataclass
 class StackParams:
-    crop_radii: float = 5.0  # half-width of the output, in solar radii
+    crop_radii: Optional[float] = None  # None = full frame; else a square this many solar radii from the centre
     moon_margin_px: float = 3.0  # drop pixels this far outside each frame's lunar limb, full-res px
     saturation_taper: float = 0.15  # weights fall to zero over this range below the saturation level
     saturation_level: float = 0.95  # of full scale
@@ -79,7 +80,7 @@ class Match:
 
 @dataclass
 class StackResult:
-    crop: tuple[int, int, int]  # x0, y0, size in reference coordinates
+    crop: tuple[int, int, int, int]  # x0, y0, width, height in reference coordinates
     matches: list[Match]
     moon_frame: int
     sun: Optional[dict]
@@ -87,7 +88,7 @@ class StackResult:
     notes: list[str] = field(default_factory=list)
 
     def describe(self) -> str:
-        lines = [f"Output: {self.crop[2]} x {self.crop[2]} px from reference ({self.crop[0]}, {self.crop[1]})",
+        lines = [f"Output: {self.crop[2]} x {self.crop[3]} px from reference ({self.crop[0]}, {self.crop[1]})",
                  f"Moon from frame #{self.moon_frame}",
                  f"{'#':>3}  {'gain':>10}  {'offset':>9}  {'vs nominal':>10}  {'pixels':>7}"]
         for m in self.matches:
@@ -101,14 +102,17 @@ class StackResult:
 # ---------------------------------------------------------------------------
 
 
-def crop_box(sun_xy: tuple[float, float], sun_r: float, size_wh: tuple[int, int], radii: float) -> tuple[int, int, int]:
-    """Square output region around the Sun, inside the image."""
+def crop_box(sun_xy: tuple[float, float], sun_r: float, size_wh: tuple[int, int],
+             radii: Optional[float] = None) -> tuple[int, int, int, int]:
+    """Output region (x0, y0, w, h): the whole reference frame, or a square around the Sun inside it."""
     w, h = size_wh
+    if radii is None:
+        return 0, 0, int(w), int(h)
     s = int(min(2 * radii * sun_r, w, h))
     s -= s % 2
     x0 = int(round(sun_xy[0] - s / 2))
     y0 = int(round(sun_xy[1] - s / 2))
-    return max(0, min(x0, w - s)), max(0, min(y0, h - s)), s
+    return max(0, min(x0, w - s)), max(0, min(y0, h - s)), s, s
 
 
 def _inverse(matrix) -> tuple[np.ndarray, np.ndarray]:
@@ -117,47 +121,57 @@ def _inverse(matrix) -> tuple[np.ndarray, np.ndarray]:
     return Mi[:2, :2], Mi[:2, 2]
 
 
-def source_box(matrix, crop: tuple[int, int, int], margin: int = 8) -> tuple[int, int, int, int]:
+def source_box(matrix, crop: tuple[int, int, int, int], margin: int = 8) -> tuple[int, int, int, int]:
     """Region of the frame (x0, y0, w, h) that lands in the crop."""
     A, t = _inverse(matrix)
-    x0, y0, s = crop
-    corners = np.array([[x0, y0], [x0 + s, y0], [x0, y0 + s], [x0 + s, y0 + s]], float)
+    x0, y0, cw, ch = crop
+    corners = np.array([[x0, y0], [x0 + cw, y0], [x0, y0 + ch], [x0 + cw, y0 + ch]], float)
     p = corners @ A.T + t
     lo = np.floor(p.min(axis=0)) - margin
     hi = np.ceil(p.max(axis=0)) + margin
     return int(lo[0]), int(lo[1]), int(hi[0] - lo[0]), int(hi[1] - lo[1])
 
 
-def warp_region(img: np.ndarray, matrix, crop: tuple[int, int, int], origin: tuple[int, int],
+def warp_region(img: np.ndarray, matrix, crop: tuple[int, int, int, int], origin: tuple[int, int],
                 order: int = 3, scale: int = 1, cval: float = np.nan) -> np.ndarray:
     """Resample a frame region onto the crop grid of the reference (optionally reduced by ``scale``)."""
     A, t = _inverse(matrix)
-    X0, Y0, s = crop
+    X0, Y0, cw, ch = crop
     x0, y0 = origin
-    n = s // scale
+    shape = (ch // scale, cw // scale)
     # Output pixel (r, c) is reference point (X0 + (c + 0.5) * scale - 0.5, Y0 + ...).
     off_ref = np.array([X0 + (scale - 1) / 2.0, Y0 + (scale - 1) / 2.0])
     p0 = A @ off_ref + t  # frame point of output (0, 0)
     mat = np.array([[A[1, 1], A[1, 0]], [A[0, 1], A[0, 0]]]) * scale
     offset = np.array([p0[1] - y0, p0[0] - x0])
     if img.ndim == 2:
-        return ndimage.affine_transform(img, mat, offset=offset, output_shape=(n, n), order=order,
+        return ndimage.affine_transform(img, mat, offset=offset, output_shape=shape, order=order,
                                         mode="constant", cval=cval, prefilter=order > 1)
-    out = np.empty((n, n, img.shape[2]), np.float32)
+    out = np.empty(shape + (img.shape[2],), np.float32)
     for ch in range(img.shape[2]):
-        out[..., ch] = ndimage.affine_transform(img[..., ch], mat, offset=offset, output_shape=(n, n),
+        out[..., ch] = ndimage.affine_transform(img[..., ch], mat, offset=offset, output_shape=shape,
                                                 order=order, mode="constant", cval=cval, prefilter=order > 1)
     return out
 
 
-def moon_mask(crop: tuple[int, int, int], fi: FrameInfo, margin: float, scale: int = 1) -> np.ndarray:
+def moon_mask(crop: tuple[int, int, int, int], fi: FrameInfo, margin: float, scale: int = 1) -> np.ndarray:
     """True where this frame's Moon (plus margin) covers the crop."""
-    X0, Y0, s = crop
-    n = s // scale
-    c = (np.arange(n) * scale + (scale - 1) / 2.0)
-    xx = X0 + c[None, :]
-    yy = Y0 + c[:, None]
+    X0, Y0, cw, ch = crop
+    off = (scale - 1) / 2.0
+    xx = X0 + np.arange(cw // scale)[None, :] * scale + off
+    yy = Y0 + np.arange(ch // scale)[:, None] * scale + off
     return np.hypot(xx - fi.moon_x, yy - fi.moon_y) < fi.moon_r + margin
+
+
+def moon_box(crop: tuple[int, int, int, int], fi: FrameInfo, margin: float) -> tuple[slice, slice]:
+    """Array slices (rows, cols) of the crop that contain this frame's Moon plus margin."""
+    X0, Y0, cw, ch = crop
+    r = fi.moon_r + margin + 1
+    c0 = max(0, int(math.floor(fi.moon_x - r)) - X0)
+    c1 = min(cw, int(math.ceil(fi.moon_x + r)) - X0 + 1)
+    r0 = max(0, int(math.floor(fi.moon_y - r)) - Y0)
+    r1 = min(ch, int(math.ceil(fi.moon_y + r)) - Y0 + 1)
+    return slice(r0, max(r0, r1)), slice(c0, max(c0, c1))
 
 
 # ---------------------------------------------------------------------------
@@ -250,8 +264,10 @@ def stack_frames(
 ) -> tuple[StackResult, np.ndarray, np.ndarray]:
     """Run brightness matching and the weighted, Moon-aware average.
 
-    Returns (result, hdr, weight): hdr is (s, s, 3) float32 radiance in units
-    of the reference exposure; weight is (s, s) float32.
+    Returns (result, hdr, weight): hdr is (h, w, 3) float32 radiance in units
+    of the reference exposure; weight is (h, w) float32. The output covers the
+    whole reference frame unless ``params.crop_radii`` asks for a square.
+    A full D850 frame needs roughly 3 GB of memory at the peak.
     """
     say = progress or (lambda _m: None)
     params = params or StackParams()
@@ -267,8 +283,8 @@ def stack_frames(
         ref = by_index[ref_index]
         centre, sun_r = (ref.moon_x, ref.moon_y), ref.moon_r / 1.04
     crop = crop_box(centre, sun_r, image_size, params.crop_radii)
-    X0, Y0, s = crop
-    say(f"output region {s} x {s} px at ({X0}, {Y0})")
+    X0, Y0, cw, ch = crop
+    say(f"output region {cw} x {ch} px at ({X0}, {Y0})")
 
     # Pass 1: reduced, aligned copies for brightness matching.
     sc = params.match_scale
@@ -283,9 +299,10 @@ def stack_frames(
         lum = fr.rgb.mean(axis=2)
         v = warp_region(lum, f.matrix, crop, (fr.x0, fr.y0), order=1, scale=1)
         sat = warp_region(fr.saturated.astype(np.float32), f.matrix, crop, (fr.x0, fr.y0), order=1, scale=1, cval=1.0)
-        n = s // sc
-        v = np.nan_to_num(v[: n * sc, : n * sc], nan=0.0).reshape(n, sc, n, sc).mean(axis=(1, 3))
-        bad = (sat[: n * sc, : n * sc] > 0.01).reshape(n, sc, n, sc).any(axis=(1, 3))
+        ny, nx = ch // sc, cw // sc
+        nan = ~np.isfinite(v[: ny * sc, : nx * sc])
+        v = np.nan_to_num(v[: ny * sc, : nx * sc], nan=0.0).reshape(ny, sc, nx, sc).mean(axis=(1, 3))
+        bad = ((sat[: ny * sc, : nx * sc] > 0.01) | nan).reshape(ny, sc, nx, sc).any(axis=(1, 3))
         ok = ~bad & ~moon_mask(crop, f, params.moon_margin_px + 2 * sc, sc)
         reduced[f.index] = (v.astype(np.float32), ok)
         if len(cache) < 2:
@@ -299,13 +316,14 @@ def stack_frames(
             notes.append(f"frame #{m.index} is {m.stops_vs_nominal:+.2f} stops from its nominal exposure")
 
     # Pass 2: full resolution.
-    total = np.zeros((s, s, 3), np.float32)
-    weight = np.zeros((s, s), np.float32)
-    moon_rgb = None
+    total = np.zeros((ch, cw, 3), np.float32)
+    weight = np.zeros((ch, cw), np.float32)
+    moon_rgb = None  # the Moon frame's data, kept only around its Moon
+    moon_slices = moon_box(crop, by_index[moon_frame], params.moon_margin_px)
     # Where no frame has usable data (all saturated or behind the Moon), fall back to the
     # shortest uncovered exposure: process frames from longest to shortest so it ends up on top.
-    fallback = np.zeros((s, s, 3), np.float32)
-    have_fallback = np.zeros((s, s), bool)
+    fallback = np.zeros((ch, cw, 3), np.float32)
+    have_fallback = np.zeros((ch, cw), bool)
     infos = sorted(infos, key=lambda f: -matches[f.index].gain)
     for f in infos:
         mos = cache.pop(f.index, None) or load(f)
@@ -314,36 +332,58 @@ def stack_frames(
         del mos
         v = warp_region(fr.rgb, f.matrix, crop, (fr.x0, fr.y0), order=3)
         sat = warp_region(fr.saturated.astype(np.float32), f.matrix, crop, (fr.x0, fr.y0), order=1, cval=1.0)
+        hot = fr.hot_pixels
+        del fr
         m = matches[f.index]
-        radiance = (v - m.offset) / m.gain
-        vmax = np.nan_to_num(np.nanmax(v, axis=2), nan=params.saturation_level)
+        with warnings.catch_warnings():  # NaN = outside this frame after alignment; weight 0 below
+            warnings.simplefilter("ignore", RuntimeWarning)
+            vmax = np.nan_to_num(np.nanmax(v, axis=2), nan=params.saturation_level)
+            mean = np.nanmean(v, axis=2)
         taper = np.clip((params.saturation_level - vmax) / params.saturation_taper, 0.0, 1.0)
-        w = (m.gain**2) / (np.clip(np.nanmean(v, axis=2), 0, None) + params.noise_floor)
+        w = (m.gain**2) / (np.clip(mean, 0, None) + params.noise_floor)
+        del mean
         w = np.nan_to_num(w * taper * (sat < 0.01), nan=0.0).astype(np.float32)
+        del vmax, taper, sat
+        radiance = v  # converted in place to save memory on full frames
+        radiance -= m.offset
+        radiance /= m.gain
         covered = moon_mask(crop, f, params.moon_margin_px)
         if f.index == moon_frame:
-            moon_rgb = np.nan_to_num(radiance, nan=0.0).astype(np.float32)
+            moon_rgb = np.nan_to_num(radiance[moon_slices], nan=0.0).astype(np.float32)
         w[covered] = 0.0
         valid = ~covered & np.isfinite(radiance).all(axis=2)
-        radiance = np.nan_to_num(radiance, nan=0.0)
+        np.nan_to_num(radiance, copy=False, nan=0.0)
         fallback[valid] = radiance[valid]
         have_fallback |= valid
-        total += radiance * w[..., None]
+        del covered, valid
+        radiance *= w[..., None]
+        total += radiance
         weight += w
-        say(f"stacked {f.file_name}: gain {m.gain:.4f}, {fr.hot_pixels} hot pixels fixed")
+        del radiance, v, w
+        say(f"stacked {f.file_name}: gain {m.gain:.4f}, {hot} hot pixels fixed")
 
-    hdr = np.where(weight[..., None] > 0, total / np.maximum(weight, 1e-12)[..., None], 0.0).astype(np.float32)
+    hdr = total
+    hdr /= np.maximum(weight, 1e-12)[..., None]
+    del total
     # The Moon as it was in the Moon frame, and any pixel no frame covered.
     mf = by_index[moon_frame]
     inside = moon_mask(crop, mf, 0.0)
     empty = weight <= 0
     gap = empty & ~inside
     hdr[gap & have_fallback] = fallback[gap & have_fallback]
+    hdr[gap & ~have_fallback] = 0.0
+    del fallback
     if moon_rgb is not None:
-        hdr[inside | (gap & ~have_fallback)] = moon_rgb[inside | (gap & ~have_fallback)]
-    if gap.any():
-        notes.append(f"{int(gap.sum())} pixel(s) outside the Moon were saturated or covered in every frame; "
+        sub = hdr[moon_slices]
+        sel = inside[moon_slices]
+        sub[sel] = moon_rgb[sel]
+    nodata = int((gap & ~have_fallback).sum())
+    clipped = int((gap & have_fallback).sum())
+    if clipped:
+        notes.append(f"{clipped} pixel(s) outside the Moon were saturated or covered in every frame; "
                      "filled from the shortest exposure that shows them (may be clipped)")
+    if nodata:
+        notes.append(f"{nodata} pixel(s) near the frame edges are outside every aligned frame; set to zero")
 
     outputs = {}
     if out_dir is not None:
@@ -374,7 +414,7 @@ def stretch_preview(hdr: np.ndarray, wb: Optional[Sequence[float]] = None, stren
 def write_outputs(hdr, weight, crop, matches, infos, ref_index, moon_frame, sun, out_dir, name, wb=None) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    X0, Y0, s = crop
+    X0, Y0 = crop[0], crop[1]
     header = {"OBJECT": "Solar corona", "BUNIT": "relative", "CROPX0": X0, "CROPY0": Y0,
               "REFFRAME": ref_index, "MOONFRM": moon_frame,
               "COMMENT": "Linear HDR stack in units of the reference exposure, camera RGB"}

@@ -108,8 +108,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--align", help="alignment results file (default: the one saved by 'tse align')")
     p.add_argument("--output", "-o", help="output folder (default: next to the project)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
-    p.add_argument("--radii", type=float, default=5.0,
-                   help="half-width of the output in solar radii (default 5; limited by the frame)")
+    p.add_argument("--square", action="store_true",
+                   help="quicker run: output only a square 10 solar radii wide around the Sun "
+                        "(default: the full frame, the same size as the RAW files)")
+    p.add_argument("--radii", type=float,
+                   help="like --square, but this many solar radii from the centre to the edge")
     p.add_argument("--moon-frame", type=int,
                    help="frame number whose Moon (and earthshine) is kept (default: the alignment reference)")
     p.add_argument("--include-rejected", action="store_true",
@@ -490,7 +493,8 @@ def cmd_stack(args) -> int:
     calibs = {fc.frame_index: fc for fc in plan.frames}
     cam = db.find_camera(lights[0].camera_make, lights[0].camera_model) if not db.empty else None
     crop_factor = cam.crop_factor if cam else 1.0
-    params = StackParams(crop_radii=args.radii, moon_frame=args.moon_frame, hot_pixels=not args.no_hot_pixels)
+    radii = args.radii if args.radii is not None else (5.0 if args.square else None)
+    params = StackParams(crop_radii=radii, moon_frame=args.moon_frame, hot_pixels=not args.no_hot_pixels)
     out_dir = Path(args.output) if args.output else path.parent
     name = args.name or path.stem
     say = (lambda m: None) if args.quiet else print
@@ -501,7 +505,7 @@ def cmd_stack(args) -> int:
     except (RuntimeError, ValueError) as exc:
         print(exc)
         return 1
-    project.parameters["stack"] = {"align": str(align_path), "radii": args.radii, "moon_frame": result.moon_frame,
+    project.parameters["stack"] = {"align": str(align_path), "radii": radii, "moon_frame": result.moon_frame,
                                    **result.outputs}
     project.save(path)
     print()

@@ -73,7 +73,7 @@ def test_robust_line_ignores_outliers():
 def test_warp_and_source_box_identity():
     img = np.arange(100 * 100, dtype=np.float32).reshape(100, 100)
     M = [[1, 0, 0], [0, 1, 0]]
-    crop = (20, 30, 40)
+    crop = (20, 30, 40, 40)
     x0, y0, w, h = source_box(M, crop)
     out = warp_region(img[y0 : y0 + h, x0 : x0 + w], M, crop, (x0, y0), order=1)
     assert np.allclose(out, img[30:70, 20:60])
@@ -104,7 +104,7 @@ def _synthetic_stack(noise: bool, errors: dict):
     from scipy import ndimage
 
     truth_free = ndimage.gaussian_filter(truth_free, 0.7)
-    X0, Y0, s = result.crop
+    X0, Y0, s, _ = result.crop
     return result, hdr, weight, truth[Y0:Y0 + s, X0:X0 + s], truth_free[Y0:Y0 + s, X0:X0 + s], infos
 
 
@@ -116,7 +116,7 @@ def test_stack_recovers_shutter_errors_and_radiance():
         expected = (1 + errors.get(m.index, 0.0)) / ref_actual * infos[m.index].nominal_ratio
         assert m.gain == pytest.approx(expected, rel=0.01), m
         assert abs(m.offset) < 2e-3
-    X0, Y0, s = result.crop
+    X0, Y0, s, _ = result.crop
     yy, xx = np.mgrid[0:s, 0:s]
     r = np.hypot(xx + X0 - 240, yy + Y0 - 240) / 40.0
     moon = infos[2]
@@ -143,13 +143,13 @@ def test_stack_with_noise_writes_outputs(tmp_path):
     out = write_outputs(hdr, weight, result.crop, {m.index: m for m in result.matches}, by, 2, 2, result.sun,
                         tmp_path, "test")
     data, header = read_fits(out["hdr"])
-    assert data.shape == (3, result.crop[2], result.crop[2])
+    assert data.shape == (3, result.crop[3], result.crop[2])
     assert header["SUNX"] == pytest.approx(240.0 - result.crop[0])
     assert header["MOONFRM"] == 2
     m3 = [m for m in result.matches if m.index == 3][0]
     assert m3.gain == pytest.approx(4 * 1.1, rel=0.02)
     # Faint outer corona: the stack is less noisy than the reference frame alone would be.
-    X0, Y0, s = result.crop
+    X0, Y0, s, _ = result.crop
     yy, xx = np.mgrid[0:s, 0:s]
     r = np.hypot(xx + X0 - 240, yy + Y0 - 240) / 40.0
     sel = (r > 2.5) & (r < 3.5)
@@ -161,9 +161,9 @@ def test_stack_with_noise_writes_outputs(tmp_path):
 
 
 def test_crop_box_inside_image():
-    assert crop_box((100, 100), 50, (1000, 800), 5) == (0, 0, 500)
-    x0, y0, s = crop_box((500, 400), 30, (1000, 800), 5)
-    assert (x0, y0, s) == (350, 250, 300)
+    assert crop_box((100, 100), 50, (1000, 800), 5) == (0, 0, 500, 500)
+    assert crop_box((500, 400), 30, (1000, 800), 5) == (350, 250, 300, 300)
+    assert crop_box((500, 400), 30, (1000, 800)) == (0, 0, 1000, 800)
 
 
 def test_cli_stack(tmp_path, monkeypatch, capsys):
@@ -200,12 +200,19 @@ def test_cli_stack(tmp_path, monkeypatch, capsys):
     project.use_lensfun = False
     path = tmp_path / "ecl.json"
     project.save(path)
+    # Default: full frame, the size of the RAW files.
+    assert cli.main(["stack", str(path), "--lensfun-db", str(tmp_path / "none"), "--quiet"]) == 0
+    full, header = read_fits(EventProject.load(path).parameters["stack"]["hdr"])
+    assert full.shape == (3, 320, 320)
+    assert header["SUNX"] == pytest.approx(160.0)
+    capsys.readouterr()
     assert cli.main(["stack", str(path), "--radii", "4", "--lensfun-db", str(tmp_path / "none")]) == 0
     out = capsys.readouterr().out
     assert "off the Moon's track; skipped" in out
     saved = EventProject.load(path).parameters["stack"]
     data, header = read_fits(saved["hdr"])
     assert data.shape == (3, 240, 240)
+    assert np.allclose(data[:, 10:-10, 10:-10], full[:, 50:-50, 50:-50], rtol=1e-4, atol=1e-6)
     assert header["NORTHANG"] == pytest.approx(2.0)
     info = json.loads(open(saved["info"]).read())
     gains = {m["index"]: m["gain"] for m in info["matches"]}

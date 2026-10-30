@@ -153,6 +153,7 @@ Moon tracking only use time differences, so a wrong clock never affects them.
 
 ```bash
 tse stack eclipse2024.json            # uses the alignment saved by 'tse align'
+tse stack eclipse2024.json --square   # quicker: a square 10 solar radii wide
 ```
 
 Every frame is read again at full resolution: black level subtracted per
@@ -179,12 +180,21 @@ shows them and are counted in the report.
 Frames the Sun-centre fit flagged as off the Moon's track are skipped
 unless `--include-rejected` is given.
 
-**Outputs** (next to the project unless `-o` says otherwise), square,
-10 solar radii wide by default (`--radii`), cropped to the frame:
+**Outputs** go next to the project unless `-o` says otherwise. By default
+they are the full frame, the same size as the RAW files and with the Sun
+where it is in the reference frame, so they line up with your originals in
+Photoshop and keep faint streamers out to the frame edges. Pixels near the
+edges that no aligned frame covers are set to zero (reported).
+
+For a quicker run, `--square` outputs only a square 10 solar radii wide
+around the Sun (about a third of the pixels, so roughly three times faster
+and smaller); `--radii N` sets the half-width in solar radii.
+
+A full 45-megapixel frame needs about 3 GB of free memory at the peak.
 
 | File | Contents |
 | --- | --- |
-| `<name>_hdr.fit` | linear 32-bit RGB in units of the reference exposure, camera colour; header has `SUNX/SUNY/SUNR`, `MOONX/MOONY/MOONR`, `PIXSCALE`, `NORTHANG` and the crop origin |
+| `<name>_hdr.fit` | linear 32-bit RGB in units of the reference exposure, camera colour; header has `SUNX/SUNY/SUNR`, `MOONX/MOONY/MOONR`, `PIXSCALE`, `NORTHANG` and the crop origin (0, 0 for the full frame) |
 | `<name>_weight.fit` | sum of weights per pixel (where the data came from) |
 | `<name>_preview.tif` | 16-bit asinh stretch with the camera white balance, for a quick look only |
 | `<name>_stack.json` | gains, offsets and settings |
