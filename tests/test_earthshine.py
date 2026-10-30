@@ -1,0 +1,158 @@
+"""Earthshine: a Moon-aligned stack recovers the lunar surface that a corona-aligned one blurs."""
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+from scipy import ndimage
+
+from tse_core.earthshine import EarthshineParams, glare_surface, moon_aligned, stack_earthshine
+from tse_core.stack import FrameInfo, Match
+from tse_core.synthetic import SyntheticScene
+from test_stack import mosaic_from
+
+SIZE, SUN, RS = 400, (200.0, 200.0), 40.0
+MOON_R = RS * 1.055
+
+
+def _surface(seed=3):
+    """Maria and highlands: smooth blobs, fixed to the Moon (coordinates relative to its centre)."""
+    rng = np.random.default_rng(seed)
+    n = 128
+    tex = ndimage.gaussian_filter(rng.normal(0, 1, (n, n)), 3.0)
+    tex /= tex.std()
+    return tex  # sampled at (dy, dx) + 64
+
+
+def _scene(moon_offsets, exposures, frame_shifts, earth=4e-4, seed=0):
+    scene = SyntheticScene(size=SIZE, sun_radius=RS, seed=5)
+    tex = _surface()
+    yy, xx = np.mgrid[0:SIZE, 0:SIZE].astype(float)
+    mos, infos, truth = {}, [], {}
+    for i, ((mdx, mdy), t, (sx, sy)) in enumerate(zip(moon_offsets, exposures, frame_shifts)):
+        sun = (SUN[0] + sx, SUN[1] + sy)
+        corona = scene.corona(*sun) * 1e-3
+        mx, my = sun[0] + mdx, sun[1] + mdy
+        r = np.hypot(xx - mx, yy - my)
+        disc = np.clip(MOON_R - r + 0.5, 0, 1)
+        surf = ndimage.map_coordinates(tex, [yy - my + 64, xx - mx + 64], order=1, mode="nearest")
+        glare = 3e-3 * (1 + 0.4 * (xx - sun[0]) / RS + 0.2 * (yy - sun[1]) / RS)  # fixed to the Sun, smooth
+        moonlight = earth * (1 + 0.3 * surf) + glare
+        img = (corona * (1 - disc) + moonlight * disc) * t
+        rng = np.random.default_rng(seed + i)
+        img = rng.poisson(np.clip(img, 0, None) * 3e4) / 3e4 + rng.normal(0, 2e-4, img.shape)
+        mos[i] = mosaic_from(np.minimum(img, 1.0).astype(np.float32))
+        M = [[1.0, 0.0, -sx], [0.0, 1.0, -sy]]
+        infos.append(FrameInfo(i, f"f{i}", t, M, mx - sx, my - sy, MOON_R))
+        truth[i] = (mx - sx, my - sy)
+    return mos, infos, tex
+
+
+def _corr_with_truth(detail, crop, moon_xy, tex, margin=6):
+    X0, Y0, w, h = crop
+    yy, xx = np.mgrid[0:h, 0:w].astype(float)
+    cx, cy = moon_xy[0] - X0, moon_xy[1] - Y0
+    inside = np.hypot(xx - cx, yy - cy) < MOON_R - margin
+    true = ndimage.map_coordinates(tex, [yy - cy + 64, xx - cx + 64], order=1, mode="nearest")
+    a = ndimage.gaussian_filter(detail, 1.0)[inside]
+    return float(np.corrcoef(a, true[inside])[0, 1])
+
+
+@pytest.fixture(scope="module")
+def run():
+    moons = [(-14, -5), (-5, -2), (4, 1), (13, 5)]  # the Moon crossing the Sun during totality
+    exposures = [4.0, 2.0, 4.0, 1.0]
+    shifts = [(1.2, -0.7), (0.0, 0.0), (-0.9, 1.1), (0.4, 0.3)]
+    mos, infos, tex = _scene(moons, exposures, shifts)
+    matches = {f.index: Match(f.index, f.nominal_ratio, 0.0, f.nominal_ratio, 0.0, 0) for f in infos}
+    ref = infos[1]
+    return mos, infos, tex, matches, ref
+
+
+def test_moon_aligned_stack_recovers_surface(run, tmp_path):
+    import tifffile
+
+    mos, infos, tex, matches, ref = run
+    res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
+                                        (0, 0, SIZE, SIZE), EarthshineParams(), out_dir=tmp_path, name="t")
+    c = _corr_with_truth(detail, res.crop, (ref.moon_x, ref.moon_y), tex)
+    assert c > 0.82, c
+    assert res.snr > 3
+    assert max(abs(d[0]) for d in res.shifts.values()) > 8  # the Moon really was moved
+    layer = tifffile.imread(res.outputs["earthshine"])
+    assert layer.shape == (SIZE, SIZE, 3)
+    # Black outside the disc, lunar detail inside, at the Moon frame's Moon.
+    assert layer[5, 5].max() == 0
+    assert layer[int(ref.moon_y), int(ref.moon_x)].max() > 0
+    yy, xx = np.mgrid[0:SIZE, 0:SIZE]
+    outside = np.hypot(xx - ref.moon_x, yy - ref.moon_y) > MOON_R
+    assert layer[outside].max() == 0
+
+
+def test_corona_aligned_stack_blurs_surface(run):
+    """Control: without the Moon shifts the same data gives a much worse surface."""
+    mos, infos, tex, matches, ref = run
+    still = [FrameInfo(f.index, f.file_name, f.nominal_ratio, f.matrix, ref.moon_x, ref.moon_y, f.moon_r) for f in infos]
+    res, lum, detail = stack_earthshine(still, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
+                                        (0, 0, SIZE, SIZE), EarthshineParams())
+    c_still = _corr_with_truth(detail, res.crop, (ref.moon_x, ref.moon_y), tex)
+    assert c_still < 0.6, c_still
+
+
+def test_short_exposures_skipped(run):
+    mos, infos, tex, matches, ref = run
+    res, *_ = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
+                               (0, 0, SIZE, SIZE), EarthshineParams(stops=1.5))
+    assert sorted(res.frames) == [0, 1, 2]  # the 1 s frame is more than 1.5 stops below 4 s
+
+
+def test_glare_surface_removes_smooth_gradient():
+    h = w = 100
+    yy, xx = np.mgrid[0:h, 0:w]
+    inside = np.hypot(xx - 50, yy - 50) < 45
+    glare = 1 + 0.01 * xx + 0.0002 * (yy - 50) ** 2
+    fit = glare_surface(glare.astype(np.float32), inside, 50, 50, 45, 4)
+    assert np.abs(fit - glare)[inside].max() < 1e-3
+
+
+def test_moon_aligned_matrix():
+    m = moon_aligned([[1, 0, 2.0], [0, 1, -1.0]], (100.0, 50.0), (103.0, 49.0))
+    assert m[0][2] == pytest.approx(5.0) and m[1][2] == pytest.approx(-2.0)
+
+
+def test_workflow_and_cli(tmp_path, monkeypatch, run, capsys):
+    """tse earthshine: frames from the project, alignment and brightness from earlier steps."""
+    import json
+    from dataclasses import asdict
+
+    from conftest import make_frames
+    from tse_core import cli, rawio
+    from tse_core.inventory import Inventory
+    from tse_core.project import EventProject
+
+    mos, infos, tex, matches, ref = run
+    frames = make_frames(["4", "2", "4", "1"])
+    by_path = {}
+    for f, info in zip(frames, infos):
+        f.index = info.index
+        f.path = str(tmp_path / f.file_name)
+        (tmp_path / f.file_name).write_bytes(b"")
+        by_path[f.path] = mos[info.index]
+    monkeypatch.setattr(rawio, "read_mosaic", lambda p: by_path[p])
+    align = {"reference_index": 1, "image_size": [SIZE, SIZE], "sun": None, "frames": [
+        {"index": i.index, "file_name": i.file_name, "matrix": i.matrix, "moon_ref": [i.moon_x, i.moon_y],
+         "moon_frame": {"radius": MOON_R}} for i in infos]}
+    (tmp_path / "e_align.json").write_text(json.dumps(align))
+    (tmp_path / "e_stack.json").write_text(json.dumps({"crop": [0, 0, SIZE, SIZE], "moon_frame": 1, "reference": 1,
+                                                       "matches": [asdict(m) for m in matches.values()]}))
+    p = EventProject(name="e")
+    p.set_inventory(Inventory(frames))
+    p.use_lensfun = False
+    p.parameters["align"] = {"file": "e_align.json"}
+    p.parameters["stack"] = {"info": "e_stack.json"}
+    p.save(tmp_path / "e.json")
+    assert cli.main(["earthshine", str(tmp_path / "e.json"), "--lensfun-db", str(tmp_path / "none")]) == 0
+    out = capsys.readouterr().out
+    assert "Lunar surface detail" in out
+    saved = EventProject.load(tmp_path / "e.json").parameters["earthshine"]
+    assert Path(saved["earthshine"]).exists() and sorted(saved["frames"]) == [0, 1, 2, 3]

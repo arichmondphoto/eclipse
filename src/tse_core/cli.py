@@ -147,6 +147,22 @@ def main(argv: list[str] | None = None) -> int:
                    help="do not model and remove the sky background (level, colour and gradient)")
     p.add_argument("--quiet", action="store_true")
 
+    p = sub.add_parser("earthshine", help="Moon-aligned stack of the long exposures: a layer for the black lunar disc")
+    p.add_argument("project", help="project file (run 'tse stack' on it first)")
+    p.add_argument("--stops", type=float, default=6.0,
+                   help="use frames within this many stops of the longest exposure (default 6)")
+    p.add_argument("--glare-order", type=int, default=2,
+                   help="smoothness of the glare removed from the disc: polynomial order (default 2)")
+    p.add_argument("--smooth", type=float, default=1.0, help="smoothing of the layer in pixels (default 1, 0 = none)")
+    p.add_argument("--brightness", type=float, default=0.6,
+                   help="brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona)")
+    p.add_argument("--include-rejected", action="store_true")
+    p.add_argument("--output", "-o", help="output folder (default: next to the project)")
+    p.add_argument("--name", help="output file name prefix (default: the project name)")
+    p.add_argument("--profile-dir")
+    p.add_argument("--lensfun-db")
+    p.add_argument("--quiet", action="store_true")
+
     sub.add_parser("doctor", help="show which optional readers are available")
 
     args = parser.parse_args(argv)
@@ -172,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_stack(args)
     if args.command == "enhance":
         return cmd_enhance(args)
+    if args.command == "earthshine":
+        return cmd_earthshine(args)
     if args.command == "flat-profile":
         return cmd_flat_profile(args)
     return 1
@@ -494,6 +512,22 @@ def cmd_enhance(args) -> int:
     if args.quiet:
         for n in notes:
             print(n)
+    print()
+    print(result.describe())
+    return 0
+
+
+def cmd_earthshine(args) -> int:
+    from .earthshine import EarthshineParams
+    from .workflow import earthshine
+
+    params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
+                              brightness=args.brightness)
+    result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,
+                        output=args.output, name=args.name, profile_dir=args.profile_dir,
+                        lensfun_db=args.lensfun_db, quiet=args.quiet)
+    if code:
+        return code
     print()
     print(result.describe())
     return 0

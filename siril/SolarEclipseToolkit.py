@@ -15,6 +15,8 @@ Four tabs, one per step, each saving into the event's project file:
 3. Stack: the Moon-aware linear HDR stack (full frame or a square).
 4. Enhance: natural, NRGF, FNRGF, FNRGF-N and adaptive layers with a live,
    reduced-size preview, then the full-size 16-bit TIFF layers.
+5. Earthshine: the lunar surface from a Moon-aligned stack of the long
+   exposures, as a layer that fits the corona layers' black disc.
 
 Long steps run in the background with progress in the log and a Cancel button.
 """
@@ -1048,6 +1050,93 @@ class EnhanceTab(StepTab):
 
 
 # ---------------------------------------------------------------------------
+# Earthshine
+# ---------------------------------------------------------------------------
+
+
+class EarthshineTab(StepTab):
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window)
+        box = QGroupBox("Earthshine")
+        f = QFormLayout(box)
+        self.stops = QDoubleSpinBox()
+        self.stops.setRange(0.5, 15.0)
+        self.stops.setValue(6.0)
+        self.stops.setSuffix(" stops")
+        f.addRow("Use frames within:", self.stops)
+        self.glare = QSpinBox()
+        self.glare.setRange(1, 6)
+        self.glare.setValue(2)
+        f.addRow("Glare smoothness:", self.glare)
+        self.smooth = QDoubleSpinBox()
+        self.smooth.setRange(0.0, 5.0)
+        self.smooth.setSingleStep(0.5)
+        self.smooth.setValue(1.0)
+        self.smooth.setSuffix(" px")
+        f.addRow("Smoothing:", self.smooth)
+        self.brightness = QDoubleSpinBox()
+        self.brightness.setRange(0.1, 1.0)
+        self.brightness.setSingleStep(0.05)
+        self.brightness.setValue(0.6)
+        f.addRow("Brightness:", self.brightness)
+        self.include_rejected = QCheckBox("Include frames flagged as off the Moon's track")
+        f.addRow(self.include_rejected)
+        self.settings_layout.addWidget(box)
+        run = QPushButton("Stack earthshine")
+        run.clicked.connect(self.run)
+        self.run_buttons.append(run)
+        self.settings_layout.addWidget(run)
+        self.open_btn = QPushButton("Open earthshine layer in Siril")
+        self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.layer_path))
+        self.settings_layout.addWidget(self.open_btn)
+        self.settings_layout.addStretch(1)
+        self.layer_path = ""
+        self.view = ImageView()
+        self.results_layout.addWidget(self.view, 1)
+
+        _tip(box, "Earthshine is the Moon's night side lit by sunlight reflected from the Earth. The Moon moves "
+             "across the Sun during totality, so this stacks the frames aligned on the Moon instead of the "
+             "corona, removes the glare from the bright inner corona, and writes a layer the same size as the "
+             "corona layers: the lunar surface inside the disc, black outside. In Photoshop put it under the "
+             "corona layers in Screen or Lighten mode, or paste it into the black disc.")
+        _tip(self.stops, "Only the longer exposures show earthshine; shorter ones add noise only. Frames more than "
+             "this many stops below the longest exposure are skipped. Default 6.", f)
+        _tip(self.glare, "How flexible the glare surface removed from the disc is (polynomial order). Glare from "
+             "the corona is a gentle gradient, so 2 (default) is usually right. Higher removes uneven glare but "
+             "also starts removing large maria; 1 removes a straight gradient only.", f)
+        _tip(self.smooth, "Softens the noise in the layer, in pixels. Earthshine is faint, so a little smoothing "
+             "(default 1) helps; 0 for none, 2-3 for very noisy data.", f)
+        _tip(self.brightness, "How bright the brightest lunar surface is in the layer, from 0 to 1. Earthshine is "
+             "much fainter than the corona, so the default 0.6 keeps it subdued; adjust to taste in Photoshop.", f)
+        _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken; "
+             "they would blur the lunar surface.")
+
+    def load_project(self, project: EventProject, path: Path) -> None:
+        e = project.parameters.get("earthshine", {})
+        self.layer_path = W.resolve(path, e.get("earthshine"))
+        self.open_btn.setEnabled(bool(self.layer_path))
+        crop = W.resolve(path, e.get("crop"))
+        if crop:
+            self.view.show_file(crop)
+
+    def run(self) -> None:
+        from tse_core.earthshine import EarthshineParams
+
+        params = EarthshineParams(stops=self.stops.value(), glare_order=self.glare.value(),
+                                  smooth=self.smooth.value(), brightness=self.brightness.value())
+        inc = self.include_rejected.isChecked()
+        self.start("Stacking earthshine",
+                   lambda p, say, cancel: W.earthshine(p, params, include_rejected=inc, say=say, cancel=cancel),
+                   self._done)
+
+    def _done(self, result) -> None:
+        self.log.appendPlainText(result.describe())
+        self.layer_path = result.outputs.get("earthshine", "")
+        self.open_btn.setEnabled(bool(self.layer_path))
+        self.view.show_file(result.outputs.get("crop", ""))
+
+
+# ---------------------------------------------------------------------------
 # Image display
 # ---------------------------------------------------------------------------
 
@@ -1120,10 +1209,12 @@ class MainWindow(QMainWindow):
         self.align_tab = AlignTab(self)
         self.stack_tab = StackTab(self)
         self.enhance_tab = EnhanceTab(self)
+        self.earthshine_tab = EarthshineTab(self)
         self.tabs.addTab(self.frames_tab, "1 Frames")
         self.tabs.addTab(self.align_tab, "2 Align")
         self.tabs.addTab(self.stack_tab, "3 Stack")
         self.tabs.addTab(self.enhance_tab, "4 Enhance")
+        self.tabs.addTab(self.earthshine_tab, "5 Earthshine")
         self.setCentralWidget(self.tabs)
 
         menu = self.menuBar().addMenu("&Project")
@@ -1170,7 +1261,7 @@ class MainWindow(QMainWindow):
         project = EventProject.load(path)
         self.frames_tab.project = project
         self.frames_tab.inventory = project.inventory
-        for tab in (self.align_tab, self.stack_tab, self.enhance_tab):
+        for tab in (self.align_tab, self.stack_tab, self.enhance_tab, self.earthshine_tab):
             tab.load_project(project, Path(path))
         self._title(path)
 

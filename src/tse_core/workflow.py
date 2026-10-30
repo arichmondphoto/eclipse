@@ -199,20 +199,18 @@ class StackOptions:
     lensfun_db: Optional[str] = None
 
 
-def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=None):
-    """Merge the aligned frames into the linear HDR stack. Returns (StackResult, skipped messages)."""
-    from .frames import true_exposure
-    from .rawio import read_mosaic
-    from .stack import FrameInfo, StackParams, stack_frames
+def _frame_infos(project: EventProject, alignment: dict, include_rejected: bool):
+    """Light frames with their alignment, Moon and nominal brightness, for stacking.
 
-    say = reporter(say, cancel)
-    path = Path(project_path).resolve()
-    project = EventProject.load(path)
-    alignment, align_path = load_alignment(path, opts.align)
+    Returns (frames by index, reference index, [FrameInfo], [skipped messages]).
+    """
+    from .frames import true_exposure
+    from .stack import FrameInfo
+
     frames = {f.index: f for f in project.inventory.lights()}
     ref = alignment["reference_index"]
     rejected = set()
-    if alignment.get("sun") and not opts.include_rejected:
+    if alignment.get("sun") and not include_rejected:
         order = [fr["index"] for fr in alignment["frames"]]
         rejected = {order[k] for k in alignment["sun"].get("rejected", [])}
 
@@ -236,6 +234,19 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
         ratio = 2.0 ** (ev - ev_ref) if ev is not None and ev_ref is not None else 1.0
         mx, my = fr["moon_ref"]
         infos.append(FrameInfo(i, fr["file_name"], ratio, fr["matrix"], mx, my, fr["moon_frame"]["radius"]))
+    return frames, ref, infos, skipped
+
+
+def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=None):
+    """Merge the aligned frames into the linear HDR stack. Returns (StackResult, skipped messages)."""
+    from .rawio import read_mosaic
+    from .stack import StackParams, stack_frames
+
+    say = reporter(say, cancel)
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    alignment, align_path = load_alignment(path, opts.align)
+    frames, ref, infos, skipped = _frame_infos(project, alignment, opts.include_rejected)
     for msg in skipped:
         say(msg)
     if not infos:
@@ -392,3 +403,60 @@ def enhance_project(project_path, params, hdr_file: Optional[str] = None, output
     project.parameters["enhance"] = {"hdr": data.path, **result.layers}
     project.save(path)
     return result, data.notes
+
+
+# ---------------------------------------------------------------------------
+# Earthshine
+# ---------------------------------------------------------------------------
+
+
+def earthshine(project_path, params=None, include_rejected: bool = False, output: Optional[str] = None,
+               name: Optional[str] = None, profile_dir: Optional[str] = None, lensfun_db: Optional[str] = None,
+               say: Optional[Say] = None, cancel=None):
+    """Moon-aligned stack of the long exposures; writes a layer that fits the corona layers' black disc.
+
+    Needs the alignment and the HDR stack (for the measured frame brightness and the canvas).
+    Returns the EarthshineResult.
+    """
+    from .earthshine import EarthshineParams, stack_earthshine
+    from .rawio import read_mosaic
+    from .stack import Match
+
+    say = reporter(say, cancel)
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    alignment, _ = load_alignment(path)
+    st = project.parameters.get("stack", {})
+    info_path = resolve(path, st.get("info"))
+    if not info_path:
+        raise WorkflowError("Run the Stack step first: earthshine uses the brightness it measures for each frame.")
+    info = json.loads(Path(info_path).read_text(encoding="utf-8"))
+    matches = {m["index"]: Match(**m) for m in info["matches"]}
+    frames, ref, infos, skipped = _frame_infos(project, alignment, include_rejected)
+    moon_frame = info.get("moon_frame", ref)
+    mf = next((fr for fr in alignment["frames"] if fr["index"] == moon_frame), None)
+    if mf is None:
+        raise WorkflowError(f"The Moon frame #{moon_frame} is not in the alignment.")
+    moon_xy = tuple(mf["moon_ref"])
+    moon_r = float(mf["moon_frame"]["radius"])
+    canvas = tuple(info["crop"]) if len(info["crop"]) == 4 else (info["crop"][0], info["crop"][1], info["crop"][2],
+                                                                 info["crop"][2])
+    p = params or EarthshineParams()
+    gmax = max((matches[f.index].gain for f in infos if f.index in matches), default=0)
+    use = [f for f in infos if f.index in matches and matches[f.index].gain >= gmax * 2.0 ** (-p.stops)]
+    if not use:
+        raise WorkflowError("No frames to use for earthshine.")
+    lights = [frames[f.index] for f in use]
+    _locate_frames(path, lights)
+    plan, crop_factor = _plan(project, lights, lensfun_db, profile_dir)
+    calibs = {fc.frame_index: fc for fc in plan.frames}
+    out_dir = Path(output) if output else path.parent
+    try:
+        result, _lum, _detail = stack_earthshine(use, lambda f: read_mosaic(frames[f.index].path), calibs, matches,
+                                                 moon_xy, moon_r, canvas, p, out_dir=out_dir,
+                                                 name=name or path.stem, image_crop=crop_factor, progress=say)
+    except (RuntimeError, ValueError) as exc:
+        raise WorkflowError(str(exc)) from exc
+    project.parameters["earthshine"] = {**result.outputs, "frames": result.frames}
+    project.save(path)
+    return result

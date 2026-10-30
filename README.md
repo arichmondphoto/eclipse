@@ -20,7 +20,7 @@ from each frame's metadata.
 | 2 | Geometry (lunar limb, Moon track, Sun centre) and phase correlation alignment | **done** (command line) |
 | 3 | Moon-aware linear HDR stacking | **done** (command line) |
 | 4 | NRGF, FNRGF, FNRGF-N, adaptive filter, natural layer, blend | **done** (command line) |
-| 5 | Full GUI and packaging | GUI built (Frames, Align, Stack, Enhance tabs); first run in Siril pending |
+| 5 | Full GUI and packaging | **done**: Frames, Align, Stack, Enhance and Earthshine tabs, working in Siril |
 
 ## Supported files
 
@@ -276,6 +276,30 @@ earthshine layer is planned).
 
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
+
+## Earthshine
+
+```bash
+tse earthshine eclipse2024.json       # after 'tse stack'
+```
+
+The Moon's night side, lit by sunlight reflected from the Earth. The Moon
+moves across the Sun during totality (about 40 px in three minutes at
+400 mm), so a corona-aligned stack blurs it. This step keeps each frame's
+corona alignment and adds a shift that puts its Moon where the Moon is in
+the HDR stack's Moon frame. Only exposures within `--stops` (default 6) of
+the longest are used. The glare from the inner corona inside the disc, a
+gentle gradient, is removed with a smooth surface (`--glare-order`, default
+2; higher orders start removing large maria too).
+
+| File | Contents |
+| --- | --- |
+| `<name>_earthshine.tif` | 16-bit layer the size of the HDR stack: the lunar surface inside the disc, black outside, so it drops into the corona layers' black disc (Screen or Lighten mode) |
+| `<name>_earthshine_crop.tif` | the same, cropped to the Moon |
+| `<name>_earthshine.fit` | the Moon-aligned linear stack before glare removal |
+
+The report gives the lunar detail over the noise; below about 3 the layer
+is mostly noise (short exposures, low ISO or a bright sky).
 
 ## Calibration rules
 

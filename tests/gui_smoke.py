@@ -64,4 +64,9 @@ win.align_tab.lat.setText("36.94")
 win.align_tab.run()
 print("last message:", QMessageBox.log[-1][1][:120])
 print("buttons re-enabled:", all(b._enabled for b in win.align_tab.run_buttons))
+# Earthshine without a stack brightness file: a clear message.
+n = len(QMessageBox.log)
+win.earthshine_tab.run()
+print("earthshine message:", QMessageBox.log[-1][1][:80])
+assert len(QMessageBox.log) == n + 1 and "Stack step" in QMessageBox.log[-1][1]
 print("GUI SMOKE OK")
