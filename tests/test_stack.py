@@ -180,6 +180,7 @@ def test_cli_stack(tmp_path, monkeypatch, capsys):
     frames = make_frames(exposures, aperture=8.0)
     for f in frames:
         f.path = str(tmp_path / f.file_name)
+        (tmp_path / f.file_name).write_bytes(b"")  # stands in for the RAW file; read_mosaic is replaced below
     shifts = [(1.0, -0.5), (0.0, 0.0), (-1.2, 0.8), (0.4, 0.3)]
     mosaics = {}
     align_frames = []

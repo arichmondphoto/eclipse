@@ -43,6 +43,38 @@ def reporter(say: Optional[Say] = None, cancel: Optional[Callable[[], bool]] = N
     return _say
 
 
+def resolve(project_path, stored: Optional[str]) -> str:
+    """Find a file the project refers to, wherever the program was started from.
+
+    Older project files (and the command line run from another folder) store
+    paths relative to the folder the command ran in. Try the path as stored,
+    then relative to the project file's folder, then the same file name next
+    to the project file. Returns "" when nothing exists.
+    """
+    if not stored:
+        return ""
+    p = Path(stored)
+    base = Path(project_path).resolve().parent
+    for cand in ((p,) if p.is_absolute() else ()) + (base / p, base / p.name, p):
+        if cand.exists():
+            return str(cand.resolve())
+    return ""
+
+
+def _locate_frames(project_path, frames) -> None:
+    """Point each frame at its RAW file wherever it is found (see ``resolve``); report the missing."""
+    missing = []
+    for f in frames:
+        found = resolve(project_path, f.path)
+        if found:
+            f.path = found
+        else:
+            missing.append(f.file_name)
+    if missing:
+        raise WorkflowError(f"{len(missing)} RAW file(s) not found, for example {missing[0]}. If the folder moved, "
+                            "read it again on the Frames tab (or run 'tse inventory' on the new folder).")
+
+
 def _db(path: Optional[str]) -> LensfunDatabase:
     return LensfunDatabase.load([path] if path else None)
 
@@ -101,7 +133,7 @@ def align(project_path, opts: AlignOptions, say: Optional[Say] = None, cancel=No
     from .pipeline import default_loader, run_alignment
 
     say = reporter(say, cancel)
-    path = Path(project_path)
+    path = Path(project_path).resolve()
     project = EventProject.load(path)
     for attr in ("latitude", "longitude", "elevation_m", "camera_utc_offset_h", "mirrored", "clock_error_s"):
         value = getattr(opts, attr)
@@ -110,6 +142,7 @@ def align(project_path, opts: AlignOptions, say: Optional[Say] = None, cancel=No
     lights = project.inventory.lights()
     if len(lights) < 2:
         raise WorkflowError("Need at least two light frames: read the RAW folder on the Frames tab first.")
+    _locate_frames(path, lights)
     plan, crop = _plan(project, lights, opts.lensfun_db, opts.profile_dir)
     site = None
     if project.latitude is not None and project.longitude is not None:
@@ -139,10 +172,10 @@ def align(project_path, opts: AlignOptions, say: Optional[Say] = None, cancel=No
 
 
 def load_alignment(project_path, align_file: Optional[str] = None) -> tuple[dict, Path]:
-    path = Path(project_path)
+    path = Path(project_path).resolve()
     project = EventProject.load(path)
-    align_path = Path(align_file or project.parameters.get("align", {}).get("file")
-                      or path.with_name(path.stem + "_align.json"))
+    align_path = Path(resolve(path, align_file or project.parameters.get("align", {}).get("file"))
+                      or resolve(path, path.stem + "_align.json") or path.with_name(path.stem + "_align.json"))
     if not align_path.exists():
         raise WorkflowError(f"No alignment results at {align_path}; run the Align step first.")
     return json.loads(align_path.read_text(encoding="utf-8")), align_path
@@ -173,7 +206,7 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
     from .stack import FrameInfo, StackParams, stack_frames
 
     say = reporter(say, cancel)
-    path = Path(project_path)
+    path = Path(project_path).resolve()
     project = EventProject.load(path)
     alignment, align_path = load_alignment(path, opts.align)
     frames = {f.index: f for f in project.inventory.lights()}
@@ -208,6 +241,7 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
     if not infos:
         raise WorkflowError("Nothing to stack: no aligned light frames.")
     lights = [frames[f.index] for f in infos]
+    _locate_frames(path, lights)
     plan, crop_factor = _plan(project, lights, opts.lensfun_db, opts.profile_dir)
     calibs = {fc.frame_index: fc for fc in plan.frames}
     params = StackParams(crop_radii=opts.radii, moon_frame=opts.moon_frame, hot_pixels=opts.hot_pixels)
@@ -268,13 +302,14 @@ def parse_blend(text: Optional[str]) -> dict:
 def load_hdr(project_path, hdr_file: Optional[str] = None) -> HdrData:
     from .fits import read_fits
 
-    path = Path(project_path)
+    path = Path(project_path).resolve()
     project = EventProject.load(path)
     stack_info = project.parameters.get("stack", {})
-    hdr_path = hdr_file or stack_info.get("hdr")
-    if not hdr_path or not Path(hdr_path).exists():
+    hdr_path = resolve(path, hdr_file or stack_info.get("hdr")) or resolve(path, path.stem + "_hdr.fit")
+    if not hdr_path:
         raise WorkflowError(f"No HDR stack found{' at ' + hdr_path if hdr_path else ''}; run the Stack step first.")
-    weight_path = str(hdr_path).replace("_hdr.fit", "_weight.fit") if hdr_file else stack_info.get("weight")
+    weight_path = resolve(path, str(hdr_path).replace("_hdr.fit", "_weight.fit") if hdr_file
+                          else stack_info.get("weight")) or resolve(path, str(hdr_path).replace("_hdr.fit", "_weight.fit"))
     data, header = read_fits(hdr_path)
     hdr = np.ascontiguousarray(np.moveaxis(data, 0, -1)) if data.ndim == 3 else np.repeat(data[..., None], 3, 2)
     del data
@@ -346,7 +381,7 @@ def enhance_project(project_path, params, hdr_file: Optional[str] = None, output
     from .enhance import enhance
 
     say = reporter(say, cancel)
-    path = Path(project_path)
+    path = Path(project_path).resolve()
     data = load_hdr(path, hdr_file)
     for n in data.notes:
         say(n)

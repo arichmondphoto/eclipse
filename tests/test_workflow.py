@@ -85,3 +85,31 @@ def test_steps_report_missing_inputs(tmp_path):
         W.stack(p, W.StackOptions())
     with pytest.raises(W.WorkflowError, match="Stack step"):
         W.enhance_project(p, EnhanceParams())
+
+
+def test_paths_stored_relative_to_another_folder(tmp_path, monkeypatch):
+    """A project made by 'tse' run inside its folder stores bare file names; the GUI (Siril) runs
+    from elsewhere and must still find the alignment and stack files."""
+    import json
+
+    from tse_core.fits import write_fits
+    from tse_core.project import EventProject
+
+    folder = tmp_path / "event"
+    folder.mkdir()
+    (folder / "e_align.json").write_text(json.dumps({"reference_index": 0, "frames": []}))
+    write_fits(folder / "e_hdr.fit", np.zeros((3, 8, 8), np.float32), {"MOONX": 4.0, "MOONY": 4.0, "MOONR": 2.0})
+    write_fits(folder / "e_weight.fit", np.ones((8, 8), np.float32))
+    p = EventProject(name="e")
+    p.parameters["align"] = {"file": "e_align.json"}
+    p.parameters["stack"] = {"hdr": "e_hdr.fit", "weight": "e_weight.fit"}
+    p.save(folder / "e.json")
+    monkeypatch.chdir(tmp_path)  # somewhere else
+    alignment, apath = W.load_alignment(folder / "e.json")
+    assert apath == (folder / "e_align.json").resolve()
+    data = W.load_hdr(folder / "e.json")
+    assert Path(data.path) == (folder / "e_hdr.fit").resolve()
+    assert not data.notes  # the weight map was found too
+    assert W.resolve(folder / "e.json", "missing.fit") == ""
+    # Moved folder: absolute paths that no longer exist fall back to the name next to the project.
+    assert W.resolve(folder / "e.json", "/old/place/e_hdr.fit") == str((folder / "e_hdr.fit").resolve())

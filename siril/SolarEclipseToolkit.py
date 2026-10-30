@@ -717,11 +717,11 @@ class StackTab(StepTab):
             i = self.moon_frame.findData(st["moon_frame"])
             if i >= 0:
                 self.moon_frame.setCurrentIndex(i)
-        self.hdr_path = st.get("hdr", "")
+        self.hdr_path = W.resolve(path, st.get("hdr"))
         self.open_btn.setEnabled(bool(self.hdr_path))
-        self.preview.show_file(st.get("preview", ""))
-        info = st.get("info")
-        if info and Path(info).exists():
+        self.preview.show_file(W.resolve(path, st.get("preview")))
+        info = W.resolve(path, st.get("info"))
+        if info:
             import json
 
             self.show_matches(json.loads(Path(info).read_text(encoding="utf-8")).get("matches", []))
@@ -870,7 +870,8 @@ class EnhanceTab(StepTab):
         return sp
 
     def load_project(self, project: EventProject, path: Path) -> None:
-        self.outputs = {k: v for k, v in project.parameters.get("enhance", {}).items() if k in LAYER_NAMES}
+        self.outputs = {k: W.resolve(path, v) for k, v in project.parameters.get("enhance", {}).items()
+                        if k in LAYER_NAMES and W.resolve(path, v)}
 
     def forget_preview(self) -> None:
         self.small = None
