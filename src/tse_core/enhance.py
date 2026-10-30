@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import math
+import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Sequence
@@ -181,6 +182,40 @@ class RingStats:
     seg_std: np.ndarray  # (rings,) average within-segment deviation (a floor for the FNRGF)
 
 
+def spot_mask(lum: np.ndarray, valid: np.ndarray, r: Optional[np.ndarray] = None, r_min: float = 0.0,
+              size: int = 9, k: float = 5.0) -> np.ndarray:
+    """Small compact blemishes (dust shadows, stars, hot pixels) to leave out of the statistics.
+
+    A dark dust spot at one distance from the Sun pulls down the circle
+    statistics at exactly that distance, and the filters turn it into a
+    faint arc around the Sun. Spots are found on a reduced copy (about 1400
+    px high) as departures from a local median, far beyond the local scatter.
+    They are only excluded from the statistics; the image keeps them.
+    """
+    h, w = lum.shape
+    f = max(1, int(round(min(h, w) / 1400)))
+    hh, ww = h // f, w // f
+    x = np.where(valid, lum, np.nan)[: hh * f, : ww * f].reshape(hh, f, ww, f)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        red = np.nanmean(x, axis=(1, 3))
+    ok = np.isfinite(red) & (red > 0)
+    if ok.sum() < 1000:
+        return np.zeros((h, w), bool)
+    lg = np.log(np.where(ok, red, np.nanmedian(red[ok])))
+    lg = np.where(ok, lg, np.median(lg[ok]))
+    d = lg - ndimage.median_filter(lg, size=size, mode="nearest")
+    scatter = 1.25 * ndimage.uniform_filter(np.abs(d), size=4 * size + 1, mode="nearest") + 1e-6
+    spots = ok & (np.abs(d) > k * scatter)
+    if r is not None and r_min > 0:
+        # Near the Sun the corona itself is full of compact, sharp structure; leave it alone.
+        spots &= r[: hh * f : f, : ww * f : f][:hh, :ww] > r_min
+    spots = ndimage.binary_dilation(spots, iterations=2)
+    full = np.zeros((h, w), bool)
+    full[: hh * f, : ww * f] = np.repeat(np.repeat(spots, f, axis=0), f, axis=1)
+    return full
+
+
 def ring_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, segments: int, order: int,
                smooth: float, noise: Optional[np.ndarray] = None) -> RingStats:
     """Mean and deviation per 1-px ring and angular segment, fitted with Fourier series.
@@ -222,6 +257,10 @@ def ring_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray,
     ring_mean = ndimage.gaussian_filter1d(m1 * rc, sg, mode="nearest") / rcs
     ring_std = np.sqrt(ndimage.gaussian_filter1d(v1 * rc, sg, mode="nearest") / rcs)
     cnt = cnt.reshape(nr, segments)
+    # A segment "has data" when at least a third of its arc is inside the frame and off the
+    # Moon; slivers at the frame edge are too few pixels to trust.
+    arc = 2 * math.pi * (np.arange(nr) + 0.5) / segments
+    have = cnt >= np.maximum(0.33 * arc[:, None], 1.0)
     mean = np.nan_to_num(mean.reshape(nr, segments))
     std = np.sqrt(np.nan_to_num(var.reshape(nr, segments)))
     nstd = np.sqrt(np.nan_to_num(nvar.reshape(nr, segments)))
@@ -237,11 +276,9 @@ def ring_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray,
     # Circles that leave the frame have segments without data. Fill each empty segment from
     # the last ring where it had data, scaled by the smooth radial trend: coronal structure
     # is close to radial, so this continues streamers outwards instead of inventing an edge.
-    have = cnt > 1e-3 * np.maximum(cnt.max(axis=1, keepdims=True), 1e-12)
-    complete = have.all(axis=1)
-    mean = _fill_segments(mean, have, _trend(ring_mean, complete))
-    std = _fill_segments(std, have, _trend(seg_std, complete))
-    nstd = _fill_segments(nstd, have, _trend(seg_std, complete))
+    mean = _fill_segments(mean, have, additive=True)
+    std = _fill_segments(std, have, additive=False)
+    nstd = _fill_segments(nstd, have, additive=False)
     # Whole-circle statistics again, now from the completed circles, so the NRGF and the natural
     # layer do not jump where one side of a circle leaves the frame and the sky there differs.
     data = rc > 0
@@ -283,17 +320,45 @@ def _trend(prof: np.ndarray, complete: np.ndarray, sigma: float = 15.0) -> np.nd
     return np.exp(sm)
 
 
-def _fill_segments(y: np.ndarray, have: np.ndarray, trend: np.ndarray) -> np.ndarray:
-    """Fill (ring, segment) cells without data from the nearest ring with data, scaled by ``trend``."""
-    nr = y.shape[0]
+def _fill_segments(y: np.ndarray, have: np.ndarray, additive: bool) -> np.ndarray:
+    """Complete circles that leave the frame.
+
+    A segment with no data at ring ``i`` takes its own value from the last
+    ring ``L`` where it had data, changed by how much the segments that
+    still have data at ``i`` changed between ``L`` and ``i``: the same
+    difference (``additive``, for means, which approach zero once the sky
+    is removed) or the same ratio (for deviations, which stay positive).
+    Seen from the Sun the frame is convex, so a segment with data at ``i``
+    also has data at every ring inside ``i``.
+    """
+    nr, ns = y.shape
+    out = y.copy()
     idx = np.arange(nr)[:, None]
-    last = np.maximum.accumulate(np.where(have, idx, -1), axis=0)  # nearest inner ring with data
-    nxt = np.minimum.accumulate(np.where(have, idx, nr)[::-1], axis=0)[::-1]  # nearest outer ring
-    src = np.where(last >= 0, last, np.where(nxt < nr, nxt, idx))
-    seg = np.arange(y.shape[1])[None, :]
-    filled = y[src, seg] * (trend[:, None] / np.maximum(trend[src], 1e-30))
-    # A circle with no data at all keeps its ring average.
-    return np.where(have, y, filled)
+    last = np.maximum.accumulate(np.where(have, idx, -1), axis=0)
+    # Rings inside the first data (behind the Moon) take the nearest ring outside.
+    nxt = np.minimum.accumulate(np.where(have, idx, nr)[::-1], axis=0)[::-1]
+    for i in range(nr):
+        miss = ~have[i]
+        if not miss.any():
+            continue
+        avail = have[i]
+        for L in np.unique(last[i][miss]):
+            segs = miss & (last[i] == L)
+            if L < 0:
+                n = nxt[i][segs]
+                ok = n < nr
+                cols = np.nonzero(segs)[0]
+                out[i, cols[ok]] = y[n[ok], cols[ok]]
+                continue
+            if avail.any():
+                now, then = y[i, avail].mean(), y[L, avail].mean()
+                if additive:
+                    out[i, segs] = y[L, segs] + (now - then)
+                else:
+                    out[i, segs] = y[L, segs] * (now / then if then > 0 else 1.0)
+            else:
+                out[i, segs] = out[i - 1, segs] if i > 0 else y[L, segs]
+    return out
 
 
 def _carry(v: np.ndarray, have: np.ndarray) -> np.ndarray:
@@ -377,7 +442,7 @@ def radial_profile(x: np.ndarray, r: np.ndarray, valid: np.ndarray, smooth: floa
 
 
 def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
-            flatten: float) -> np.ndarray:
+            flatten: float, stats_valid: Optional[np.ndarray] = None) -> np.ndarray:
     """Log stretch with part of the radial fall-off removed.
 
     ``x`` has the sky removed. The flattening stops where the corona sinks
@@ -387,7 +452,8 @@ def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, no
     lg = np.log(np.maximum(x, 0) + floor).astype(np.float32)
     # Circle averages from completed circles (see ring_stats), so no arcs at the frame edges.
     lo = float(lg[valid].min()) if valid.any() else 0.0
-    prof = ring_stats(lg - lo, r, phi, valid, 36, 0, 2.0).ring_mean + lo
+    sv = valid if stats_valid is None else stats_valid
+    prof = ring_stats(lg - lo, r, phi, sv, 36, 0, 2.0).ring_mean + lo
     prof = np.maximum(prof, math.log(4 * floor))  # no lifting of what is mostly noise
     ri = np.clip(r - 0.5, 0, len(prof) - 1.001)
     i0 = ri.astype(np.int32)
@@ -608,6 +674,13 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     outside_moon = np.sqrt(xx * xx + yy * yy) > g.moon_r + p.moon_margin_px
     del xx, yy
     valid = finite & (weight > 0) & outside_moon
+    # The outermost rows and columns of a RAW frame are often not image (Nikon includes a few
+    # masked or edge columns) and the stack edges hold fewer frames; leave a thin border out.
+    edge = max(4, int(round(0.004 * min(h, w))))
+    valid[:edge] = False
+    valid[-edge:] = False
+    valid[:, :edge] = False
+    valid[:, -edge:] = False
 
     camera_wb = None
     if all(k in header for k in ("WBR", "WBG", "WBB")):
@@ -628,6 +701,8 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     lum = rgb.mean(axis=2)
     say(f"white balance {wb.round(3).tolist()}; sky removed ({sky_kind}) {bg.tolist()}")
 
+    stats_valid = valid & ~spot_mask(lum, valid, r, 2.0 * g.sun_r)
+    say(f"{int((valid & ~stats_valid).sum())} pixels in dust spots or stars left out of the circle statistics")
     noise = noise_map(lum, weight, valid)
     nlev = float(np.median(noise[valid & (noise > 0)])) if (valid & (noise > 0)).any() else 0.0
     col = chroma(rgb, lum, valid, noise, p.saturation)
@@ -640,7 +715,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     stats = None
     if {"fnrgf", "fnrgf_n", "nrgf"} & set(p.layers) or "fnrgf_n" in p.blend or "fnrgf" in p.blend:
         say("circle statistics")
-        stats = ring_stats(lum, r, phi, valid, p.segments, order, p.ring_smooth, noise)
+        stats = ring_stats(lum, r, phi, stats_valid, p.segments, order, p.ring_smooth, noise)
 
     need = set(p.layers) | {k for k, v in p.blend.items() if v}
     scales = list(p.mgn_scales) if p.mgn_scales else [g.sun_r * f for f in (0.006, 0.012, 0.025, 0.05, 0.1, 0.2)]
@@ -649,7 +724,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             continue
         say(f"layer {name_l}")
         if name_l == "natural":
-            y = natural(lum, r, phi, valid, nlev, p.flatten)
+            y = natural(lum, r, phi, valid, nlev, p.flatten, stats_valid)
         elif name_l == "nrgf":
             y = to_unit(nrgf(lum, r, valid, stats), valid)
         elif name_l == "fnrgf":
