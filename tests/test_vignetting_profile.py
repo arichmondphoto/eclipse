@@ -117,3 +117,28 @@ def test_synthetic_cfa_flat_file(tmp_path):
     path = write_synthetic_flat(tmp_path / "f.fit", 200, 100, TRUE["G"], channel_terms=dict(TRUE), cfa_pattern="RGGB")
     data, _ = read_fits(path)
     assert data[0, 0] == pytest.approx(vignetting_map(200, 100, TRUE["R"])[0, 0])
+
+
+@pytest.mark.parametrize("a,b,same", [
+    ("80-400mm f/4.5-5.6 D VR", "AF VR Zoom-Nikkor 80-400mm f/4.5-5.6D ED", True),   # exifread vs exiftool
+    ("80-400mm f/4.5-5.6 D VR", "80-400mm f/4.5-5.6 D VR", True),
+    ("80-400mm f/4.5-5.6 D VR", "AF-S Nikkor 80-400mm f/4.5-5.6G ED VR", False),    # G lens
+    ("80-400mm f/4.5-5.6 D VR", "80-400mm f/4.5-5.6", True),                        # designation unknown
+    ("80-400mm f/4.5-5.6 D VR", "70-300mm f/4.5-5.6 G VR", False),
+    ("80-400mm f/4.5-5.6 D VR", "80-400mm f/4-5.6", False),
+    ("Some Lens", "Other Lens", False),
+])
+def test_same_lens(a, b, same):
+    from tse_core.vignetting_profile import same_lens
+
+    assert same_lens(a, b) is same
+
+
+def test_user_profile_matches_frames_read_by_either_reader():
+    # The profile fitted from the 2024 flats, as saved on the user's machine.
+    prof = VignettingProfile("80-400mm f/4.5-5.6 D VR", 400, 8, (-0.07130, -0.07298, 0.04993), {}, 1.0)
+    assert prof.corner()[0] == pytest.approx(0.906, abs=0.001)
+    for name in ("80-400mm f/4.5-5.6 D VR", "AF VR Zoom-Nikkor 80-400mm f/4.5-5.6D ED"):
+        f = make_frames(["1/100"])[0]
+        f.lens_model = name
+        assert match_profile(f, [prof]) is prof

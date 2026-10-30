@@ -114,9 +114,8 @@ def load_profile_library(directory: Optional[str | os.PathLike] = None) -> list[
 def match_profile(frame: FrameMeta, profiles: Iterable[VignettingProfile]) -> Optional[VignettingProfile]:
     """Closest profile for the same lens, within 1/3 stop and 5 % focal length."""
     best, best_d = None, float("inf")
-    lens = _norm(frame.lens_model)
     for p in profiles:
-        if lens and _norm(p.lens_model) and _norm(p.lens_model) != lens:
+        if frame.lens_model and p.lens_model and not same_lens(frame.lens_model, p.lens_model):
             continue
         if not (frame.focal_length_mm and frame.aperture_f):
             continue
@@ -333,12 +332,43 @@ def profile_map(profile: VignettingProfile, width: int, height: int, image_crop:
     return out
 
 
+def same_lens(a: str, b: str) -> bool:
+    """Whether two lens names describe the same lens.
+
+    Different readers name the same lens differently: exifread builds
+    "80-400mm f/4.5-5.6 D VR" from Nikon's maker notes, exiftool gives
+    "AF VR Zoom-Nikkor 80-400mm f/4.5-5.6D ED". Names match when their focal
+    ranges, maximum apertures and Nikon-style D/G/E designations agree.
+    """
+    if _norm(a) == _norm(b):
+        return True
+    from .lensfun import parse_aperture_range, parse_focal_range
+
+    fa, fb = parse_focal_range(a), parse_focal_range(b)
+    if not (fa and fb):
+        return False
+    if any(abs(x - y) > 0.6 for x, y in zip(fa, fb)):
+        return False
+    aa, ab = parse_aperture_range(a), parse_aperture_range(b)
+    if aa and ab and any(abs(x - y) > 0.1 for x, y in zip(aa, ab)):
+        return False
+    da, db = _designation(a), _designation(b)
+    return not (da and db and da != db)
+
+
+def _designation(name: str) -> set[str]:
+    """Nikon D/G/E designation: '5.6D', '5.6G' or a standalone 'D', 'G', 'E'."""
+    found = set(re.findall(r"\d([DGE])(?![A-Za-z])", name or ""))
+    found |= {t for t in re.split(r"[^A-Za-z0-9]+", name or "") if t in ("D", "G", "E")}
+    return found
+
+
 def _norm(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
 
 
 __all__ = [
-    "VignettingProfile", "fit_profile_from_planes", "fit_profile_from_files", "load_profile_library",
+    "same_lens", "VignettingProfile", "fit_profile_from_planes", "fit_profile_from_files", "load_profile_library",
     "match_profile", "profile_map", "planes_from_raw", "planes_from_fits", "relative_illumination",
     "FULL_FRAME_HALF_DIAGONAL_MM",
 ]
