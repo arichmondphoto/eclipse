@@ -20,7 +20,7 @@ from each frame's metadata.
 | 2 | Geometry (lunar limb, Moon track, Sun centre) and phase correlation alignment | **done** (command line) |
 | 3 | Moon-aware linear HDR stacking | **done** (command line) |
 | 4 | NRGF, FNRGF, FNRGF-N, adaptive filter, natural layer, blend | **done** (command line) |
-| 5 | Full GUI and packaging | planned |
+| 5 | Full GUI and packaging | GUI built (Frames, Align, Stack, Enhance tabs); first run in Siril pending |
 
 ## Supported files
 
@@ -67,9 +67,24 @@ tse elements-update --from ~/Downloads/eclipse_besselian_from_mysqldump2.csv
 1. In Siril, open **Preferences → Scripts** and add this repository's
    `siril` folder to the script paths.
 2. Run **Scripts → SolarEclipseToolkit**. On first run Siril installs
-   PyQt6, exifread, numpy and rawpy into its own Python environment.
+   PyQt6, numpy, scipy, exifread, rawpy, tifffile, certifi and truststore
+   into its own Python environment.
 
 The script finds the core package in `../src`, so keep the folders together.
+
+The window has one tab per step, and each step saves into the project file:
+
+| Tab | What you do | What you see |
+| --- | --- | --- |
+| 1 Frames | Read the RAW folder, check the frames and brackets, choose the lens profile, add calibration folders | Frame table (right-click to exclude a frame), bracket and calibration report |
+| 2 Align | Enter the site (latitude, longitude, elevation), the camera time zone and clock error if known; choose the rotation model | Per-frame shift, rotation and peak strength; the Sun centre report |
+| 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep | The stacked preview and each frame's measured brightness |
+| 4 Enhance | Layers to write, blend strengths, flatten, saturation, white balance, FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
+
+Long steps run in the background: progress shows in the log under each tab
+and **Cancel** stops at the next step. **Open … in Siril** loads a result
+into Siril. The same steps run from the command line with `tse`, using the
+same project file.
 
 ## Command line
 

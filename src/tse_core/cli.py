@@ -419,131 +419,49 @@ def cmd_eclipse(args) -> int:
     return 0
 
 
-def cmd_align(args) -> int:
-    from .align import AlignParams
-    from .calibration import plan_calibration
-    from .eclipse import Site
-    from .pipeline import default_loader, run_alignment
+def _run(step, *a, quiet=False, **k):
+    """Run a workflow step with printed progress; WorkflowError -> message and exit code 1."""
+    from .workflow import WorkflowError
 
-    path = Path(args.project)
-    project = EventProject.load(path)
-    if args.lat is not None:
-        project.latitude = args.lat
-    if args.lon is not None:
-        project.longitude = args.lon
-    if args.elev is not None:
-        project.elevation_m = args.elev
-    if args.camera_utc_offset is not None:
-        project.camera_utc_offset_h = args.camera_utc_offset
-    if args.mirrored is not None:
-        project.mirrored = args.mirrored
-    if args.clock_error is not None:
-        project.clock_error_s = args.clock_error
-    inv = project.inventory
-    lights = inv.lights()
-    db = _db(args.lensfun_db)
-    library = load_profile_library(args.profile_dir)
-    plan = plan_calibration(lights, db, None, lens_name=project.lens_profile or None,
-                            use_lensfun=project.use_lensfun, profiles=library)
-    cam = db.find_camera(lights[0].camera_make, lights[0].camera_model) if lights and not db.empty else None
-    crop = cam.crop_factor if cam else 1.0
-    site = None
-    if project.latitude is not None and project.longitude is not None:
-        site = Site(project.latitude, project.longitude, project.elevation_m)
-    if site is not None and lights and lights[0].timestamp:
-        try:
-            _ensure_elements(lights[0].timestamp[:10])
-        except KeyError as exc:
-            print(exc.args[0])
-    params = AlignParams(rho=args.rho, rotation_model=args.rotation, coarse_rotation=args.any_angle,
-                         solve_rotation=args.rotation != "none")
-    say = (lambda m: None) if args.quiet else print
     try:
-        result = run_alignment(lights, default_loader(plan, crop), params, window=args.window, site=site,
-                               clock_error_s=project.clock_error_s, crop_factor=crop,
-                               utc_offset_h=project.camera_utc_offset_h, mirrored=project.mirrored,
-                               progress=say)
-    except RuntimeError as exc:
+        return step(*a, say=None if quiet else print, **k), 0
+    except WorkflowError as exc:
         print(exc)
-        return 1
-    out = Path(args.output) if args.output else path.with_name(path.stem + "_align.json")
-    result.save(out)
-    project.parameters["align"] = {"file": str(out), "rho": args.rho, "rotation": args.rotation,
-                                   "window": args.window, "clock_error": args.clock_error}
-    project.save(path)
+        return None, 1
+
+
+def cmd_align(args) -> int:
+    from .workflow import AlignOptions, align
+
+    opts = AlignOptions(latitude=args.lat, longitude=args.lon, elevation_m=args.elev,
+                        camera_utc_offset_h=args.camera_utc_offset, mirrored=args.mirrored,
+                        clock_error_s=args.clock_error, rotation=args.rotation, any_angle=args.any_angle,
+                        rho=args.rho, window=args.window, output=args.output, profile_dir=args.profile_dir,
+                        lensfun_db=args.lensfun_db)
+    out, code = _run(align, args.project, opts, quiet=args.quiet)
+    if code:
+        return code
+    result, path = out
     print()
     print(result.describe())
-    print(f"\nAlignment saved to {out}")
+    print(f"\nAlignment saved to {path}")
     return 0
 
 
 def cmd_stack(args) -> int:
-    from .calibration import plan_calibration
-    from .rawio import read_mosaic
-    from .stack import FrameInfo, StackParams, stack_frames
+    from .workflow import StackOptions, stack
 
-    path = Path(args.project)
-    project = EventProject.load(path)
-    align_path = args.align or project.parameters.get("align", {}).get("file") or str(
-        path.with_name(path.stem + "_align.json"))
-    if not Path(align_path).exists():
-        print(f"No alignment results at {align_path}; run 'tse align {path}' first.")
-        return 1
-    alignment = json.loads(Path(align_path).read_text(encoding="utf-8"))
-    frames = {f.index: f for f in project.inventory.lights()}
-    ref = alignment["reference_index"]
-    rejected = set()
-    if alignment.get("sun") and not args.include_rejected:
-        order = [fr["index"] for fr in alignment["frames"]]
-        rejected = {order[k] for k in alignment["sun"].get("rejected", [])}
-    from .frames import true_exposure
-
-    def _ev(fm):  # light gathered, using the shutter's real time behind its rounded label
-        if not (fm.exposure_s and fm.aperture_f and fm.iso):
-            return None
-        return math.log2(true_exposure(fm.exposure_s) * fm.iso / 100.0 / fm.aperture_f**2)
-
-    ev_ref = _ev(frames[ref]) if ref in frames else None
-    infos = []
-    for fr in alignment["frames"]:
-        i = fr["index"]
-        if i not in frames:
-            print(f"frame #{i} ({fr['file_name']}) is no longer a light frame in the project; skipped")
-            continue
-        if i in rejected:
-            print(f"frame #{i} ({fr['file_name']}) was flagged as off the Moon's track; skipped "
-                  "(use --include-rejected to keep it)")
-            continue
-        ev = _ev(frames[i])
-        ratio = 2.0 ** (ev - ev_ref) if ev is not None and ev_ref is not None else 1.0
-        mx, my = fr["moon_ref"]
-        infos.append(FrameInfo(i, fr["file_name"], ratio, fr["matrix"], mx, my, fr["moon_frame"]["radius"]))
-    if len(infos) < 1:
-        print("nothing to stack")
-        return 1
-    db = _db(args.lensfun_db)
-    library = load_profile_library(args.profile_dir)
-    lights = [frames[f.index] for f in infos]
-    plan = plan_calibration(lights, db, None, lens_name=project.lens_profile or None,
-                            use_lensfun=project.use_lensfun, profiles=library)
-    calibs = {fc.frame_index: fc for fc in plan.frames}
-    cam = db.find_camera(lights[0].camera_make, lights[0].camera_model) if not db.empty else None
-    crop_factor = cam.crop_factor if cam else 1.0
     radii = args.radii if args.radii is not None else (5.0 if args.square else None)
-    params = StackParams(crop_radii=radii, moon_frame=args.moon_frame, hot_pixels=not args.no_hot_pixels)
-    out_dir = Path(args.output) if args.output else path.parent
-    name = args.name or path.stem
-    say = (lambda m: None) if args.quiet else print
-    try:
-        result, _hdr, _w = stack_frames(infos, lambda f: read_mosaic(frames[f.index].path), calibs,
-                                        tuple(alignment["image_size"]), ref, alignment.get("sun"), params,
-                                        out_dir=out_dir, name=name, image_crop=crop_factor, progress=say)
-    except (RuntimeError, ValueError) as exc:
-        print(exc)
-        return 1
-    project.parameters["stack"] = {"align": str(align_path), "radii": radii, "moon_frame": result.moon_frame,
-                                   **result.outputs}
-    project.save(path)
+    opts = StackOptions(align=args.align, output=args.output, name=args.name, radii=radii,
+                        moon_frame=args.moon_frame, include_rejected=args.include_rejected,
+                        hot_pixels=not args.no_hot_pixels, profile_dir=args.profile_dir, lensfun_db=args.lensfun_db)
+    out, code = _run(stack, args.project, opts, quiet=args.quiet)
+    if code:
+        return code
+    result, skipped = out
+    if args.quiet:
+        for msg in skipped:
+            print(msg)
     print()
     print(result.describe())
     return 0
@@ -554,58 +472,28 @@ def _floats(text):
 
 
 def cmd_enhance(args) -> int:
-    import numpy as np
+    from .enhance import EnhanceParams
+    from .workflow import WorkflowError, enhance_project, parse_blend, parse_layers
 
-    from .enhance import EnhanceParams, enhance
-    from .fits import read_fits
-
-    path = Path(args.project)
-    project = EventProject.load(path)
-    stack = project.parameters.get("stack", {})
-    hdr_path = args.hdr or stack.get("hdr")
-    if not hdr_path or not Path(hdr_path).exists():
-        print(f"No HDR stack found{' at ' + hdr_path if hdr_path else ''}; run 'tse stack {path}' first.")
-        return 1
-    weight_path = stack.get("weight") if not args.hdr else str(hdr_path).replace("_hdr.fit", "_weight.fit")
-    layers = tuple(x.strip() for x in args.layers.split(",") if x.strip())
-    bad = [x for x in layers if x not in LAYERS]
-    if bad:
-        print(f"unknown layer(s): {', '.join(bad)}; choose from {', '.join(LAYERS)}")
-        return 1
-    blend = {}
-    if args.blend and args.blend.lower() != "none":
-        try:
-            for item in args.blend.split(","):
-                k, v = item.split("=")
-                blend[k.strip()] = float(v)
-        except ValueError:
-            print("--blend takes layer=weight pairs, for example natural=0.4,fnrgf_n=0.3,adaptive=0.3")
-            return 1
-        bad = [k for k in blend if k not in LAYERS]
-        if bad:
-            print(f"unknown blend layer(s): {', '.join(bad)}; choose from {', '.join(LAYERS)}")
-            return 1
-    data, header = read_fits(hdr_path)
-    hdr = np.ascontiguousarray(np.moveaxis(data, 0, -1)) if data.ndim == 3 else np.repeat(data[..., None], 3, 2)
-    del data
-    if weight_path and Path(weight_path).exists():
-        weight, _ = read_fits(weight_path)
-    else:
-        print("no weight map found; treating every pixel as equally reliable (FNRGF-N noise estimate is rough)")
-        weight = np.ones(hdr.shape[:2], np.float32)
-    if "MOONX" not in header:
-        print(f"{hdr_path} has no Moon/Sun geometry in its header; was it made by 'tse stack'?")
+    try:
+        layers = parse_layers(args.layers)
+        blend = parse_blend(args.blend)
+    except WorkflowError as exc:
+        print(exc)
         return 1
     params = EnhanceParams(layers=layers, segments=args.segments, order=args.order,
                            mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
                            noise_m=args.noise_m, flatten=args.flatten, saturation=args.saturation,
                            white=args.white, blend=blend,
                            neutral_background=not args.keep_background_colour)
-    say = (lambda m: None) if args.quiet else print
-    out_dir = Path(args.output) if args.output else path.parent
-    result, _ = enhance(hdr, weight, header, params, out_dir=out_dir, name=args.name or path.stem, progress=say)
-    project.parameters["enhance"] = {"hdr": str(hdr_path), **result.layers}
-    project.save(path)
+    out, code = _run(enhance_project, args.project, params, hdr_file=args.hdr, output=args.output,
+                     name=args.name, quiet=args.quiet)
+    if code:
+        return code
+    result, notes = out
+    if args.quiet:
+        for n in notes:
+            print(n)
     print()
     print(result.describe())
     return 0
