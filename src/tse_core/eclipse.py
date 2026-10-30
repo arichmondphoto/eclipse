@@ -159,17 +159,9 @@ def update_canon(source: Optional[str | os.PathLike] = None, timeout: float = 12
     if source:
         text = Path(source).read_text(encoding="utf-8", errors="replace")
     else:
-        import ssl
-        import urllib.request
+        from .net import fetch
 
-        try:
-            import certifi
-
-            ctx = ssl.create_default_context(cafile=certifi.where())
-        except ImportError:
-            ctx = ssl.create_default_context()
-        with urllib.request.urlopen(CANON_URL, timeout=timeout, context=ctx) as resp:
-            text = resp.read().decode("utf-8", errors="replace")
+        text = fetch(CANON_URL, timeout=timeout).decode("utf-8", errors="replace")
     eclipses = parse_canon_csv(text)
     if not eclipses:
         raise ValueError("no eclipses found in the canon file")

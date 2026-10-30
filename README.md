@@ -47,14 +47,19 @@ tse doctor                   # shows which readers are available
 tse lensfun-update           # downloads the lensfun lens database once
 ```
 
-If the download fails with a certificate error, run `pip install --upgrade certifi`
-and try again (on macOS you can also run *Install Certificates.command* in the
-Python folder in Applications). Or download
-<https://github.com/lensfun/lensfun/archive/refs/heads/master.zip> in a browser
-and install it offline:
+Downloads check certificates against your system's store (the same
+certificates your browser uses, via the `truststore` package), then
+certifi's list. That way they also work where an antivirus program, a
+company network or a VPN inspects HTTPS traffic, which otherwise shows up as
+"self-signed certificate in certificate chain". Certificate checking is
+never switched off. If a download still fails, download the file in a
+browser and use `--from`:
 
 ```bash
+# https://github.com/lensfun/lensfun/archive/refs/heads/master.zip
 tse lensfun-update --from ~/Downloads/lensfun-master.zip
+# https://eclipse.gsfc.nasa.gov/eclipse_besselian_from_mysqldump2.csv
+tse elements-update --from ~/Downloads/eclipse_besselian_from_mysqldump2.csv
 ```
 
 ### In Siril

@@ -24,7 +24,6 @@ import math
 import os
 import re
 import shutil
-import ssl
 import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
@@ -323,23 +322,21 @@ def default_database_dirs() -> list[Path]:
 def download_database(dest: Optional[str | os.PathLike] = None, timeout: float = 30.0) -> Path:
     """Download the current lensfun XML files from GitHub into the cache.
 
-    Uses certifi's certificate list when it is installed, so it also works
-    with Python installs that cannot see the system certificates (common
-    with the python.org installer on macOS).
+    Certificates are checked against the system store, then certifi's
+    list (see ``net``).
     """
     target = Path(dest) if dest else CACHE_DIR / "lensfun"
     target.mkdir(parents=True, exist_ok=True)
-    ctx = _ssl_context()
+    from .net import fetch
+
     req = urllib.request.Request(GITHUB_DB_API, headers={"Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-        listing = json.load(resp)
+    listing = json.loads(fetch(req, timeout=timeout))
     for item in listing:
         name = item.get("name", "")
         url = item.get("download_url")
         if not name.endswith(".xml") or not url:
             continue
-        with urllib.request.urlopen(url, timeout=timeout, context=ctx) as resp:
-            data = resp.read()
+        data = fetch(url, timeout=timeout)
         ET.fromstring(data)  # refuse to save anything that is not valid XML
         (target / name).write_bytes(data)
     return target
@@ -386,15 +383,6 @@ def _is_lensfun_xml(data: bytes) -> bool:
         return ET.fromstring(data).tag == "lensdatabase"
     except ET.ParseError:
         return False
-
-
-def _ssl_context() -> ssl.SSLContext:
-    try:
-        import certifi
-
-        return ssl.create_default_context(cafile=certifi.where())
-    except ImportError:
-        return ssl.create_default_context()
 
 
 # ---------------------------------------------------------------------------

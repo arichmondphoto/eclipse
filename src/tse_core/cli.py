@@ -272,15 +272,12 @@ def cmd_lensfun_update(args) -> int:
     try:
         path = import_database(args.source, args.dest) if args.source else download_database(args.dest)
     except urllib.error.URLError as exc:
+        from .net import certificate_help
+
         print(f"Download failed: {exc.reason}")
         if "CERTIFICATE" in str(exc.reason).upper():
-            print(
-                "Python could not verify GitHub's certificate. Fix it with either:\n"
-                "  pip install --upgrade certifi      (then run this command again), or\n"
-                "  on macOS, run 'Install Certificates.command' in your Python folder in Applications.\n"
-                "Or download https://github.com/lensfun/lensfun/archive/refs/heads/master.zip in a browser\n"
-                "and run:  tse lensfun-update --from <path to the zip>"
-            )
+            print(certificate_help("https://github.com/lensfun/lensfun/archive/refs/heads/master.zip",
+                                   "tse lensfun-update --from <path to the zip>"))
         return 1
     except (FileNotFoundError, ValueError) as exc:
         print(exc)
@@ -352,8 +349,13 @@ def cmd_elements_update(source=None) -> int:
     try:
         path, n = update_canon(source)
     except urllib.error.URLError as exc:
+        from .net import certificate_help
+
         print(f"Download failed: {exc.reason}")
-        print(f"Download {CANON_URL} in a browser and run: tse elements-update --from <file>")
+        if "CERTIFICATE" in str(exc.reason).upper():
+            print(certificate_help(CANON_URL, "tse elements-update --from <path to the .csv file>"))
+        else:
+            print(f"Download {CANON_URL} in a browser and run: tse elements-update --from <file>")
         return 1
     except (OSError, ValueError) as exc:
         print(exc)
@@ -552,6 +554,12 @@ def cmd_doctor() -> int:
         print(f"exifread: {exifread.__version__}")
     except ImportError:
         print("exifread: not installed (pip install exifread)")
+    try:
+        import truststore  # noqa: F401
+
+        print("certificates: system store (truststore)")
+    except ImportError:
+        print("certificates: certifi only (pip install truststore to use your system's certificates)")
     db = LensfunDatabase.load()
     print(f"lensfun:  {len(db.lenses)} lenses from {len(db.files)} file(s)" if not db.empty else "lensfun:  database not found (run 'tse lensfun-update')")
     return 0

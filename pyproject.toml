@@ -15,6 +15,7 @@ dependencies = [
     "scipy>=1.10",
     "exifread>=3.0",
     "certifi",
+    "truststore>=0.9",  # use the system's certificates (antivirus / company networks)
     "tifffile",
 ]
 
