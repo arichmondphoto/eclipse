@@ -212,9 +212,13 @@ class SunCentre:
     speed_ratio: float  # measured / predicted Moon speed; ~1 when the scale is right
     mirrored: bool
     notes: list[str] = field(default_factory=list)
+    px_per_clock_second: float = 0.0  # how far the centre moves along the track per second of clock error
+    rejected: list[int] = field(default_factory=list)  # input positions left out of the track fit
+    residuals_px: list[float] = field(default_factory=list)  # each frame's distance from the fitted track
     # The answer had the image the other way round (mirrored vs not). The Moon's track cannot
     # tell the two apart, so both are kept; they differ by twice the closest approach of centres.
     other_parity_xy: Optional[tuple[float, float]] = None
+    clock_error_given: bool = False
     parity_difference_px: float = 0.0
 
     def describe(self) -> str:
@@ -226,7 +230,9 @@ class SunCentre:
             f"Image orientation: {'mirrored' if self.mirrored else 'not mirrored'}; east is "
             f"{'clockwise' if self.mirrored else 'counter-clockwise'} from north on the image",
         ]
-        if hi > lo:
+        if self.clock_error_given:
+            lines.append(f"  each second of clock error moves the centre {self.px_per_clock_second:.2f} px along the Moon's track")
+        elif hi > lo:
             lines.append(
                 f"  allowed by 'all frames in totality': {lo:+.0f} to {hi:+.0f} s; "
                 f"along-track uncertainty +/-{self.along_track_uncertainty_px:.1f} px"
@@ -249,12 +255,18 @@ def solve_sun_centre(
     eclipse: LocalEclipse,
     clock_error_s: Optional[float] = None,
     mirrored: bool = False,
+    limb_rms: Optional[Sequence[float]] = None,
 ) -> SunCentre:
     """Sun centre in aligned-image coordinates from the Moon centres over time.
 
     ``times_ut`` are the camera's time stamps converted to UT with the
     camera's own time-zone tag; ``clock_error_s`` (true minus camera) is
     applied on top. Leave it None to bound it by totality.
+
+    ``limb_rms`` (the lunar-limb fit residual of each frame) weights the
+    frames: in long exposures glare from the saturated corona softens the
+    limb and biases the fitted centre. Frames whose Moon lies far off the
+    fitted track (camera shake, a doubled image) are rejected and reported.
     """
     m = np.asarray(moon_xy, dtype=float)
     if len(m) < 2:
@@ -281,24 +293,47 @@ def solve_sun_centre(
 
     P = np.array([[1.0, 0.0], [0.0, -1.0]]) if mirrored else np.array([[-1.0, 0.0], [0.0, -1.0]])
 
+    base_w = np.ones(len(m))
+    if limb_rms is not None:
+        base_w = 1.0 / np.maximum(np.asarray(limb_rms, dtype=float), 0.3) ** 2
+    keep = np.ones(len(m), bool)
+
     def fit(tau_s: float):
         states = [eclipse.state_at(t + timedelta(seconds=tau_s)) for t in t_cam]
         ratio = float(np.mean([s.ratio for s in states]))
         sun_r = moon_radius_px / ratio
         wv = np.array([P @ np.array(s.offset()) for s in states]) * sun_r
-        mc, wc = m.mean(axis=0), wv.mean(axis=0)
+        w = base_w * keep
+        w = w / w.sum()
+        mc, wc = (w[:, None] * m).sum(axis=0), (w[:, None] * wv).sum(axis=0)
         dm, dw = m - mc, wv - wc
-        theta = math.atan2(np.sum(dw[:, 0] * dm[:, 1] - dw[:, 1] * dm[:, 0]), np.sum(dw[:, 0] * dm[:, 0] + dw[:, 1] * dm[:, 1]))
+        theta = math.atan2(np.sum(w * (dw[:, 0] * dm[:, 1] - dw[:, 1] * dm[:, 0])),
+                           np.sum(w * (dw[:, 0] * dm[:, 0] + dw[:, 1] * dm[:, 1])))
         R = np.array([[math.cos(theta), -math.sin(theta)], [math.sin(theta), math.cos(theta)]])
         Hc = mc - R @ wc
         pred = Hc + (R @ wv.T).T
-        rms = float(np.sqrt(np.mean(np.sum((pred - m) ** 2, axis=1))))
-        span_m = np.linalg.norm(dm, axis=1).max()
-        span_w = np.linalg.norm(dw, axis=1).max()
-        speed = float(span_m / span_w) if span_w > 0 else float("nan")
-        return Hc, theta, sun_r, rms, speed, states
+        resid = np.linalg.norm(pred - m, axis=1)
+        rms = float(np.sqrt(np.sum(w * resid**2)))
+        # Measured / predicted speed: least-squares scale between the two tracks.
+        rdw = (R @ dw.T).T
+        denom = float(np.sum(w * np.sum(rdw * rdw, axis=1)))
+        speed = float(np.sum(w * np.sum(dm * rdw, axis=1)) / denom) if denom > 0 else float("nan")
+        return Hc, theta, sun_r, rms, speed, states, resid
 
-    H, theta, sun_r, rms, speed, states = fit(tau)
+    # Reject frames whose Moon is far off the track (shake, doubled image, bad limb fit).
+    for _ in range(5):
+        resid = fit(tau)[6]
+        scale = 1.4826 * float(np.median(resid[keep])) if keep.any() else 0.0
+        new = resid < max(3.0 * scale, 1.5)
+        if new.sum() < 2 or np.array_equal(new, keep):
+            break
+        keep = new
+    rejected = [int(i) for i in np.nonzero(~keep)[0]]
+    if rejected:
+        notes.append(f"{len(rejected)} frame(s) left out of the Moon track: their Moon lies off the track "
+                     "(camera shake, a doubled image, or a poor limb fit)")
+
+    H, theta, sun_r, rms, speed, states, resid = fit(tau)
     H_lo = fit(lo)[0]
     H_hi = fit(hi)[0]
     along = 0.5 * float(np.linalg.norm(H_hi - H_lo)) if clock_error_s is None else 0.0
@@ -328,6 +363,9 @@ def solve_sun_centre(
         rotation_deg=rot, clock_error_s=tau, clock_error_range_s=(lo, hi),
         along_track_uncertainty_px=along, track_rms_px=rms, speed_ratio=speed, mirrored=mirrored, notes=notes,
         other_parity_xy=(float(H_alt[0]), float(H_alt[1])), parity_difference_px=diff,
+        rejected=rejected, residuals_px=[float(r) for r in resid],
+        clock_error_given=clock_error_s is not None,
+        px_per_clock_second=float(np.linalg.norm(fit(tau + 1.0)[0] - H)),
     )
 
 

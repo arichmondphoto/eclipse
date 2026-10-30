@@ -178,7 +178,12 @@ def run_alignment(
             ecl = LocalEclipse(el, site)
             times = [_aware(f) for f in frames]
             sc = solve_sun_centre(times, [fr.moon_ref for fr in out_frames], moon_r_full, ecl,
-                                  clock_error_s=clock_error_s, mirrored=mirrored)
+                                  clock_error_s=clock_error_s, mirrored=mirrored,
+                                  limb_rms=[fr.moon_frame["rms"] for fr in out_frames])
+            for k in sc.rejected:
+                out_frames[k].notes.append(
+                    f"Moon {sc.residuals_px[k]:.1f} px off the track: possible camera shake or a doubled image; "
+                    "inspect this frame")
             sun = asdict(sc)
             sun["text"] = sc.describe()
         except (KeyError, ValueError) as exc:

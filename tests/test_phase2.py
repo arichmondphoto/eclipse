@@ -329,3 +329,26 @@ def test_parity_irrelevant_on_the_central_line():
     moons = _track_parity(ecl, times, (2000.0, 1500.0), 0.0, 413.0, 0.0, mirrored=False)
     sc = solve_sun_centre(times, moons, 413.0 * 1.0547, ecl, clock_error_s=0.0)
     assert sc.parity_difference_px < 1.5 and not any("--mirrored" in n for n in sc.notes)
+
+
+def test_off_track_frames_are_rejected_and_reported():
+    ecl = LocalEclipse(elements_for("2024-04-08"), WAPPAPELLO)
+    start = datetime(2024, 4, 8, 18, 55, 5, tzinfo=timezone.utc)
+    times = [start + timedelta(seconds=4 * k) for k in range(37)]
+    H, sun_r = (3965.0, 2791.0), 413.5
+    moons = [list(p) for p in _track(ecl, times, H, 2.7, sun_r, 117.0)]
+    rng = np.random.default_rng(1)
+    for p in moons:
+        p[0] += rng.normal(0, 0.4)
+        p[1] += rng.normal(0, 0.4)
+    moons[21][1] -= 7.8  # like DSC_9108: a doubled image at 1/5 s
+    moons[34][0] -= 3.1  # like DSC_9131: smeared 2.5 s frame
+    moons[34][1] += 4.9
+    limb = [0.4] * 37
+    limb[34] = 2.9
+    sc = solve_sun_centre(times, [tuple(p) for p in moons], sun_r * ecl.state_at(times[18]).ratio, ecl,
+                          clock_error_s=117.0, limb_rms=limb)
+    assert sc.rejected == [21, 34]
+    assert math.hypot(sc.x - H[0], sc.y - H[1]) < 0.5
+    assert sc.track_rms_px < 0.7 and sc.speed_ratio == pytest.approx(1.0, abs=0.05)
+    assert 0.1 < sc.px_per_clock_second < 0.3

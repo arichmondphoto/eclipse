@@ -82,7 +82,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lon", type=float, help="observing site longitude, east positive (saved in the project)")
     p.add_argument("--elev", type=float, help="observing site elevation, metres")
     p.add_argument("--clock-error", type=float,
-                   help="seconds to add to the camera's UT to get true UT, if known; otherwise bounded from totality")
+                   help="seconds to add to the camera's UT to get true UT, if known (saved in the project); "
+                        "otherwise bounded from totality")
     p.add_argument("--camera-utc-offset", type=float, help="camera time zone, hours, when the files carry none")
     p.add_argument("--mirrored", action=argparse.BooleanOptionalAction, default=None,
                    help="the optics mirror the image (telescope with a star diagonal); saved in the project")
@@ -346,6 +347,8 @@ def cmd_align(args) -> int:
         project.camera_utc_offset_h = args.camera_utc_offset
     if args.mirrored is not None:
         project.mirrored = args.mirrored
+    if args.clock_error is not None:
+        project.clock_error_s = args.clock_error
     inv = project.inventory
     lights = inv.lights()
     db = _db(args.lensfun_db)
@@ -367,7 +370,7 @@ def cmd_align(args) -> int:
     say = (lambda m: None) if args.quiet else print
     try:
         result = run_alignment(lights, default_loader(plan, crop), params, window=args.window, site=site,
-                               clock_error_s=args.clock_error, crop_factor=crop,
+                               clock_error_s=project.clock_error_s, crop_factor=crop,
                                utc_offset_h=project.camera_utc_offset_h, mirrored=project.mirrored,
                                progress=say)
     except RuntimeError as exc:
