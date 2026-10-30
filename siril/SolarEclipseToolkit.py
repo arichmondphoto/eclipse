@@ -810,7 +810,7 @@ class EnhanceTab(StepTab):
             self.layer_checks[k] = c
         self.settings_layout.addWidget(lay)
 
-        blend = QGroupBox("Suggested blend (Soft Light over the natural layer)")
+        blend = QGroupBox("Suggested blend (filter layers in Soft Light over the natural layer)")
         bf = QFormLayout(blend)
         self.blend = {}
         for k, default in (("fnrgf_n", 70), ("adaptive", 50), ("fnrgf", 0), ("nrgf", 0)):
@@ -835,7 +835,7 @@ class EnhanceTab(StepTab):
         tf.addRow(self.keep_sky)
         self.settings_layout.addWidget(tone)
 
-        fn = QGroupBox("FNRGF")
+        fn = QGroupBox("FNRGF (Fourier Normalizing-Radial-Graded Filter)")
         ff = QFormLayout(fn)
         self.order = self._spin(1, 20, 10, "")
         self.order.setToolTip("Fourier order of the circle statistics (paper: 10)")
@@ -879,19 +879,30 @@ class EnhanceTab(StepTab):
         self.outputs: dict = {}
 
         layer_tips = {
-            "natural": "Log stretch with most of the brightness fall-off from the Sun removed. The closest to what "
+            "natural": "Natural: a logarithmic (log) stretch with most of the brightness fall-off from the Sun removed. The closest to what "
                        "the eye saw, and the base layer of the blend. Keeps the colour.",
-            "nrgf": "Normalizing-radial-graded filter (Morgan et al. 2006): every circle around the Sun brought to "
-                    "the same brightness and contrast. Simple and honest; bright streamers stay brighter than "
+            "nrgf": "NRGF = Normalizing-Radial-Graded Filter (Morgan, Habbal & Woo 2006). 'Radial-graded': it "
+                    "works outward from the Sun, circle by circle. 'Normalizing': every circle is brought to "
+                    "the same average brightness and contrast. Simple and honest; bright streamers stay brighter than "
                     "coronal holes at the same height.",
-            "fnrgf": "Fourier NRGF (Druckmüllerová et al. 2011): like NRGF, but contrast is also evened out around "
-                     "each circle, so faint regions get as much contrast as bright streamers at the same height.",
-            "fnrgf_n": "FNRGF-N: FNRGF that discounts the noise, so the faint outer corona is enhanced as strongly "
+            "fnrgf": "FNRGF = Fourier Normalizing-Radial-Graded Filter (Druckmüllerová, Morgan & Habbal 2011). "
+                     "Like NRGF, but the average and contrast are measured in pieces around each circle and "
+                     "smoothed with a Fourier series (a sum of waves around the circle), so contrast is also "
+                     "evened out around each circle, so faint regions get as much contrast as bright streamers at the same height.",
+            "fnrgf_n": "FNRGF-N = FNRGF with Noise compensation (from the same 2011 paper): FNRGF that discounts "
+                       "the noise, so the faint outer corona is enhanced as strongly "
                        "as the inner corona without turning into grain. Usually the best structure layer.",
-            "adaptive": "Fine detail (loops, plumes, streamer edges) at several scales and every direction "
-                        "(multi-scale Gaussian normalization, a successor to Druckmüller's adaptive filter). "
+            "adaptive": "Fine detail (loops, plumes, streamer edges) at several scales and every direction. "
+                        "Method: MGN = Multi-scale Gaussian Normalization (Morgan & Druckmüller 2014), the "
+                        "published successor to Druckmüller's ACHF = Adaptive Circular High-pass Filter. "
                         "Use lightly; it flattens the overall brightness.",
         }
+        for i in range(self.show_layer.count()):
+            k = self.show_layer.itemData(i)
+            if k in layer_tips:
+                self.show_layer.setItemData(i, layer_tips[k], Qt.ItemDataRole.ToolTipRole)
+        _tip(self.show_layer, "Which layer the preview shows. Blend = the suggested mix of the layers. "
+             "Rest the mouse on a layer name in the list, or on its checkbox, for what it is.")
         for k, c in self.layer_checks.items():
             _tip(c, layer_tips[k] + "\n\nTicked layers are written as 16-bit TIFFs by 'Write full-size layers'. "
                  "The preview always shows every layer.")

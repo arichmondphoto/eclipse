@@ -239,6 +239,11 @@ for pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the log image: fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
 | `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light at the given opacities, `--blend natural=1,fnrgf_n=0.7,adaptive=0.5` by default (`--blend none` to skip); the same thing you would do with layers in Photoshop |
 
+**Names used:** NRGF = Normalizing-Radial-Graded Filter; FNRGF = Fourier
+Normalizing-Radial-Graded Filter; FNRGF-N = FNRGF with Noise compensation;
+MGN = Multi-scale Gaussian Normalization; ACHF = Adaptive Circular
+High-pass Filter; HDR = High Dynamic Range (the merged exposures).
+
 The layers are already stretched: each filter maps the linear data to
 display brightness itself (a log stretch for `natural` and `adaptive`, the
 filter's own normalization and a soft S-curve for the NRGF family). Run
