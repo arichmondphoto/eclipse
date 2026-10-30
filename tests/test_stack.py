@@ -218,3 +218,26 @@ def test_cli_stack(tmp_path, monkeypatch, capsys):
     gains = {m["index"]: m["gain"] for m in info["matches"]}
     assert set(gains) == {frames[0].index, frames[1].index, frames[2].index}
     assert gains[frames[2].index] == pytest.approx(4.0, rel=0.02)
+
+
+@pytest.mark.parametrize("seeing", [False, True])
+def test_long_bracket_gains_do_not_drift(seeing):
+    """A 1/3-stop ladder over 4 stops: chained gains stay within 1% at both ends,
+    even when the frames differ in noise and sharpness (regression dilution)."""
+    from scipy import ndimage
+
+    scene = SyntheticScene(size=300, sun_radius=20.0, seed=5)
+    n, ref = 13, 6
+    mos, infos = {}, []
+    for i in range(n):
+        t = 2 ** ((i - ref) / 3)
+        img, m = scene.frame(t * 0.05, 150, 150, 0.2 * (i - ref), 0.1 * (i - ref), noise=False)
+        if seeing:
+            img = ndimage.gaussian_filter(img, 0.3 + 0.12 * i)
+        rng = np.random.default_rng(i)
+        img = rng.poisson(np.clip(img, 0, None) * 2e4) / 2e4 + rng.normal(0, 3e-4, img.shape)
+        mos[i] = mosaic_from(np.minimum(img, 1).astype(np.float32))
+        infos.append(FrameInfo(i, f"f{i}", t, [[1, 0, 0], [0, 1, 0]], m["moon_x"], m["moon_y"], m["moon_r"]))
+    res, _, _ = stack_frames(infos, lambda f: mos[f.index], {}, (300, 300), ref, None, StackParams())
+    for m in res.matches:
+        assert m.gain / m.nominal == pytest.approx(1.0, abs=0.01), m

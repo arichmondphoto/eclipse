@@ -69,3 +69,16 @@ def test_clock_offset_moves_frames_into_totality():
     assert all(f.role == "partial" for f in inv.frames)
     inv.mark_outside(c2, c3, clock_offset_s=3600 + 4 * 60)
     assert all(f.role == "light" for f in inv.frames)
+
+
+def test_true_exposure_snaps_rounded_labels():
+    from tse_core.frames import true_exposure
+
+    assert true_exposure(1 / 30) == pytest.approx(1 / 32)
+    assert true_exposure(1 / 125) == pytest.approx(1 / 128)
+    assert true_exposure(0.6) == pytest.approx(2 ** (-2 / 3))
+    assert true_exposure(1 / 1600) == pytest.approx(2 ** (-32 / 3))
+    assert true_exposure(4.0) == 4.0
+    assert true_exposure(1 / 90) == pytest.approx(2 ** -6.5)  # half-stop camera
+    assert true_exposure(1 / 45) == pytest.approx(2 ** -5.5)
+    assert true_exposure(0.37) == 0.37  # neither ladder: as given

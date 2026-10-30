@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -469,7 +470,14 @@ def cmd_stack(args) -> int:
     if alignment.get("sun") and not args.include_rejected:
         order = [fr["index"] for fr in alignment["frames"]]
         rejected = {order[k] for k in alignment["sun"].get("rejected", [])}
-    ev_ref = frames[ref].exposure_value() if ref in frames else None
+    from .frames import true_exposure
+
+    def _ev(fm):  # light gathered, using the shutter's real time behind its rounded label
+        if not (fm.exposure_s and fm.aperture_f and fm.iso):
+            return None
+        return math.log2(true_exposure(fm.exposure_s) * fm.iso / 100.0 / fm.aperture_f**2)
+
+    ev_ref = _ev(frames[ref]) if ref in frames else None
     infos = []
     for fr in alignment["frames"]:
         i = fr["index"]
@@ -480,7 +488,7 @@ def cmd_stack(args) -> int:
             print(f"frame #{i} ({fr['file_name']}) was flagged as off the Moon's track; skipped "
                   "(use --include-rejected to keep it)")
             continue
-        ev = frames[i].exposure_value()
+        ev = _ev(frames[i])
         ratio = 2.0 ** (ev - ev_ref) if ev is not None and ev_ref is not None else 1.0
         mx, my = fr["moon_ref"]
         infos.append(FrameInfo(i, fr["file_name"], ratio, fr["matrix"], mx, my, fr["moon_frame"]["radius"]))

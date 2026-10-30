@@ -225,6 +225,27 @@ def to_float(value: Any) -> Optional[float]:
         return None
 
 
+def true_exposure(seconds: Optional[float]) -> Optional[float]:
+    """The shutter's real exposure time behind a rounded label.
+
+    Cameras time their 1/3- and 1/2-stop speeds as exact powers of two but
+    label (and often record) them rounded: "1/30" is really 1/32 s, "1/125"
+    is 1/128 s, "0.6" is 0.63 s. A label within 0.1 stop of the 1/3-stop
+    ladder (or within 0.05 stop of the 1/2-stop ladder) is taken as that
+    step; anything else is used as it is.
+    """
+    if not seconds or seconds <= 0:
+        return seconds
+    ev = math.log2(seconds)
+    third = round(ev * 3) / 3
+    if abs(ev - third) <= 0.1:
+        return 2.0 ** third
+    half = round(ev * 2) / 2
+    if abs(ev - half) <= 0.05:
+        return 2.0 ** half
+    return seconds
+
+
 def format_exposure(seconds: Optional[float]) -> str:
     """Human-readable shutter speed: 1/1600, 1/2.5, 0.6, 4."""
     if not seconds:

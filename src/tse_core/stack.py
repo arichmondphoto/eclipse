@@ -53,6 +53,8 @@ class StackParams:
     noise_floor: float = 0.002  # read-noise term in the weights, in full-scale units
     match_scale: int = 4  # brightness matching on images reduced by this factor
     match_range: tuple[float, float] = (0.003, 0.85)  # usable values for matching
+    match_smooth: float = 2.0  # blur (reduced px) before matching, so seeing/shake differences don't bias gains
+    match_strong: float = 0.02  # gains from pixels above this level in both frames
     hot_pixels: bool = True
     moon_frame: Optional[int] = None  # frame index whose Moon is kept; None = the alignment reference
 
@@ -202,6 +204,48 @@ def robust_line(x: np.ndarray, y: np.ndarray, iters: int = 8) -> tuple[float, fl
     return float(a), float(b), int((w > 0).sum())
 
 
+def pair_gain(vi: np.ndarray, vj: np.ndarray, strong: float = 0.02,
+              value_range: tuple[float, float] = (0.003, 0.85)) -> tuple[float, float, int]:
+    """Brightness relation vj = a * vi + b between two aligned frames.
+
+    A least-squares slope is biased low whenever one frame is noisier or
+    blurrier than the other (errors in the x values), and across a chain of
+    30 brackets that adds up to several percent. So the slope comes from the
+    median ratio of well-exposed pixels, which is symmetric in the two
+    frames; the line fit only supplies the small offset. Pixels are chosen
+    by their mean brightness across both frames, not by either frame alone,
+    because cutting on one noisy frame biases the ratio.
+
+    ``vi`` and ``vj`` are the pixels usable in both (unsaturated, off the Moon).
+    """
+    lo, hi = value_range
+    sel = (vi > lo) & (vi < hi) & (vj > lo) & (vj < hi)
+    if sel.sum() < 50:
+        return float("nan"), float("nan"), int(sel.sum())
+    a0, b, n = robust_line(vi[sel], vj[sel])
+    if not (math.isfinite(a0) and a0 > 0):
+        return a0, b, n
+    u = 0.5 * (a0 * vi + vj)  # in frame j's units
+    top = 0.9 * hi
+    good = (u > strong) & (u / a0 > strong) & (u < top) & (u / a0 < top)
+    if good.sum() < 50:
+        return a0, b, n
+    xi, xj, uu = vi[good], vj[good], u[good]
+    a = float(np.exp(np.median(np.log(np.clip(xj - b, 1e-9, None) / xi))))
+    w = np.ones_like(xi)
+    for _ in range(4):
+        # Ratio of (weighted) sums: linear in both frames, so noise does not bias it, and
+        # sharpness differences only move light between pixels. Outliers (hot pixels, a
+        # prominence that changed, residual Moon edge) are down-weighted symmetrically.
+        r = (xj - b - a * xi) / uu
+        sc = 1.4826 * np.median(np.abs(r)) + 1e-9
+        t = r / (4.685 * sc)
+        w = np.where(np.abs(t) < 1, (1 - t**2) ** 2, 0.0)
+        a = float((w * (xj - b)).sum() / (w * xi).sum())
+        b = float(np.median(vj[sel] - a * vi[sel]))
+    return a, b, int((w > 0).sum())
+
+
 def match_exposures(reduced: dict[int, tuple[np.ndarray, np.ndarray]], infos: dict[int, FrameInfo], ref: int,
                     params: StackParams, say: Say) -> dict[int, Match]:
     """Chain robust fits between neighbouring exposures to get g_i and c_i relative to ``ref``."""
@@ -215,10 +259,16 @@ def match_exposures(reduced: dict[int, tuple[np.ndarray, np.ndarray]], infos: di
     def pair(i: int, j: int) -> tuple[float, float, int]:
         vi, oki = reduced[i]
         vj, okj = reduced[j]
-        sel = oki & okj & (vi > lo_v) & (vi < hi_v) & (vj > lo_v) & (vj < hi_v)
-        if sel.sum() < 50:
-            return float("nan"), float("nan"), int(sel.sum())
-        return robust_line(vi[sel].astype(np.float64), vj[sel].astype(np.float64))
+        both = oki & okj
+        if params.match_smooth > 0:
+            # Blur both frames identically (same mask) to even out sharpness differences, and
+            # keep only pixels whose blur kernel lies wholly inside the common mask.
+            sm = params.match_smooth
+            vi = ndimage.gaussian_filter(np.where(both, vi, 0.0), sm)
+            vj = ndimage.gaussian_filter(np.where(both, vj, 0.0), sm)
+            both = ~ndimage.binary_dilation(~both, iterations=int(math.ceil(3 * sm)))
+        return pair_gain(vi[both].astype(np.float64), vj[both].astype(np.float64), params.match_strong,
+                         params.match_range)
 
     k = pos[ref]
     for direction in (1, -1):
