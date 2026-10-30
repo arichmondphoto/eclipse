@@ -434,6 +434,16 @@ def stack_frames(
                      "filled from the shortest exposure that shows them (may be clipped)")
     if nodata:
         notes.append(f"{nodata} pixel(s) near the frame edges are outside every aligned frame; set to zero")
+    bad = bad_edge_lines(hdr.mean(axis=2), weight)
+    if any(bad.values()):
+        t, b_, l_, r_ = bad["top"], bad["bottom"], bad["left"], bad["right"]
+        for sl in ((slice(0, t), slice(None)), (slice(ch - b_, ch), slice(None)),
+                   (slice(None), slice(0, l_)), (slice(None), slice(cw - r_, cw))):
+            if sl[0] != slice(0, 0) and sl[1] != slice(0, 0):
+                hdr[sl] = 0.0
+                weight[sl] = 0.0
+        notes.append("edge rows/columns that are not image removed (weight 0): "
+                     + ", ".join(f"{k} {v}" for k, v in bad.items() if v))
 
     outputs = {}
     if out_dir is not None:
@@ -441,6 +451,45 @@ def stack_frames(
                                 wb=wb)
     result = StackResult(crop, [matches[i] for i in sorted(matches)], moon_frame, sun, outputs, notes)
     return result, hdr, weight
+
+
+def bad_edge_lines(lum: np.ndarray, weight: np.ndarray, max_lines: int = 32, tol: float = 0.25) -> dict:
+    """Count the outermost rows/columns on each side that are not image.
+
+    RAW files often carry a few columns or rows at the sensor edge that are
+    masked, partly covered or simply wrong (on a D850 the last column reads
+    several times too bright). In a smooth sky they stand out from their
+    neighbours far more than neighbouring lines ever differ. Each side is
+    walked inwards while a line differs from the median of the next eight
+    lines by more than ``tol`` (relative) and by more than 8 times the typical
+    line-to-line difference further in.
+    """
+    out = {}
+    h, w = lum.shape
+    for side in ("top", "bottom", "left", "right"):
+        if side in ("top", "bottom"):
+            lines = lum if side == "top" else lum[::-1]
+            wl = weight if side == "top" else weight[::-1]
+        else:
+            lines = lum.T if side == "left" else lum.T[::-1]
+            wl = weight.T if side == "left" else weight.T[::-1]
+        n = min(max_lines + 16, lines.shape[0] // 4)
+        med = np.array([np.median(lines[i][wl[i] > 0]) if (wl[i] > 0).sum() > 10 else np.nan for i in range(n)])
+        if not np.isfinite(med[max_lines // 2:]).any():
+            out[side] = 0
+            continue
+        steps = np.abs(np.diff(med[max_lines // 2:]))
+        typical = float(np.nanmedian(steps)) if np.isfinite(steps).any() else 0.0
+        count = 0
+        for i in range(min(max_lines, n - 9)):
+            ref = np.nanmedian(med[i + 1:i + 9])
+            d = abs(med[i] - ref) if np.isfinite(med[i]) else 0.0
+            if np.isfinite(ref) and d > tol * abs(ref) and d > 8 * typical:
+                count = i + 1
+            else:
+                break
+        out[side] = count
+    return out
 
 
 # ---------------------------------------------------------------------------

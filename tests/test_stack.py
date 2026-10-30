@@ -241,3 +241,17 @@ def test_long_bracket_gains_do_not_drift(seeing):
     res, _, _ = stack_frames(infos, lambda f: mos[f.index], {}, (300, 300), ref, None, StackParams())
     for m in res.matches:
         assert m.gain / m.nominal == pytest.approx(1.0, abs=0.01), m
+
+
+def test_bad_edge_lines():
+    from tse_core.stack import bad_edge_lines
+
+    yy, xx = np.mgrid[0:200, 0:300]
+    lum = (0.01 + 0.002 * xx / 300 + 0.001 * yy / 200).astype(np.float32)
+    lum += np.random.default_rng(0).normal(0, 1e-4, lum.shape).astype(np.float32)
+    weight = np.ones_like(lum)
+    assert bad_edge_lines(lum, weight) == {"top": 0, "bottom": 0, "left": 0, "right": 0}
+    lum[:, -1] *= 6.0  # a D850-style bad last column
+    lum[:, -2] *= 1.8
+    lum[0, :] = 0.0003  # a dark masked row
+    assert bad_edge_lines(lum, weight) == {"top": 1, "bottom": 0, "left": 0, "right": 2}

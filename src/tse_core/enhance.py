@@ -616,8 +616,10 @@ def white_balance(rgb: np.ndarray, r: np.ndarray, valid: np.ndarray, g: Geometry
     return (m / m[1]).astype(np.float32)
 
 
-def chroma(rgb: np.ndarray, lum: np.ndarray, valid: np.ndarray, noise: np.ndarray, saturation: float) -> np.ndarray:
-    """Smoothed colour ratios rgb/lum, faded to grey where the signal is buried in noise."""
+def chroma(rgb: np.ndarray, lum: np.ndarray, valid: np.ndarray, noise: np.ndarray, saturation: float,
+           colour_floor: float = 0.0) -> np.ndarray:
+    """Smoothed colour ratios rgb/lum, faded to grey where the signal is buried in noise or is
+    not clearly brighter than ``colour_floor`` (the uncertainty of the removed sky)."""
     out = np.ones_like(rgb)
     if saturation <= 0:
         return out
@@ -628,6 +630,8 @@ def chroma(rgb: np.ndarray, lum: np.ndarray, valid: np.ndarray, noise: np.ndarra
             out[..., c] = np.clip(np.nan_to_num(sc / sl, nan=1.0), 0.3, 3.0)
     snr = np.where(noise > 0, lum / np.maximum(noise, 1e-12) / 3.0, 10.0)
     fade = np.clip(snr / 20.0, 0.0, 1.0) * saturation
+    if colour_floor > 0:
+        fade *= np.clip((lum / colour_floor - 1.0) / 4.0, 0.0, 1.0)
     out = 1.0 + (out - 1.0) * fade[..., None]
     out /= np.maximum(out.mean(axis=2, keepdims=True), 1e-6)  # keep luminance
     return out.astype(np.float32)
@@ -705,7 +709,9 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     say(f"{int((valid & ~stats_valid).sum())} pixels in dust spots or stars left out of the circle statistics")
     noise = noise_map(lum, weight, valid)
     nlev = float(np.median(noise[valid & (noise > 0)])) if (valid & (noise > 0)).any() else 0.0
-    col = chroma(rgb, lum, valid, noise, p.saturation)
+    # Per-channel sky offsets are only known to about their own size; where the corona is no
+    # brighter than that, its colour cannot be trusted and is shown grey.
+    col = chroma(rgb, lum, valid, noise, p.saturation, colour_floor=2.0 * float(np.abs(bg).max()))
     del rgb
 
     order = p.order

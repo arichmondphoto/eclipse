@@ -180,7 +180,9 @@ inner corona. Inside the Moon as it was in the Moon frame (the alignment
 reference unless `--moon-frame` says otherwise) the result is that frame's
 data, which keeps the lunar limb sharp. Pixels that are saturated or covered
 in every frame (rare with 1/3-stop brackets) take the shortest exposure that
-shows them and are counted in the report.
+shows them and are counted in the report. Rows and columns at the frame edge
+that are not image (a D850's last column reads several times too bright) are
+detected and given zero weight.
 
 Frames the Sun-centre fit flagged as off the Moon's track are skipped
 unless `--include-rejected` is given.
@@ -305,6 +307,13 @@ Set `TSE_SAMPLE_RAWS` to a folder of sample RAW files to also test the
 metadata readers on real files. Development uses only the 2024 data; the
 2017 set is held back as a blind test of the finished tool.
 
+
+`tests/test_real_data.py` runs the enhancement on real data: the 2024 stack
+from Lake Wappapello, binned 8 x 8 (`tests/data/eclipse2024_bin8.npz`,
+3.6 MB). It keeps the problems synthetic data missed (non-image edge
+columns, an uneven twilight sky with a negative red level, corona reaching
+the frame edges, dust and stars) and checks for rings, a bright sky and
+colour casts. The 2017 set is reserved as a blind test and must not be added.
 ## Licence
 
 MIT, see `LICENSE`.
