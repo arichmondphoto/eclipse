@@ -572,6 +572,21 @@ class AlignTab(StepTab):
         f2.addRow(self.any_angle)
         self.settings_layout.addWidget(opts)
 
+        _tip(self.lat, "Observing site latitude in degrees, north positive. With the longitude, elevation and "
+             "time, it gives the Moon's path across the Sun, which locates the Sun's true centre (needed by the "
+             "enhancement filters).", form)
+        _tip(self.lon, "Observing site longitude in degrees, east positive (west of Greenwich is negative).", form)
+        _tip(self.elev, "Site elevation above sea level in metres. A rough value is fine.", form)
+        _tip(self.tz, "The camera's time zone in hours (for example -6 for CST), used only when the RAW files do "
+             "not record it.", form)
+        _tip(self.clock, "Seconds to add to the camera's clock to get true time, if you know it (for example 117 "
+             "when the camera ran 117 s slow). Leave blank to have it worked out from the Moon's motion.", form)
+        _tip(self.mirrored, "Tick for telescopes used with a star diagonal, which mirror the image. Camera lenses "
+             "do not. It changes where the Sun's centre is computed to be.")
+        _tip(self.rotation, "Field rotation between frames. drift (default): a smooth change over time, right "
+             "for tracking mounts. per-frame: measured separately for each frame. none: no rotation.", f2)
+        _tip(self.any_angle, "Search for large rotations and scale changes, for example from an alt-az mount. "
+             "Slower; leave off for tracking mounts.")
         run = QPushButton("Align frames")
         run.clicked.connect(self.run)
         self.run_buttons.append(run)
@@ -683,6 +698,17 @@ class StackTab(StepTab):
         f.addRow(self.hot)
         self.settings_layout.addWidget(opts)
 
+        _tip(self.full, "The output is the same size as the RAW files, so it lines up with your originals in "
+             "Photoshop and keeps streamers out to the frame edges. Needs about 3-4 GB of memory.")
+        _tip(self.square, "Only a square around the Sun: about three times quicker and smaller.")
+        _tip(self.radii, "Size of the square: solar radii from the Sun's centre to the edge (5 = a square 10 solar "
+             "radii wide).")
+        _tip(self.moon_frame, "Inside the lunar disc the stack keeps one frame's data, so the limb stays sharp and "
+             "in one place. Default: the alignment reference. A longer exposure shows more earthshine.", f)
+        _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken or "
+             "doubled and are left out. Tick to stack them anyway.")
+        _tip(self.hot, "Replace single hot or dead pixels with their neighbours' median. Real stars and "
+             "prominences, which cover several pixels, are left alone.")
         run = QPushButton("Stack frames")
         run.clicked.connect(self.run)
         self.run_buttons.append(run)
@@ -851,6 +877,66 @@ class EnhanceTab(StepTab):
         self.view = ImageView()
         self.results_layout.addWidget(self.view, 1)
         self.outputs: dict = {}
+
+        layer_tips = {
+            "natural": "Log stretch with most of the brightness fall-off from the Sun removed. The closest to what "
+                       "the eye saw, and the base layer of the blend. Keeps the colour.",
+            "nrgf": "Normalizing-radial-graded filter (Morgan et al. 2006): every circle around the Sun brought to "
+                    "the same brightness and contrast. Simple and honest; bright streamers stay brighter than "
+                    "coronal holes at the same height.",
+            "fnrgf": "Fourier NRGF (Druckmüllerová et al. 2011): like NRGF, but contrast is also evened out around "
+                     "each circle, so faint regions get as much contrast as bright streamers at the same height.",
+            "fnrgf_n": "FNRGF-N: FNRGF that discounts the noise, so the faint outer corona is enhanced as strongly "
+                       "as the inner corona without turning into grain. Usually the best structure layer.",
+            "adaptive": "Fine detail (loops, plumes, streamer edges) at several scales and every direction "
+                        "(multi-scale Gaussian normalization, a successor to Druckmüller's adaptive filter). "
+                        "Use lightly; it flattens the overall brightness.",
+        }
+        for k, c in self.layer_checks.items():
+            _tip(c, layer_tips[k] + "\n\nTicked layers are written as 16-bit TIFFs by 'Write full-size layers'. "
+                 "The preview always shows every layer.")
+        blend_tip = ("How strongly this layer is applied in Soft Light over the natural layer in the suggested "
+                     "blend, like layer opacity in Photoshop. 0 % leaves it out.\n\nSoft Light treats mid-grey as "
+                     "'no change', so the filter layers add structure without lifting the dark sky. "
+                     "Defaults: FNRGF-N 70 %, adaptive 50 %. Lower them for a more natural look.")
+        for k, sp in self.blend.items():
+            _tip(sp, f"{LAYER_NAMES[k]}: " + blend_tip, bf)
+        _tip(self.flatten, "How much of the corona's brightness fall-off from the Sun the natural layer removes, "
+             "from 0 (none: a plain log stretch, the inner corona dominates) to 1 (all of it: equal brightness at "
+             "every height).\n\nDefault 0.8. Lower it (0.5-0.7) to keep more of the natural fall-off; raise it "
+             "to show more of the outer corona. It stops where the corona sinks into the noise, so the sky stays "
+             "dark.", tf)
+        _tip(self.saturation, "Colour strength in every layer: 0 = black and white, 1 = the measured colour, "
+             "above 1 = stronger. Colour fades to grey on its own where the corona is too faint for its colour to "
+             "be trusted.", tf)
+        _tip(self.white, "corona (default): the inner corona, 1.2-2.5 solar radii, is made white. Its light is "
+             "sunlight scattered by electrons, so it really is white, which makes this the most reliable "
+             "choice.\n\ncamera: the camera's as-shot white balance.\n\nnone: raw camera colour (looks green).",
+             tf)
+        _tip(self.keep_sky, "By default the sky (twilight glow, its gradient across the frame and small "
+             "black-level offsets) is modelled for each colour and removed before filtering; otherwise the "
+             "filters turn it into arcs and colour casts. Tick this to compare without it.")
+        _tip(self.order, "How closely FNRGF's 'local average' follows brightness changes around each circle.\n\n"
+             "Lower (3-6): bright streamers stay clearly brighter than dark coronal holes; closer to plain NRGF, "
+             "with more of the corona's overall shape.\n\nHigher (14-20): faint regions are boosted to match "
+             "bright ones. Too high and the streamers count as part of the average and get subtracted, so they "
+             "look flat and blotchy.\n\nDefault 10 (the value in the FNRGF paper). Lower it if the result looks "
+             "too uniform; raise it if dim regions beside bright streamers still look empty. If you go above "
+             "about 15, raise Segments too.", ff)
+        _tip(self.segments, "How finely each circle is divided to measure its average and contrast. 50 means "
+             "pieces of 7.2 degrees.\n\nMore segments: finer but noisier measurements. Fewer: smoother.\n\n"
+             "Default 50 (the FNRGF paper). Rarely needs changing, but it must stay well above 2 x Order + 1 "
+             "(21 at order 10): at order 20, use about 80-100.", ff)
+        _tip(self.noise_m, "How much of the noise is discounted when FNRGF-N measures contrast, 0 to 0.99.\n\n"
+             "Far from the Sun much of the measured variation is just noise, so plain FNRGF under-enhances the "
+             "faint outer corona. This subtracts the estimated noise first.\n\n0: plain FNRGF, smooth but weak "
+             "far out. Higher (0.8-0.95): more faint streamers and plumes, and more grain.\n\nDefault 0.7. This "
+             "is the main setting to try: compare 0.5 and 0.9 in the preview. Stacks of many frames can go "
+             "higher; noisier ones may need 0.3-0.5.", ff)
+        _tip(self.preview_btn, "Runs every layer on a reduced copy of the stack (about 1400 px wide), in seconds. "
+             "Nothing is written.")
+        _tip(self.run_btn, "Runs the ticked layers at full resolution and writes them, plus the blend, as "
+             "16-bit TIFFs next to the project file. Takes a few minutes for a full frame.")
 
     def _spin(self, lo, hi, val, suffix) -> QSpinBox:
         sp = QSpinBox()
@@ -1091,6 +1177,16 @@ class MainWindow(QMainWindow):
             self.link.siril.cmd("load", f'"{path}"')
         except Exception as exc:
             QMessageBox.warning(self, "Solar Eclipse Toolkit", f"Siril could not open the file:\n{exc}")
+
+
+def _tip(widget, text: str, form=None) -> None:
+    """Hover help on a control and on its label. Rich text so Qt wraps long tips."""
+    html = "<p>" + text.replace("\n\n", "</p><p>") + "</p>"
+    widget.setToolTip(html)
+    if form is not None:
+        label = form.labelForField(widget)
+        if label is not None:
+            label.setToolTip(html)
 
 
 def _mono() -> QFont:
