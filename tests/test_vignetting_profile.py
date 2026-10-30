@@ -142,3 +142,18 @@ def test_user_profile_matches_frames_read_by_either_reader():
         f = make_frames(["1/100"])[0]
         f.lens_model = name
         assert match_profile(f, [prof]) is prof
+
+
+def test_no_lensfun_warning_when_profile_covers_every_frame(lens_db):
+    frames = make_frames(ECLIPSE_2024)
+    for f in frames:
+        f.lens_model, f.lens_spec = "80-400mm f/4.5-5.6 D VR", [80, 400, 4.5, 5.6]
+    prof = VignettingProfile("80-400mm f/4.5-5.6 D VR", 400, 8, (-0.0713, -0.07298, 0.04993), {}, 1.0)
+    plan = plan_calibration(frames, lens_db, profiles=[prof])
+    assert {fc.vignetting for fc in plan.frames} == {"profile"}
+    assert plan.warnings == [] and plan.lens is None
+    assert "Lens profile: not chosen" not in plan.describe()
+    # Without the profile, the D lens warning must not point at another maker's lens.
+    plan = plan_calibration(frames, lens_db)
+    text = " ".join(plan.warnings)
+    assert "no vignetting data" in text and "Sigma" not in text and "tse flat-profile" in text

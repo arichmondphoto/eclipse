@@ -82,7 +82,9 @@ class CalibrationPlan:
         own = sorted({fc.lens_label for fc in self.frames if fc.vignetting == "profile"})
         for label in own:
             lines.append(f"Own-flats profile: {label}")
-        if self.lens:
+        if own and not self.lens and not self.lens_candidates:
+            pass
+        elif self.lens:
             lines.append(f"Lens profile: {self.lens.label()} ({self.lens.source_file})")
         elif self.lens_candidates:
             lines.append("Lens profile: not chosen; candidates: " + "; ".join(self.lens_candidates))
@@ -135,8 +137,15 @@ def plan_calibration(
     flat_groups = _group(calib.flats, lambda f: _flat_key(f))
     bias_groups = _group(calib.bias, lambda f: _iso_key(f))
 
+    # lensfun is only consulted for frames that no profile or flat covers.
+    def covered(f: FrameMeta) -> bool:
+        return profile is not None or _flat_key(f) in flat_groups or bool(profiles and match_profile(f, profiles))
+
+    needs_lensfun = any(not covered(f) for f in lights)
     lens, candidates = None, []
-    if use_lensfun and db is not None and not db.empty:
+    if not needs_lensfun:
+        pass
+    elif use_lensfun and db is not None and not db.empty:
         lens, candidates, lens_warning = choose_lens(lights, db, lens_name)
         if lens_warning:
             warnings.append(lens_warning)
@@ -242,9 +251,18 @@ def choose_lens(
     if best.score - runner_up < 1.0:
         return None, labels, f"lens '{name}' matches several profiles equally well; choose one"
     if not best.lens.has_vignetting:
-        others = [m.lens.label() for m in matches[1:] if m.lens.has_vignetting]
+        # Only suggest another profile from the same maker: a Sigma or Tokina
+        # profile is never right for a lens the camera reports as a Nikkor.
+        maker_word = (maker or "").lower().split(" ")[0]
+        others = [
+            m.lens.label() for m in matches[1:]
+            if m.lens.has_vignetting and maker_word and m.lens.maker.lower().startswith(maker_word)
+        ]
         hint = f"; if your lens is the {others[0]}, choose it with --lens \"{others[0]}\"" if others else ""
-        return None, labels, f"'{best.lens.label()}' has no vignetting data in lensfun{hint}"
+        return None, labels, (
+            f"'{best.lens.label()}' has no vignetting data in lensfun{hint}; "
+            "or shoot flats and run 'tse flat-profile'"
+        )
     return best.lens, labels, ""
 
 
