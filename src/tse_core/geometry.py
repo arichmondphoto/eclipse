@@ -212,6 +212,10 @@ class SunCentre:
     speed_ratio: float  # measured / predicted Moon speed; ~1 when the scale is right
     mirrored: bool
     notes: list[str] = field(default_factory=list)
+    # The answer had the image the other way round (mirrored vs not). The Moon's track cannot
+    # tell the two apart, so both are kept; they differ by twice the closest approach of centres.
+    other_parity_xy: Optional[tuple[float, float]] = None
+    parity_difference_px: float = 0.0
 
     def describe(self) -> str:
         lo, hi = self.clock_error_range_s
@@ -219,11 +223,19 @@ class SunCentre:
             f"Sun centre: x={self.x:.2f}, y={self.y:.2f} px (radius {self.radius_px:.1f} px, {self.arcsec_per_px:.3f}\"/px)",
             f"Celestial north is {self.rotation_deg:+.2f} deg from image up (positive = towards image right)",
             f"Camera clock error used: {self.clock_error_s:+.1f} s (true UT minus camera UT)",
+            f"Image orientation: {'mirrored' if self.mirrored else 'not mirrored'}; east is "
+            f"{'clockwise' if self.mirrored else 'counter-clockwise'} from north on the image",
         ]
         if hi > lo:
             lines.append(
                 f"  allowed by 'all frames in totality': {lo:+.0f} to {hi:+.0f} s; "
                 f"along-track uncertainty +/-{self.along_track_uncertainty_px:.1f} px"
+            )
+        if self.other_parity_xy is not None and self.parity_difference_px > max(2.0, 0.005 * self.radius_px):
+            ox, oy = self.other_parity_xy
+            lines.append(
+                f"If the optics {'do not ' if self.mirrored else ''}mirror the image, the Sun centre would be at "
+                f"x={ox:.2f}, y={oy:.2f} ({self.parity_difference_px:.1f} px away)"
             )
         lines.append(f"Moon track fit residual {self.track_rms_px:.2f} px; measured/predicted Moon speed {self.speed_ratio:.3f}")
         lines += [f"Note: {n}" for n in self.notes]
@@ -298,10 +310,24 @@ def solve_sun_centre(
     # Image "up" is -y. North vector on the image is R @ P @ (0, 1).
     north = np.array([[math.cos(theta), -math.sin(theta)], [math.sin(theta), math.cos(theta)]]) @ P @ np.array([0.0, 1.0])
     rot = math.degrees(math.atan2(north[0], -north[1]))
+    # Same fit with the other image parity.
+    P_alt = np.array([[-1.0, 0.0], [0.0, -1.0]]) if mirrored else np.array([[1.0, 0.0], [0.0, -1.0]])
+    P_keep = P
+    P = P_alt
+    H_alt = fit(tau)[0]
+    P = P_keep
+    diff = float(np.linalg.norm(H_alt - H))
+    # Below about 0.5 % of the solar radius (or 2 px) the difference does not matter in practice.
+    if diff > max(2.0, 0.005 * sun_r) and not mirrored:
+        notes.append(
+            f"the Sun's centre depends on whether your optics mirror the image ({diff:.1f} px apart here). "
+            "Camera lenses do not; telescopes with a star diagonal do: use --mirrored for those"
+        )
     return SunCentre(
         x=float(H[0]), y=float(H[1]), radius_px=float(sun_r), arcsec_per_px=sun_arcsec / sun_r,
         rotation_deg=rot, clock_error_s=tau, clock_error_range_s=(lo, hi),
         along_track_uncertainty_px=along, track_rms_px=rms, speed_ratio=speed, mirrored=mirrored, notes=notes,
+        other_parity_xy=(float(H_alt[0]), float(H_alt[1])), parity_difference_px=diff,
     )
 
 

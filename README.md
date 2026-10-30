@@ -118,9 +118,26 @@ Measured accuracy: about 0.1 px (full resolution) on copies of a real D850
 frame up to four stops apart, and 0.1 px on synthetic brackets spanning 8
 stops with a moving Moon. A 37-frame bracket takes several minutes.
 
-Bundled Besselian elements: 2017 Aug 21, 2024 Apr 08, 2026 Aug 12 and
-2027 Aug 02 (reduced precision). Add others to
-`src/tse_core/data/besselian.json` or pass `--elements`.
+**Any eclipse, any site.** Elements from NASA's eclipse bulletins are
+bundled for 2017, 2024, 2026 and 2027. For every other eclipse from 1600 to
+2400, the tool downloads NASA's Five Millennium Canon once (about 6 MB) the
+first time it needs it, or on request:
+
+```bash
+tse elements-update                    # download NASA's catalogue now
+tse elements-update --from canon.csv   # or install a copy downloaded in a browser
+```
+
+**Any focal length.** The tangential filter length, mask softness and
+analysis window follow the Sun's size in the image (tested from a 20 px to a
+180 px solar radius); `--rho` and `--window` override them.
+
+**Mirrored optics.** Camera lenses give a true image; telescopes with a star
+diagonal give a mirror image. The Moon's track cannot tell the two apart,
+and the choice moves the computed Sun centre by twice the closest approach
+of the Sun's and Moon's centres: negligible near the central line, tens of
+pixels near the edge of the path. Use `--mirrored` for mirrored optics; the
+tool reports both answers and warns when the difference matters.
 
 `inventory` prints the frame table, the detected brackets (step size, range,
 missing shutter speeds), and the calibration plan: which vignetting source

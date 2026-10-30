@@ -17,7 +17,7 @@ from typing import Callable, Optional, Sequence
 
 import numpy as np
 
-from .align import AlignFrame, AlignParams, FrameAlignment, Transform, align_sequence
+from .align import AlignFrame, AlignParams, FrameAlignment, Transform, align_sequence, auto_window
 from .calibration import CalibrationPlan, FrameCalibration
 from .eclipse import LocalEclipse, Site, elements_for
 from .frames import FrameMeta
@@ -85,11 +85,12 @@ def run_alignment(
     frames: Sequence[FrameMeta],
     loader: Loader,
     params: Optional[AlignParams] = None,
-    window: int = 2048,
+    window: Optional[int] = None,
     site: Optional[Site] = None,
     clock_error_s: Optional[float] = None,
     crop_factor: float = 1.0,
     utc_offset_h: Optional[float] = None,
+    mirrored: bool = False,
     progress: Optional[Callable[[str], None]] = None,
 ) -> AlignmentResult:
     """Align the light frames; ``utc_offset_h`` is the camera's time zone when EXIF has none."""
@@ -121,7 +122,8 @@ def run_alignment(
     # 2. Common window around the Moon.
     cx = float(np.median([m.x for m in moons]))
     cy = float(np.median([m.y for m in moons]))
-    size = min(window, h, w)
+    sun_r = float(np.median([m.radius for m in moons])) / 1.04
+    size = auto_window(sun_r, w, h) if window is None else min(window, h, w)
     size -= size % 2
     x0 = int(round(cx)) - size // 2
     y0 = int(round(cy)) - size // 2
@@ -176,7 +178,7 @@ def run_alignment(
             ecl = LocalEclipse(el, site)
             times = [_aware(f) for f in frames]
             sc = solve_sun_centre(times, [fr.moon_ref for fr in out_frames], moon_r_full, ecl,
-                                  clock_error_s=clock_error_s)
+                                  clock_error_s=clock_error_s, mirrored=mirrored)
             sun = asdict(sc)
             sun["text"] = sc.describe()
         except (KeyError, ValueError) as exc:

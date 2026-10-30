@@ -35,6 +35,7 @@ class EventProject:
     longitude: Optional[float] = None  # east positive
     elevation_m: float = 0.0
     camera_utc_offset_h: Optional[float] = None  # only needed when the files carry no time zone
+    mirrored: bool = False  # optics give a mirror image (e.g. a telescope with a star diagonal)
 
     lens_profile: str = ""  # forced lensfun lens label, empty = automatic
     use_lensfun: bool = True

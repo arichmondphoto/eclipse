@@ -50,7 +50,7 @@ from .geometry import MoonFit, find_moon
 
 @dataclass
 class AlignParams:
-    rho: float = 8.0  # tangential blur, px of arc length (paper: 8-16)
+    rho: Optional[float] = None  # tangential blur, px of arc length; None = from the Sun's size (see scaled_params)
     p_frac: float = 0.0005  # damping, fraction of the largest Fourier amplitude (paper: 0.01-0.1 %)
     sigma_frac: Optional[float] = None  # low-pass, fraction of the window width; None = choose automatically
     # Low-pass widths to try, as fractions of the window. Above ~0.16 the peak is narrower than a
@@ -59,7 +59,7 @@ class AlignParams:
     epsilon: float = 4.0  # sub-pixel centroid radius (paper: 3-5)
     moon_margin: float = 0.06  # mask the Moon out to (1 + margin) * radius
     edge_margin: float = 0.04  # keep inside (1 - margin) * incircle
-    mask_blur: float = 4.0  # px, softness of the mask
+    mask_blur: Optional[float] = None  # px, softness of the mask; None = rho / 2
     saturation: float = 0.97  # of full scale, in normalised data
     star_sigma: float = 8.0  # local outliers this many sigma above their surroundings are masked
     min_snr: float = 8.0  # mask where the local brightness is below this many noise sigmas
@@ -147,6 +147,32 @@ class FrameAlignment:
 # ---------------------------------------------------------------------------
 
 
+def sun_radius_from_moon(moon_radius_px: float) -> float:
+    """Approximate solar radius in pixels from the lunar one (the Moon is 1.00-1.08 x the Sun in a total eclipse)."""
+    return moon_radius_px / 1.04
+
+
+def scaled_params(params: AlignParams, sun_radius_px: float) -> AlignParams:
+    """Fill pixel-based settings from the Sun's size in the image.
+
+    Druckmuller used rho = 8-16 px at 0.89"/px (a solar radius of ~1080 px), i.e. about 1 % of
+    the radius; small images need relatively more blur to stay above the noise. The rule below
+    gives 8 px at the D850 + 400 mm superpixel scale (~210 px radius) and stays within 4-16 px.
+    """
+    from dataclasses import replace
+
+    rho = params.rho if params.rho is not None else float(min(16.0, max(4.0, 0.038 * sun_radius_px)))
+    blur = params.mask_blur if params.mask_blur is not None else max(2.0, rho / 2.0)
+    return replace(params, rho=rho, mask_blur=blur)
+
+
+def auto_window(sun_radius_px: float, width: int, height: int) -> int:
+    """Analysis window: the corona out to about 4 solar radii, 512-4096 px, inside the image."""
+    want = sfft.next_fast_len(int(8 * sun_radius_px))
+    size = int(min(max(want, 512), 4096, width, height))
+    return size - size % 2
+
+
 def tangential_highpass(img: np.ndarray, cx: float, cy: float, rho: float, r_max: Optional[float] = None,
                         return_blur: bool = False):
     """H_rho: the image minus its Gaussian blur along circles about (cx, cy)."""
@@ -217,6 +243,8 @@ def prepare(
     Pixels with too little signal for a useful contrast are masked.
     """
     h, w = img.shape
+    if params.rho is None or params.mask_blur is None:
+        params = scaled_params(params, sun_radius_from_moon(moon.radius))
     hp, back = tangential_highpass(img, moon.x, moon.y, params.rho, return_blur=True)
     noise = noise_sigma(img) if valid is None else noise_sigma(np.where(valid, img, np.median(img[valid]) if valid.any() else 0))
     floor = params.min_snr * noise
@@ -510,6 +538,8 @@ def align_sequence(
             f.moon = find_moon(f.image, expected_moon_radius, saturation=None)
         if f.defects is None:
             f.defects = defect_mask(f.image, params.star_sigma)
+    params = scaled_params(params, sun_radius_from_moon(float(np.median([f.moon.radius for f in frames]))))
+    say(f"settings: rho {params.rho:.1f} px, mask blur {params.mask_blur:.1f} px, window {w} px")
 
     order = sorted(range(len(frames)), key=lambda i: math.log(frames[i].exposure))
     mid = order[len(order) // 2]

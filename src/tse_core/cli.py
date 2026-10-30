@@ -73,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--delta-t", type=float, help="TT-UT in seconds (default: the measured or predicted value)")
     p.add_argument("--elements", help="JSON file with Besselian elements for other eclipses")
 
+    p = sub.add_parser("elements-update", help="download NASA's Besselian elements for every eclipse (1600-2400)")
+    p.add_argument("--from", dest="source", help="use a downloaded copy of NASA's canon CSV instead")
+
     p = sub.add_parser("align", help="align the light frames of a project on the corona and find the Sun's centre")
     p.add_argument("project", help="project file made by 'tse inventory --project'")
     p.add_argument("--lat", type=float, help="observing site latitude (saved in the project)")
@@ -81,11 +84,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--clock-error", type=float,
                    help="seconds to add to the camera's UT to get true UT, if known; otherwise bounded from totality")
     p.add_argument("--camera-utc-offset", type=float, help="camera time zone, hours, when the files carry none")
-    p.add_argument("--window", type=int, default=2048, help="analysis window in superpixels (default 2048)")
+    p.add_argument("--mirrored", action=argparse.BooleanOptionalAction, default=None,
+                   help="the optics mirror the image (telescope with a star diagonal); saved in the project")
+    p.add_argument("--window", type=int, help="analysis window in superpixels (default: about 8 solar radii)")
     p.add_argument("--rotation", choices=["drift", "per-frame", "none"], default="drift",
                    help="field rotation: smooth drift over time (default), per frame, or none")
     p.add_argument("--any-angle", action="store_true", help="search any rotation and scale (alt-az mounts)")
-    p.add_argument("--rho", type=float, default=8.0, help="tangential filter length, px (default 8)")
+    p.add_argument("--rho", type=float, help="tangential filter length in superpixels (default: from the Sun's size)")
     p.add_argument("--output", "-o", help="alignment results file (default: next to the project)")
     p.add_argument("--profile-dir", help="folder of saved own-flats profiles")
     p.add_argument("--lensfun-db")
@@ -106,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_frame(args)
     if args.command == "eclipse":
         return cmd_eclipse(args)
+    if args.command == "elements-update":
+        return cmd_elements_update(args.source)
     if args.command == "align":
         return cmd_align(args)
     if args.command == "flat-profile":
@@ -273,11 +280,46 @@ def cmd_lens(args) -> int:
     return 0
 
 
-def cmd_eclipse(args) -> int:
-    from .eclipse import LocalEclipse, Site, elements_for
+def cmd_elements_update(source=None) -> int:
+    import urllib.error
+
+    from .eclipse import CANON_URL, update_canon
+
+    if not source:
+        print(f"Downloading NASA's eclipse catalogue from {CANON_URL} ...")
+    try:
+        path, n = update_canon(source)
+    except urllib.error.URLError as exc:
+        print(f"Download failed: {exc.reason}")
+        print(f"Download {CANON_URL} in a browser and run: tse elements-update --from <file>")
+        return 1
+    except (OSError, ValueError) as exc:
+        print(exc)
+        return 1
+    print(f"Saved Besselian elements for {n} eclipses to {path}")
+    return 0
+
+
+def _ensure_elements(day, elements_file=None):
+    """Elements for this date, downloading NASA's catalogue once if needed."""
+    from .eclipse import CANON_CACHE, elements_for
 
     try:
-        el = elements_for(args.date, args.elements)
+        return elements_for(day, elements_file)
+    except KeyError:
+        if CANON_CACHE.is_file():
+            raise
+        print("This eclipse is not in the bundled set; fetching NASA's full catalogue once.")
+        if cmd_elements_update() != 0:
+            raise
+        return elements_for(day, elements_file)
+
+
+def cmd_eclipse(args) -> int:
+    from .eclipse import LocalEclipse, Site
+
+    try:
+        el = _ensure_elements(args.date, args.elements)
     except KeyError as exc:
         print(exc.args[0])
         return 1
@@ -302,6 +344,8 @@ def cmd_align(args) -> int:
         project.elevation_m = args.elev
     if args.camera_utc_offset is not None:
         project.camera_utc_offset_h = args.camera_utc_offset
+    if args.mirrored is not None:
+        project.mirrored = args.mirrored
     inv = project.inventory
     lights = inv.lights()
     db = _db(args.lensfun_db)
@@ -313,13 +357,19 @@ def cmd_align(args) -> int:
     site = None
     if project.latitude is not None and project.longitude is not None:
         site = Site(project.latitude, project.longitude, project.elevation_m)
+    if site is not None and lights and lights[0].timestamp:
+        try:
+            _ensure_elements(lights[0].timestamp[:10])
+        except KeyError as exc:
+            print(exc.args[0])
     params = AlignParams(rho=args.rho, rotation_model=args.rotation, coarse_rotation=args.any_angle,
                          solve_rotation=args.rotation != "none")
     say = (lambda m: None) if args.quiet else print
     try:
         result = run_alignment(lights, default_loader(plan, crop), params, window=args.window, site=site,
                                clock_error_s=args.clock_error, crop_factor=crop,
-                               utc_offset_h=project.camera_utc_offset_h, progress=say)
+                               utc_offset_h=project.camera_utc_offset_h, mirrored=project.mirrored,
+                               progress=say)
     except RuntimeError as exc:
         print(exc)
         return 1

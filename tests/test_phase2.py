@@ -218,3 +218,114 @@ def test_pipeline_end_to_end_with_eclipse_geometry(tmp_path):
     res.save(tmp_path / "a.json")
     assert (tmp_path / "a.json").stat().st_size > 100
     assert "Sun centre" in res.describe()
+
+
+# ------------------------------------------------------------------ canon
+
+CANON_SAMPLE = __import__("pathlib").Path(__file__).parent / "data" / "nasa_canon_sample.csv"
+
+
+def test_parse_nasa_canon_sample():
+    from tse_core.eclipse import parse_canon_csv
+
+    rows = parse_canon_csv(CANON_SAMPLE.read_text())
+    assert set(rows) == {"2024-04-08", "2017-08-21", "2025-03-29"}  # the -1999 row is outside 1600-2400
+    e = rows["2024-04-08"]
+    assert e["type"] == "T" and e["t0_tdt_hours"] == 18.0 and len(e["mu"]) == 3
+    assert e["x"][0] == pytest.approx(-0.318244) and e["tan_f2"] == pytest.approx(0.004645)
+
+
+def test_canon_and_bulletin_agree_for_2024(tmp_path, monkeypatch):
+    from tse_core import eclipse as ecl_mod
+
+    monkeypatch.setattr(ecl_mod, "CANON_CACHE", tmp_path / "canon.json")
+    path, n = ecl_mod.update_canon(CANON_SAMPLE)
+    assert n == 3 and path.is_file()
+    canon = ecl_mod.load_elements(path)["2024-04-08"]
+    bulletin = ecl_mod.load_elements()["2024-04-08"]
+    a = LocalEclipse(canon, WAPPAPELLO, delta_t=69.2).circumstances()
+    b = LocalEclipse(bulletin, WAPPAPELLO, delta_t=69.2).circumstances()
+    assert abs((a.c2 - b.c2).total_seconds()) < 2 and abs((a.c3 - b.c3).total_seconds()) < 2
+    # Bundled bulletin values win over the canon; a canon-only eclipse is now found.
+    assert ecl_mod.elements_for("2024-04-08").source.startswith("NASA GSFC, Besselian")
+    assert ecl_mod.elements_for("2025-03-29").type == "P"
+
+
+def test_missing_eclipse_suggests_update(tmp_path, monkeypatch):
+    from tse_core import eclipse as ecl_mod
+
+    monkeypatch.setattr(ecl_mod, "CANON_CACHE", tmp_path / "none.json")
+    with pytest.raises(KeyError, match="elements-update"):
+        ecl_mod.elements_for("2045-08-12")
+
+
+# ------------------------------------------------------- scale-aware defaults
+
+
+def test_scaled_defaults():
+    from tse_core.align import auto_window, scaled_params
+
+    p = scaled_params(AlignParams(), 210.0)  # D850 + 400 mm, superpixels
+    assert 7.5 < p.rho < 8.5 and p.mask_blur == pytest.approx(p.rho / 2)
+    assert scaled_params(AlignParams(), 20.0).rho == 4.0  # short lens: floor
+    assert scaled_params(AlignParams(), 1000.0).rho == 16.0  # long telescope: Druckmuller's upper value
+    assert scaled_params(AlignParams(rho=11.0), 210.0).rho == 11.0  # user setting wins
+    assert auto_window(210.0, 4144, 2760) == 1680
+    assert auto_window(20.0, 4144, 2760) == 512
+    assert auto_window(1000.0, 4144, 2760) == 2760
+
+
+@pytest.mark.parametrize("radius,size", [(20, 192), (90, 768)])
+def test_alignment_at_other_scales(radius, size):
+    sc = SyntheticScene(size=size, sun_radius=radius)
+    c = (size - 1) / 2
+    rng = np.random.default_rng(3)
+    frames, truth = [], []
+    for i in range(5):
+        e = 2e-3 * 2 ** i
+        sx, sy = rng.uniform(-4, 4, 2)
+        md = (-0.2 + 0.1 * i) * radius
+        img, _ = sc.frame(e, c + sx, c + sy, md, 0.3 * md, seed=50 + i)
+        frames.append(AlignFrame(i, img, e, time_s=10.0 * i))
+        truth.append((sx, sy))
+    res = align_sequence(frames, AlignParams(), expected_moon_radius=radius * 1.055)
+    a = next(r for r in res if math.isinf(r.psr)).index
+    for r, (sx, sy) in zip(res, truth):
+        x, y = r.transform.apply_point(c + sx, c + sy)
+        assert math.hypot(x - c - truth[a][0], y - c - truth[a][1]) < 0.2
+
+
+# ------------------------------------------------------------- mirroring
+
+
+def _track_parity(ecl, times, H, theta_deg, sun_r, clock_error, mirrored):
+    th = math.radians(theta_deg)
+    R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
+    P = np.array([[1.0, 0.0], [0.0, -1.0]]) if mirrored else np.array([[-1.0, 0.0], [0.0, -1.0]])
+    return [tuple(np.array(H) + sun_r * (R @ P @ np.array(ecl.state_at(t + timedelta(seconds=clock_error)).offset())))
+            for t in times]
+
+
+def test_mirrored_optics_near_the_path_edge():
+    # Dallas was about half-way from the central line to the edge: the centres never coincided.
+    ecl = LocalEclipse(elements_for("2024-04-08"), Site(32.7767, -96.797, 150))
+    c2 = ecl.circumstances().c2
+    times = [c2 + timedelta(seconds=20 + 10 * k) for k in range(18)]
+    H, sun_r = (2000.0, 1500.0), 800.0
+    moons = _track_parity(ecl, times, H, 35.0, sun_r, 0.0, mirrored=True)
+    r = sun_r * ecl.state_at(times[9]).ratio
+    right = solve_sun_centre(times, moons, r, ecl, clock_error_s=0.0, mirrored=True)
+    wrong = solve_sun_centre(times, moons, r, ecl, clock_error_s=0.0, mirrored=False)
+    assert math.hypot(right.x - H[0], right.y - H[1]) < 0.05
+    assert wrong.parity_difference_px > 5  # the choice matters here...
+    assert math.hypot(wrong.other_parity_xy[0] - H[0], wrong.other_parity_xy[1] - H[1]) < 0.05
+    assert any("--mirrored" in n for n in wrong.notes)  # ...and the user is told
+
+
+def test_parity_irrelevant_on_the_central_line():
+    ecl = LocalEclipse(elements_for("2024-04-08"), WAPPAPELLO)
+    c2 = ecl.circumstances().c2
+    times = [c2 + timedelta(seconds=20 + 10 * k) for k in range(18)]
+    moons = _track_parity(ecl, times, (2000.0, 1500.0), 0.0, 413.0, 0.0, mirrored=False)
+    sc = solve_sun_centre(times, moons, 413.0 * 1.0547, ecl, clock_error_s=0.0)
+    assert sc.parity_difference_px < 1.5 and not any("--mirrored" in n for n in sc.notes)

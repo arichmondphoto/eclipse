@@ -29,6 +29,11 @@ from pathlib import Path
 from typing import Optional
 
 DATA_FILE = Path(__file__).resolve().parent / "data" / "besselian.json"
+CACHE_DIR = Path(os.environ.get("TSE_CACHE_DIR", Path.home() / ".cache" / "solar-eclipse-toolkit"))
+CANON_CACHE = CACHE_DIR / "besselian_canon.json"
+# NASA's Five Millennium Canon of Solar Eclipses, Besselian elements for every eclipse -1999..3000.
+CANON_URL = "https://eclipse.gsfc.nasa.gov/eclipse_besselian_from_mysqldump2.csv"
+CANON_YEARS = (1600, 2400)  # range kept in the cache
 EARTH_EQUATORIAL_M = 6378137.0
 B_OVER_A = 0.99664719  # Earth's polar/equatorial axis ratio
 SUN_SEMIDIAMETER_1AU = 959.63  # arcsec
@@ -55,6 +60,7 @@ class BesselianElements:
     tan_f2: float
     source: str = ""
     delta_t_observed: Optional[float] = None
+    t_valid: Optional[list[float]] = None  # hours from t0 over which the polynomials are valid
 
     @property
     def best_delta_t(self) -> float:
@@ -75,19 +81,102 @@ def load_elements(path: Optional[str | os.PathLike] = None) -> dict[str, Besseli
     return out
 
 
+def all_elements(path: Optional[str | os.PathLike] = None) -> dict[str, BesselianElements]:
+    """Every eclipse we know: NASA canon cache, then bundled bulletins, then a user file (later wins).
+
+    The bundled values come from NASA's individual eclipse bulletins and take
+    precedence over the canon for the same eclipse.
+    """
+    table: dict[str, BesselianElements] = {}
+    if CANON_CACHE.is_file():
+        try:
+            table.update(load_elements(CANON_CACHE))
+        except (ValueError, KeyError, TypeError):
+            pass
+    table.update(load_elements(DATA_FILE))
+    if path:
+        table.update(load_elements(path))
+    return table
+
+
 def elements_for(day: date | datetime | str, path: Optional[str | os.PathLike] = None) -> BesselianElements:
     """Elements for the eclipse on this date (UT date; the day before or after also matches)."""
     if isinstance(day, str):
         day = date.fromisoformat(day[:10])
     if isinstance(day, datetime):
         day = day.date()
-    table = load_elements(path)
+    table = all_elements(path)
     for offset in (0, -1, 1):
         key = (day + timedelta(days=offset)).isoformat()
         if key in table:
             return table[key]
-    known = ", ".join(sorted(table))
-    raise KeyError(f"no Besselian elements for {day}; known eclipses: {known}. Add them with --elements")
+    hint = "" if CANON_CACHE.is_file() else " Run 'tse elements-update' to download NASA's catalogue of every eclipse."
+    raise KeyError(f"no Besselian elements for {day}.{hint}")
+
+
+# ---------------------------------------------------------------------------
+# NASA canon: download and convert
+# ---------------------------------------------------------------------------
+
+
+def parse_canon_csv(text: str, years: tuple[int, int] = CANON_YEARS) -> dict[str, dict]:
+    """Convert NASA's canon CSV (one row per eclipse) to this module's JSON layout."""
+    import csv
+    import io
+
+    out: dict[str, dict] = {}
+    for row in csv.DictReader(io.StringIO(text)):
+        try:
+            y, m, d = int(row["year"]), int(row["month"]), int(row["day"])
+        except (KeyError, ValueError):
+            continue
+        if not years[0] <= y <= years[1]:
+            continue
+
+        def f(name: str) -> float:
+            return float(row[name])
+
+        out[f"{y:04d}-{m:02d}-{d:02d}"] = {
+            "type": row.get("eclipse_type", "").strip()[:1],
+            "t0_tdt_hours": f("t0"),
+            "delta_t": f("dt"),
+            "x": [f("x0"), f("x1"), f("x2"), f("x3")],
+            "y": [f("y0"), f("y1"), f("y2"), f("y3")],
+            "d": [f("d0"), f("d1"), f("d2")],
+            "l1": [f("l10"), f("l11"), f("l12")],
+            "l2": [f("l20"), f("l21"), f("l22")],
+            "mu": [f("mu0"), f("mu1"), f("mu2")],
+            "tan_f1": f("tan_f1"),
+            "tan_f2": f("tan_f2"),
+            "t_valid": [f("tmin"), f("tmax")],
+            "source": "NASA Five Millennium Canon of Solar Eclipses (Espenak & Meeus)",
+        }
+    return out
+
+
+def update_canon(source: Optional[str | os.PathLike] = None, timeout: float = 120.0) -> tuple[Path, int]:
+    """Download NASA's canon (or read a local copy) and cache it. Returns (path, eclipses)."""
+    if source:
+        text = Path(source).read_text(encoding="utf-8", errors="replace")
+    else:
+        import ssl
+        import urllib.request
+
+        try:
+            import certifi
+
+            ctx = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            ctx = ssl.create_default_context()
+        with urllib.request.urlopen(CANON_URL, timeout=timeout, context=ctx) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+    eclipses = parse_canon_csv(text)
+    if not eclipses:
+        raise ValueError("no eclipses found in the canon file")
+    CANON_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    CANON_CACHE.write_text(json.dumps({"_comment": f"Converted from {CANON_URL}", "eclipses": eclipses}),
+                           encoding="utf-8")
+    return CANON_CACHE, len(eclipses)
 
 
 def _poly(c: list[float], t: float) -> float:
