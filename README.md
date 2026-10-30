@@ -233,9 +233,13 @@ Soft Light (40-70 %), `adaptive` above that in Soft Light (20-40 %). The
 filter layers are centred on mid-grey, which Soft Light treats as "no
 change"; desaturate them so the colour comes from the natural layer.
 
-The sky background is made neutral grey before filtering, so a small
-per-channel sky or black-level offset does not tint the faint corona
-(`--keep-background-colour` to skip).
+Before filtering, the sky (twilight glow, its gradient across the frame,
+vignetting leftovers and black-level offsets) is modelled per colour channel
+as a smooth surface fitted to the darkest parts of the frame away from the
+inner corona, and removed. Radial terms in the fit take up the faint outer
+corona so it is not mistaken for sky. The natural layer then keeps the sky
+dark: it stops flattening where the corona sinks into the noise
+(`--keep-sky` skips the sky model).
 
 The Sun's centre and radius come from the stack header, so the circles are
 centred on the true Sun, not the Moon. Circles that leave a rectangular

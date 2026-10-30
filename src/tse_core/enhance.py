@@ -63,7 +63,7 @@ class EnhanceParams:
     mgn_k: float = 0.7
     saturation: float = 1.0  # colour saturation of every layer (0 = monochrome)
     white: str = "corona"  # "corona" (inner corona is white), "camera" (as-shot), or "none"
-    neutral_background: bool = True  # make the sky background grey (removes colour casts in the faint corona)
+    neutral_background: bool = True  # model and remove the sky (level, colour and gradient) before filtering
     moon_margin_px: float = 1.5
     blend: dict = field(default_factory=lambda: dict(DEFAULT_BLEND))
 
@@ -378,17 +378,27 @@ def radial_profile(x: np.ndarray, r: np.ndarray, valid: np.ndarray, smooth: floa
 
 def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
             flatten: float) -> np.ndarray:
-    """Log stretch with part of the radial fall-off removed."""
+    """Log stretch with part of the radial fall-off removed.
+
+    ``x`` has the sky removed. The flattening stops where the corona sinks
+    into the noise, so the sky beyond stays dark instead of being lifted.
+    """
     floor = max(noise_level, 1e-9)
     lg = np.log(np.maximum(x, 0) + floor).astype(np.float32)
     # Circle averages from completed circles (see ring_stats), so no arcs at the frame edges.
-    prof = ring_stats(lg - lg[valid].min(), r, phi, valid, 36, 0, 2.0).ring_mean + lg[valid].min()
+    lo = float(lg[valid].min()) if valid.any() else 0.0
+    prof = ring_stats(lg - lo, r, phi, valid, 36, 0, 2.0).ring_mean + lo
+    prof = np.maximum(prof, math.log(4 * floor))  # no lifting of what is mostly noise
     ri = np.clip(r - 0.5, 0, len(prof) - 1.001)
     i0 = ri.astype(np.int32)
     t = ri - i0
     base = (1 - t) * prof[i0] + t * prof[i0 + 1]
     out = lg - np.float32(flatten) * base.astype(np.float32)
-    out = stretch(out, valid, 0.5, 99.9)
+    # Black point: the sky (pixels at the noise level), so it comes out dark.
+    sky = valid & (x < floor)
+    black = float(np.median(out[sky])) if sky.sum() > 1000 else float(np.percentile(out[valid], 0.5))
+    white = float(np.percentile(out[valid], 99.9))
+    out = np.clip((out - black) / ((white - black) or 1.0), 0.0, 1.0).astype(np.float32)
     out[~valid] = 0.0
     return out
 
@@ -455,6 +465,73 @@ def sky_background(rgb: np.ndarray, r: np.ndarray, valid: np.ndarray, g: Geometr
     return np.array([np.median(rgb[..., c][far][dark]) for c in range(3)], np.float32)
 
 
+def _sky_cells(img: np.ndarray, r: np.ndarray, valid: np.ndarray, g: Geometry, cell: int):
+    """Darkest-pixel level (20th percentile) in grid cells clear of the inner corona."""
+    h, w = img.shape
+    xs, ys, rs, vals = [], [], [], []
+    far = valid & (r > 2.5 * g.sun_r)
+    for y0 in range(0, h - cell + 1, cell):
+        for x0 in range(0, w - cell + 1, cell):
+            m = far[y0:y0 + cell, x0:x0 + cell]
+            if m.mean() < 0.5:
+                continue
+            v = img[y0:y0 + cell, x0:x0 + cell][m]
+            xs.append(x0 + cell / 2)
+            ys.append(y0 + cell / 2)
+            rs.append(float(r[y0 + cell // 2, x0 + cell // 2]))
+            vals.append(float(np.percentile(v, 20)))
+    return np.array(xs), np.array(ys), np.array(rs), np.array(vals)
+
+
+def sky_model(rgb: np.ndarray, r: np.ndarray, valid: np.ndarray, g: Geometry) -> tuple[list, str]:
+    """Smooth sky (twilight glow, gradient, black-level residual) per channel, as polynomial coefficients.
+
+    Fitted to the darkest pixels of grid cells away from the inner corona,
+    as a quadratic surface plus radial power-law terms. The power laws
+    soak up the faint outer corona, so only the quadratic part (the sky) is
+    removed. With too few cells (a tight crop) the sky is a constant.
+    """
+    h, w = r.shape
+    cell = max(16, min(h, w) // 24)
+    cx, cy, sc = w / 2.0, h / 2.0, max(h, w) / 2.0
+    models = []
+    kind = "gradient"
+    for c in range(rgb.shape[2]):
+        xs, ys, rs, vals = _sky_cells(rgb[..., c], r, valid, g, cell)
+        if len(vals) < 30:
+            far = valid & (r > 3.0 * g.sun_r)
+            if far.sum() < 100:
+                far = valid
+            v = rgb[..., c][far]
+            level = float(np.median(v[v <= np.percentile(v, 5)])) if v.size else 0.0
+            models.append([level, 0, 0, 0, 0, 0])
+            kind = "constant"
+            continue
+        u, v = (xs - cx) / sc, (ys - cy) / sc
+        rr = np.maximum(rs / g.sun_r, 1.0)
+        A = np.stack([np.ones_like(u), u, v, u * u, u * v, v * v, rr**-2, rr**-3, rr**-5], axis=1)
+        wts = np.ones(len(vals))
+        coef = np.zeros(A.shape[1])
+        for _ in range(6):
+            sw = np.sqrt(wts)[:, None]
+            coef, *_ = np.linalg.lstsq(A * sw, vals * sw[:, 0], rcond=None)
+            res = vals - A @ coef
+            s_ = 1.4826 * np.median(np.abs(res)) + 1e-12
+            t = res / (4.685 * s_)
+            wts = np.where(np.abs(t) < 1, (1 - t * t) ** 2, 0.0)
+        models.append(coef[:6].tolist())
+    return models, kind
+
+
+def sky_surface(coef: Sequence[float], shape: tuple[int, int], rows: slice = slice(None)) -> np.ndarray:
+    h, w = shape
+    cx, cy, sc = w / 2.0, h / 2.0, max(h, w) / 2.0
+    u = ((np.arange(w, dtype=np.float32) - cx) / sc)[None, :]
+    v = ((np.arange(h, dtype=np.float32)[rows] - cy) / sc)[:, None]
+    a = [np.float32(x) for x in coef]
+    return a[0] + a[1] * u + a[2] * v + a[3] * u * u + a[4] * u * v + a[5] * v * v
+
+
 def white_balance(rgb: np.ndarray, r: np.ndarray, valid: np.ndarray, g: Geometry, mode: str,
                   camera_wb: Optional[Sequence[float]], background: Optional[np.ndarray] = None) -> np.ndarray:
     """Channel multipliers. 'corona': the inner corona (1.2-2.5 R) is white, as K-corona light is
@@ -506,9 +583,8 @@ class EnhanceResult:
 
     def describe(self) -> str:
         lines = [f"White balance multipliers (R, G, B): {', '.join(f'{v:.3f}' for v in self.white)}",
-                 f"Sky background after white balance (R, G, B): "
-                 f"{', '.join(f'{v:.3g}' for v in self.background)}"
-                 + (" (neutralized)" if self.background and max(self.background) != min(self.background) else ""),
+                 f"Sky removed, typical level after white balance (R, G, B): "
+                 f"{', '.join(f'{v:.3g}' for v in self.background)}",
                  f"Adaptive filter scales (px): {', '.join(f'{s:.1f}' for s in self.scales)}"]
         lines += [f"{k}: {v}" for k, v in self.layers.items()]
         lines += [f"Note: {n}" for n in self.notes]
@@ -536,15 +612,21 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     camera_wb = None
     if all(k in header for k in ("WBR", "WBG", "WBB")):
         camera_wb = [header["WBR"], header["WBG"], header["WBB"]]
-    bg = sky_background(hdr, r, valid, g)
-    wb = white_balance(hdr, r, valid, g, p.white, camera_wb, bg)
+    sky_kind = "kept"
+    bg = np.zeros(3, np.float32)
+    if p.neutral_background:
+        models, sky_kind = sky_model(hdr, r, valid, g)
+        for c in range(3):
+            for r0 in range(0, h, 1024):
+                rows = slice(r0, min(h, r0 + 1024))
+                hdr[rows, :, c] -= sky_surface(models[c], (h, w), rows)
+            bg[c] = float(np.median(sky_surface(models[c], (h, w))[valid])) if valid.any() else 0.0
+    wb = white_balance(hdr, r, valid, g, p.white, camera_wb)
     hdr *= wb[None, None, :]
     bg = bg * wb
-    if p.neutral_background:
-        hdr -= (bg - bg.mean())[None, None, :]
     rgb = hdr
     lum = rgb.mean(axis=2)
-    say(f"white balance {wb.round(3).tolist()}; sky background {bg.tolist()}")
+    say(f"white balance {wb.round(3).tolist()}; sky removed ({sky_kind}) {bg.tolist()}")
 
     noise = noise_map(lum, weight, valid)
     nlev = float(np.median(noise[valid & (noise > 0)])) if (valid & (noise > 0)).any() else 0.0

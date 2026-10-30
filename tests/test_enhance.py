@@ -183,3 +183,25 @@ def test_sky_background_cast_is_removed():
     _, cast = E.enhance(hdr.copy(), weight, header, E.EnhanceParams(layers=("natural",), blend={},
                                                                          neutral_background=False))
     assert green(cast["natural"]) > 0.01  # the cast it fixes
+
+
+def test_sky_model_removes_gradient_but_keeps_corona():
+    H, W = 460, 690
+    g = E.Geometry(330.0, 232.0, 35.0, 331.0, 232.0, 36.8)
+    sc = SyntheticScene(size=W, sun_radius=35.0, seed=7)
+    corona = sc.corona(g.sun_x, g.sun_y, shape=(H, W)).astype(np.float32) * 0.002
+    xx = np.arange(W)[None, :]
+    yy = np.arange(H)[:, None]
+    sky = (0.004 + 0.002 * xx / W + 0.001 * yy / H) * (1 - 0.5 * ((xx - W / 2) ** 2 + (yy - H / 2) ** 2)
+                                                      / (W * W / 4 + H * H / 4))
+    img = (corona + sky).astype(np.float32)
+    r, phi, valid = _valid((H, W), g)
+    models, kind = E.sky_model(img[..., None], r, valid, g)
+    assert kind == "gradient"
+    fitted = E.sky_surface(models[0], (H, W))
+    far = valid & (r > 4 * g.sun_r)
+    err = np.abs(fitted - sky)[far]
+    assert np.median(err) < 0.1 * (sky.max() - sky.min())
+    # The corona at 2-3 solar radii is not taken for sky.
+    mid = valid & (r > 2 * g.sun_r) & (r < 3 * g.sun_r)
+    assert np.median((img - fitted)[mid] / corona[mid]) == pytest.approx(1.0, abs=0.15)

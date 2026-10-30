@@ -143,8 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--saturation", type=float, default=1.0, help="colour saturation, 0 = monochrome (default 1)")
     p.add_argument("--white", choices=["corona", "camera", "none"], default="corona",
                    help="white balance: inner corona neutral (default), the camera's as-shot, or none")
-    p.add_argument("--keep-background-colour", action="store_true",
-                   help="do not neutralize the colour of the sky background")
+    p.add_argument("--keep-sky", "--keep-background-colour", dest="keep_background_colour", action="store_true",
+                   help="do not model and remove the sky background (level, colour and gradient)")
     p.add_argument("--quiet", action="store_true")
 
     sub.add_parser("doctor", help="show which optional readers are available")
