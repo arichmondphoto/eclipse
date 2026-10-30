@@ -26,6 +26,7 @@ from typing import Optional
 import numpy as np
 
 from .calibration import FrameCalibration
+from .demosaic import cosmetic_correct, demosaic_mhc
 from .lensfun import vignetting_map
 
 SATURATION_FRACTION = 0.98
@@ -117,3 +118,97 @@ def _load_fits(path: str, calib: Optional[FrameCalibration], image_crop: float) 
     sat = data >= SATURATION_FRACTION * float(np.nanmax(data))
     _devignette(rgb, calib, image_crop)
     return LoadedFrame(rgb, sat, 1)
+
+
+# ---------------------------------------------------------------------------
+# Full resolution
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RawMosaic:
+    """A RAW file's Bayer data, read once; calibrate any part of it with ``region``."""
+
+    bayer: np.ndarray  # (H, W) raw values
+    pattern: str  # 2x2 CFA pattern at (0, 0), e.g. "RGGB"
+    black: dict  # channel letter -> black level (G uses the mean of both greens)
+    white: float
+    wb: tuple[float, float, float]  # camera as-shot multipliers (R, G, B), for previews only
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.bayer.shape
+
+
+@dataclass
+class FullFrame:
+    rgb: np.ndarray  # (h, w, 3) float32 linear, 1.0 = full scale, vignetting corrected
+    saturated: np.ndarray  # (h, w) bool: any channel near full scale (dilated over the demosaic kernel)
+    x0: int  # region origin in sensor pixels
+    y0: int
+    hot_pixels: int
+    wb: tuple[float, float, float]
+
+
+def read_mosaic(path: str) -> RawMosaic:
+    try:
+        import rawpy
+    except ImportError as exc:
+        raise RuntimeError("reading RAW files needs rawpy: pip install rawpy") from exc
+    with rawpy.imread(path) as raw:
+        bayer = raw.raw_image_visible.astype(np.float32)
+        colors = raw.raw_colors_visible
+        desc = raw.color_desc.decode("ascii", "replace")
+        black_c = np.asarray(raw.black_level_per_channel, dtype=np.float32)
+        white = float(raw.white_level)
+        try:
+            wb_raw = [float(v) for v in raw.camera_whitebalance]
+        except Exception:
+            wb_raw = [1.0, 1.0, 1.0, 1.0]
+    pattern = ""
+    black: dict = {}
+    for dy in (0, 1):
+        for dx in (0, 1):
+            idx = int(colors[dy, dx])
+            name = desc[idx] if idx < len(desc) else "G"
+            pattern += name if name in "RGB" else "G"
+            black.setdefault(pattern[-1], []).append(float(black_c[idx]))
+    black = {k: sum(v) / len(v) for k, v in black.items()}
+    g = wb_raw[1] or 1.0
+    wb = (wb_raw[0] / g if wb_raw[0] else 1.0, 1.0, wb_raw[2] / g if wb_raw[2] else 1.0)
+    return RawMosaic(bayer, pattern, black, white, wb)
+
+
+def region(mosaic: RawMosaic, x0: int, y0: int, w: int, h: int, calib: Optional[FrameCalibration] = None,
+           image_crop: float = 1.0, hot_pixels: bool = True) -> FullFrame:
+    """Calibrate and demosaic one rectangle of the sensor (origin snapped to the CFA grid)."""
+    H, W = mosaic.shape
+    x0 = max(0, min(int(x0) - int(x0) % 2, W - 2))
+    y0 = max(0, min(int(y0) - int(y0) % 2, H - 2))
+    w = min(int(w) + 1, W - x0)
+    h = min(int(h) + 1, H - y0)
+    w -= w % 2
+    h -= h % 2
+    raw = mosaic.bayer[y0 : y0 + h, x0 : x0 + w]
+    pattern = mosaic.pattern  # origin is even, so the pattern is unchanged
+    from .demosaic import channel_masks
+
+    masks = channel_masks(pattern, (h, w))
+    sat_cfa = raw >= SATURATION_FRACTION * mosaic.white
+    cfa = np.empty((h, w), np.float32)
+    for c in "RGB":
+        scale = 1.0 / max(mosaic.white - mosaic.black[c], 1.0)
+        cfa[masks[c]] = (raw[masks[c]] - mosaic.black[c]) * scale
+    if calib is not None and calib.lens_terms is not None and calib.vignetting in ("lensfun", "profile"):
+        for c in "RGB":
+            terms = (calib.channel_terms or {}).get(c, calib.lens_terms)
+            vmap = vignetting_map(W, H, tuple(terms), image_crop, calib.profile_crop, box=(x0, y0, w, h))
+            cfa[masks[c]] /= vmap[masks[c]]
+    n_hot = 0
+    if hot_pixels:
+        cfa, n_hot = cosmetic_correct(cfa, pattern)
+    rgb = demosaic_mhc(cfa, pattern)
+    from scipy import ndimage
+
+    saturated = ndimage.binary_dilation(sat_cfa, iterations=2)
+    return FullFrame(rgb, saturated, x0, y0, n_hot, mosaic.wb)

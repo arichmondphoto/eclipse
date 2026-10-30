@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -102,6 +103,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lensfun-db")
     p.add_argument("--quiet", action="store_true")
 
+    p = sub.add_parser("stack", help="merge the aligned frames into one linear HDR image")
+    p.add_argument("project", help="project file (run 'tse align' on it first)")
+    p.add_argument("--align", help="alignment results file (default: the one saved by 'tse align')")
+    p.add_argument("--output", "-o", help="output folder (default: next to the project)")
+    p.add_argument("--name", help="output file name prefix (default: the project name)")
+    p.add_argument("--radii", type=float, default=5.0,
+                   help="half-width of the output in solar radii (default 5; limited by the frame)")
+    p.add_argument("--moon-frame", type=int,
+                   help="frame number whose Moon (and earthshine) is kept (default: the alignment reference)")
+    p.add_argument("--include-rejected", action="store_true",
+                   help="also stack frames the Sun-centre fit flagged as off the Moon's track")
+    p.add_argument("--no-hot-pixels", action="store_true", help="skip the hot-pixel correction")
+    p.add_argument("--profile-dir", help="folder of saved own-flats profiles")
+    p.add_argument("--lensfun-db")
+    p.add_argument("--quiet", action="store_true")
+
     sub.add_parser("doctor", help="show which optional readers are available")
 
     args = parser.parse_args(argv)
@@ -123,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_elements_update(args.source)
     if args.command == "align":
         return cmd_align(args)
+    if args.command == "stack":
+        return cmd_stack(args)
     if args.command == "flat-profile":
         return cmd_flat_profile(args)
     return 1
@@ -423,6 +442,70 @@ def cmd_align(args) -> int:
     print()
     print(result.describe())
     print(f"\nAlignment saved to {out}")
+    return 0
+
+
+def cmd_stack(args) -> int:
+    from .calibration import plan_calibration
+    from .rawio import read_mosaic
+    from .stack import FrameInfo, StackParams, stack_frames
+
+    path = Path(args.project)
+    project = EventProject.load(path)
+    align_path = args.align or project.parameters.get("align", {}).get("file") or str(
+        path.with_name(path.stem + "_align.json"))
+    if not Path(align_path).exists():
+        print(f"No alignment results at {align_path}; run 'tse align {path}' first.")
+        return 1
+    alignment = json.loads(Path(align_path).read_text(encoding="utf-8"))
+    frames = {f.index: f for f in project.inventory.lights()}
+    ref = alignment["reference_index"]
+    rejected = set()
+    if alignment.get("sun") and not args.include_rejected:
+        order = [fr["index"] for fr in alignment["frames"]]
+        rejected = {order[k] for k in alignment["sun"].get("rejected", [])}
+    ev_ref = frames[ref].exposure_value() if ref in frames else None
+    infos = []
+    for fr in alignment["frames"]:
+        i = fr["index"]
+        if i not in frames:
+            print(f"frame #{i} ({fr['file_name']}) is no longer a light frame in the project; skipped")
+            continue
+        if i in rejected:
+            print(f"frame #{i} ({fr['file_name']}) was flagged as off the Moon's track; skipped "
+                  "(use --include-rejected to keep it)")
+            continue
+        ev = frames[i].exposure_value()
+        ratio = 2.0 ** (ev - ev_ref) if ev is not None and ev_ref is not None else 1.0
+        mx, my = fr["moon_ref"]
+        infos.append(FrameInfo(i, fr["file_name"], ratio, fr["matrix"], mx, my, fr["moon_frame"]["radius"]))
+    if len(infos) < 1:
+        print("nothing to stack")
+        return 1
+    db = _db(args.lensfun_db)
+    library = load_profile_library(args.profile_dir)
+    lights = [frames[f.index] for f in infos]
+    plan = plan_calibration(lights, db, None, lens_name=project.lens_profile or None,
+                            use_lensfun=project.use_lensfun, profiles=library)
+    calibs = {fc.frame_index: fc for fc in plan.frames}
+    cam = db.find_camera(lights[0].camera_make, lights[0].camera_model) if not db.empty else None
+    crop_factor = cam.crop_factor if cam else 1.0
+    params = StackParams(crop_radii=args.radii, moon_frame=args.moon_frame, hot_pixels=not args.no_hot_pixels)
+    out_dir = Path(args.output) if args.output else path.parent
+    name = args.name or path.stem
+    say = (lambda m: None) if args.quiet else print
+    try:
+        result, _hdr, _w = stack_frames(infos, lambda f: read_mosaic(frames[f.index].path), calibs,
+                                        tuple(alignment["image_size"]), ref, alignment.get("sun"), params,
+                                        out_dir=out_dir, name=name, image_crop=crop_factor, progress=say)
+    except (RuntimeError, ValueError) as exc:
+        print(exc)
+        return 1
+    project.parameters["stack"] = {"align": str(align_path), "radii": args.radii, "moon_frame": result.moon_frame,
+                                   **result.outputs}
+    project.save(path)
+    print()
+    print(result.describe())
     return 0
 
 

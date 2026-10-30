@@ -18,7 +18,7 @@ from each frame's metadata.
 | --- | --- | --- |
 | 1 | RAW inventory, bracket detection, lensfun lookup, calibration planning, project files | **done** |
 | 2 | Geometry (lunar limb, Moon track, Sun centre) and phase correlation alignment | **done** (command line) |
-| 3 | Moon-aware linear HDR stacking | planned |
+| 3 | Moon-aware linear HDR stacking | **done** (command line) |
 | 4 | NRGF, FNRGF, FNRGF-N, adaptive kernel filter | planned |
 | 5 | Full GUI and packaging | planned |
 
@@ -148,6 +148,46 @@ Contact times are compared with the camera's clock. If the clock was wrong,
 give the correction with `--clock-offset` (added to camera time, for example
 `+1:04:08`) and enter the contact times in true time. Bracket detection and
 Moon tracking only use time differences, so a wrong clock never affects them.
+
+## HDR stacking (Phase 3)
+
+```bash
+tse stack eclipse2024.json            # uses the alignment saved by 'tse align'
+```
+
+Every frame is read again at full resolution: black level subtracted per
+channel (negative values kept), vignetting divided out per colour, isolated
+hot pixels replaced, demosaiced with the linear Malvar-He-Cutler method in
+32-bit floating point, and resampled onto the reference frame with the
+alignment transform (bicubic).
+
+**Brightness matching.** Shutter speeds are rarely exact. Each frame's
+brightness relative to the reference, `value = gain * radiance + offset`,
+is measured by robust straight-line fits between neighbouring exposures on
+pixels well exposed in both frames and clear of the Moon. Frames more than
+0.3 EV from their nominal exposure are reported.
+
+**Merging.** Each pixel is the inverse-variance weighted mean of the frames'
+radiance estimates. Weights fall to zero approaching saturation and inside
+each frame's own Moon (plus 3 px), so the moving Moon never darkens the
+inner corona. Inside the Moon as it was in the Moon frame (the alignment
+reference unless `--moon-frame` says otherwise) the result is that frame's
+data, which keeps the lunar limb sharp. Pixels that are saturated or covered
+in every frame (rare with 1/3-stop brackets) take the shortest exposure that
+shows them and are counted in the report.
+
+Frames the Sun-centre fit flagged as off the Moon's track are skipped
+unless `--include-rejected` is given.
+
+**Outputs** (next to the project unless `-o` says otherwise), square,
+10 solar radii wide by default (`--radii`), cropped to the frame:
+
+| File | Contents |
+| --- | --- |
+| `<name>_hdr.fit` | linear 32-bit RGB in units of the reference exposure, camera colour; header has `SUNX/SUNY/SUNR`, `MOONX/MOONY/MOONR`, `PIXSCALE`, `NORTHANG` and the crop origin |
+| `<name>_weight.fit` | sum of weights per pixel (where the data came from) |
+| `<name>_preview.tif` | 16-bit asinh stretch with the camera white balance, for a quick look only |
+| `<name>_stack.json` | gains, offsets and settings |
 
 ## Calibration rules
 

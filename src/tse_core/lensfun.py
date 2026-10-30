@@ -416,14 +416,20 @@ def vignetting_map(
     image_crop: float = 1.0,
     calib_crop: float = 1.0,
     dtype=np.float32,
+    box: Optional[tuple[int, int, int, int]] = None,
 ) -> np.ndarray:
     """Relative illumination for every pixel of a width x height image.
 
     Divide a linear image by this map to correct vignetting. The radius is
     measured on the sensor in millimetres, so a calibration made on a
-    different sensor size is rescaled correctly.
+    different sensor size is rescaled correctly. ``box`` = (x0, y0, w, h)
+    returns only that part of the map.
     """
-    yy, xx = np.mgrid[0:height, 0:width].astype(np.float64)
+    if box is None:
+        yy, xx = np.mgrid[0:height, 0:width].astype(np.float64)
+    else:
+        bx, by, bw, bh = box
+        yy, xx = np.mgrid[by : by + bh, bx : bx + bw].astype(np.float64)
     cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
     pixel_half_diag = math.hypot(width, height) / 2.0
     image_half_diag_mm = FULL_FRAME_HALF_DIAGONAL_MM / image_crop

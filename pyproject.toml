@@ -15,6 +15,7 @@ dependencies = [
     "scipy>=1.10",
     "exifread>=3.0",
     "certifi",
+    "tifffile",
 ]
 
 [project.optional-dependencies]
