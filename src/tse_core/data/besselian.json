@@ -1,0 +1,163 @@
+{
+  "_comment": "Polynomial Besselian elements: a = a0 + a1*t + a2*t^2 + a3*t^3, t = TDT - t0 in hours. Sources: 'Eclipse Predictions by Fred Espenak, NASA's GSFC' (eclipse.gsfc.nasa.gov) unless noted. Add more eclipses in this format, or pass your own file with --elements. 'delta_t' is the value the elements were predicted with; 'delta_t_observed' (when present) is the measured value and is used by default.",
+  "eclipses": {
+    "2017-08-21": {
+      "type": "T",
+      "t0_tdt_hours": 18.0,
+      "delta_t": 70.3,
+      "x": [
+        -0.129571,
+        0.5406426,
+        -2.94e-05,
+        -8.1e-06
+      ],
+      "y": [
+        0.485416,
+        -0.14164,
+        -9.05e-05,
+        2e-06
+      ],
+      "d": [
+        11.8669596,
+        -0.013622,
+        -2e-06
+      ],
+      "l1": [
+        0.542093,
+        0.0001241,
+        -1.18e-05
+      ],
+      "l2": [
+        -0.004025,
+        0.0001234,
+        -1.17e-05
+      ],
+      "mu": [
+        89.24543,
+        15.00394
+      ],
+      "tan_f1": 0.0046222,
+      "tan_f2": 0.0045992,
+      "source": "NASA GSFC Solar Eclipse Search Engine, 2017 Aug 21",
+      "delta_t_observed": 68.97
+    },
+    "2024-04-08": {
+      "type": "T",
+      "t0_tdt_hours": 18.0,
+      "delta_t": 70.6,
+      "x": [
+        -0.318157,
+        0.5117105,
+        3.26e-05,
+        -8.5e-06
+      ],
+      "y": [
+        0.219747,
+        0.2709586,
+        -5.94e-05,
+        -4.7e-06
+      ],
+      "d": [
+        7.5862,
+        0.014844,
+        -2e-06
+      ],
+      "l1": [
+        0.535813,
+        6.18e-05,
+        -1.28e-05
+      ],
+      "l2": [
+        -0.010274,
+        6.15e-05,
+        -1.27e-05
+      ],
+      "mu": [
+        89.59122,
+        15.004084
+      ],
+      "tan_f1": 0.0046683,
+      "tan_f2": 0.004645,
+      "source": "NASA GSFC, Besselian Elements for the Total Solar Eclipse of 2024 Apr 08",
+      "delta_t_observed": 69.2
+    },
+    "2026-08-12": {
+      "type": "T",
+      "t0_tdt_hours": 18.0,
+      "delta_t": 71.4,
+      "x": [
+        0.475593,
+        0.5189288,
+        -7.73e-05,
+        -8.8e-06
+      ],
+      "y": [
+        0.771161,
+        -0.2301664,
+        -0.0001245,
+        3.7e-06
+      ],
+      "d": [
+        14.79667,
+        -0.012065,
+        -3e-06
+      ],
+      "l1": [
+        0.537954,
+        9.4e-05,
+        -1.21e-05
+      ],
+      "l2": [
+        -0.008142,
+        9.35e-05,
+        -1.21e-05
+      ],
+      "mu": [
+        88.74776,
+        15.003093
+      ],
+      "tan_f1": 0.0046141,
+      "tan_f2": 0.0045911,
+      "source": "NASA GSFC, Besselian Elements for the Total Solar Eclipse of 2026 Aug 12"
+    },
+    "2027-08-02": {
+      "type": "T",
+      "t0_tdt_hours": 10.0,
+      "delta_t": 72.8,
+      "x": [
+        -0.01977,
+        0.54471,
+        -4e-05,
+        -1e-05
+      ],
+      "y": [
+        0.16007,
+        -0.21116,
+        -0.00012,
+        0.0
+      ],
+      "d": [
+        17.7625,
+        -0.0102,
+        -0.0
+      ],
+      "l1": [
+        0.53062,
+        1e-05,
+        -1e-05
+      ],
+      "l2": [
+        -0.01546,
+        1e-05,
+        -1e-05
+      ],
+      "mu": [
+        328.4225,
+        15.0021
+      ],
+      "tan_f1": 0.0046064,
+      "tan_f2": 0.0045834,
+      "source": "EclipseWise Prime Page, 2027 Aug 02 (reduced precision; replace with full NASA elements when available)"
+    }
+  }
+}

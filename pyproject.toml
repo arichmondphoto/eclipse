@@ -12,6 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Andy" }]
 dependencies = [
     "numpy>=1.24",
+    "scipy>=1.10",
     "exifread>=3.0",
     "certifi",
 ]
@@ -28,6 +29,9 @@ tse = "tse_core.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+tse_core = ["data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

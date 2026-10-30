@@ -17,7 +17,7 @@ from each frame's metadata.
 | Phase | Scope | State |
 | --- | --- | --- |
 | 1 | RAW inventory, bracket detection, lensfun lookup, calibration planning, project files | **done** |
-| 2 | Geometry (lunar limb, Moon track, Sun centre) and phase correlation alignment | next |
+| 2 | Geometry (lunar limb, Moon track, Sun centre) and phase correlation alignment | **done** (command line) |
 | 3 | Moon-aware linear HDR stacking | planned |
 | 4 | NRGF, FNRGF, FNRGF-N, adaptive kernel filter | planned |
 | 5 | Full GUI and packaging | planned |
@@ -77,7 +77,50 @@ tse lens "AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" --focal 400 --aperture 8
 tse flat-profile FLATS                       # fit and save a vignetting profile from your own flats
 tse inventory RAW --profile my_profile.json  # use one profile for every frame
 tse frame DSC_4100.NEF                       # show everything read from one file
+tse eclipse --date 2024-04-08 --lat 36.9422 --lon -90.3343 --utc-offset -5   # contacts and duration
+tse align eclipse2024.json --lat 36.9422 --lon -90.3343 --elev 110           # align and find the Sun
 ```
+
+## Alignment (Phase 2)
+
+`tse align` loads every light frame as 2x2 superpixels (no demosaicing),
+applies the calibration plan, and then:
+
+1. **Finds the Moon** in each frame: the limb is located along 720 radial
+   profiles and fitted with a robust circle (prominences and valleys rejected).
+2. **Aligns on the corona** with Druckmüller's modified phase correlation:
+   a tangential high-pass filter about the Moon, a soft mask (Moon, edges,
+   saturation, stars, hot pixels), damped phase correlation with a Gaussian
+   low-pass, and a sub-pixel peak centroid. Two changes from the paper make
+   it work across a 12-stop bracket:
+   * the correlation uses *relative* tangential contrast (high-pass divided
+     by local brightness), which is the same in any exposure and stops the
+     bright inner corona from locking the result onto the Moon's motion;
+   * frames are aligned against a reference that grows from the middle
+     exposure outwards, then every frame against all the others, and the
+     whole set is re-anchored to the middle exposure at the end.
+3. **Field rotation** is measured against the middle exposure and modelled
+   as a smooth drift over time; it is applied only when statistically
+   significant. Use `--rotation per-frame` or `--any-angle` for mounts that
+   do not track.
+4. **Finds the Sun's centre** (Druckmüllerová et al. 2011, appendix): the
+   Moon's track across the aligned frames is fitted to the eclipse
+   geometry computed for your site from NASA Besselian elements. This also
+   gives the image scale and where celestial north points. If the camera
+   clock was wrong, the clock error is bounded by requiring every frame to
+   fall inside totality and the remaining along-track uncertainty is
+   reported; pass `--clock-error` if you know it.
+
+Results go to `<project>_align.json`: a full-resolution 2x3 transform per
+frame, the Moon in each frame, and the Sun's centre and radius.
+
+Measured accuracy: about 0.1 px (full resolution) on copies of a real D850
+frame up to four stops apart, and 0.1 px on synthetic brackets spanning 8
+stops with a moving Moon. A 37-frame bracket takes several minutes.
+
+Bundled Besselian elements: 2017 Aug 21, 2024 Apr 08, 2026 Aug 12 and
+2027 Aug 02 (reduced precision). Add others to
+`src/tse_core/data/besselian.json` or pass `--elements`.
 
 `inventory` prints the frame table, the detected brackets (step size, range,
 missing shutter speeds), and the calibration plan: which vignetting source

@@ -30,6 +30,12 @@ class EventProject:
     third_contact: str = ""
     camera_clock_offset_s: float = 0.0
 
+    # Observing site (for the eclipse circumstances and the Sun's centre).
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None  # east positive
+    elevation_m: float = 0.0
+    camera_utc_offset_h: Optional[float] = None  # only needed when the files carry no time zone
+
     lens_profile: str = ""  # forced lensfun lens label, empty = automatic
     use_lensfun: bool = True
     bias_files: list[str] = field(default_factory=list)

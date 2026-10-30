@@ -64,6 +64,33 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("file")
     p.add_argument("--lensfun-db")
 
+    p = sub.add_parser("eclipse", help="eclipse circumstances (contacts, duration) for a site")
+    p.add_argument("--date", required=True, help="eclipse date, e.g. 2024-04-08")
+    p.add_argument("--lat", type=float, required=True, help="latitude, degrees north")
+    p.add_argument("--lon", type=float, required=True, help="longitude, degrees east (west is negative)")
+    p.add_argument("--elev", type=float, default=0.0, help="elevation, metres")
+    p.add_argument("--utc-offset", type=float, help="also show local times at this UTC offset, hours")
+    p.add_argument("--delta-t", type=float, help="TT-UT in seconds (default: the measured or predicted value)")
+    p.add_argument("--elements", help="JSON file with Besselian elements for other eclipses")
+
+    p = sub.add_parser("align", help="align the light frames of a project on the corona and find the Sun's centre")
+    p.add_argument("project", help="project file made by 'tse inventory --project'")
+    p.add_argument("--lat", type=float, help="observing site latitude (saved in the project)")
+    p.add_argument("--lon", type=float, help="observing site longitude, east positive (saved in the project)")
+    p.add_argument("--elev", type=float, help="observing site elevation, metres")
+    p.add_argument("--clock-error", type=float,
+                   help="seconds to add to the camera's UT to get true UT, if known; otherwise bounded from totality")
+    p.add_argument("--camera-utc-offset", type=float, help="camera time zone, hours, when the files carry none")
+    p.add_argument("--window", type=int, default=2048, help="analysis window in superpixels (default 2048)")
+    p.add_argument("--rotation", choices=["drift", "per-frame", "none"], default="drift",
+                   help="field rotation: smooth drift over time (default), per frame, or none")
+    p.add_argument("--any-angle", action="store_true", help="search any rotation and scale (alt-az mounts)")
+    p.add_argument("--rho", type=float, default=8.0, help="tangential filter length, px (default 8)")
+    p.add_argument("--output", "-o", help="alignment results file (default: next to the project)")
+    p.add_argument("--profile-dir", help="folder of saved own-flats profiles")
+    p.add_argument("--lensfun-db")
+    p.add_argument("--quiet", action="store_true")
+
     sub.add_parser("doctor", help="show which optional readers are available")
 
     args = parser.parse_args(argv)
@@ -77,6 +104,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_doctor()
     if args.command == "frame":
         return cmd_frame(args)
+    if args.command == "eclipse":
+        return cmd_eclipse(args)
+    if args.command == "align":
+        return cmd_align(args)
     if args.command == "flat-profile":
         return cmd_flat_profile(args)
     return 1
@@ -239,6 +270,67 @@ def cmd_lens(args) -> int:
         else:
             vign = "no vignetting data for these settings"
         print(f"{m.score:5.1f}  {m.lens.label()}  [{m.lens.source_file}]  {vign}")
+    return 0
+
+
+def cmd_eclipse(args) -> int:
+    from .eclipse import LocalEclipse, Site, elements_for
+
+    try:
+        el = elements_for(args.date, args.elements)
+    except KeyError as exc:
+        print(exc.args[0])
+        return 1
+    circ = LocalEclipse(el, Site(args.lat, args.lon, args.elev), args.delta_t).circumstances()
+    print(circ.describe(args.utc_offset))
+    return 0
+
+
+def cmd_align(args) -> int:
+    from .align import AlignParams
+    from .calibration import plan_calibration
+    from .eclipse import Site
+    from .pipeline import default_loader, run_alignment
+
+    path = Path(args.project)
+    project = EventProject.load(path)
+    if args.lat is not None:
+        project.latitude = args.lat
+    if args.lon is not None:
+        project.longitude = args.lon
+    if args.elev is not None:
+        project.elevation_m = args.elev
+    if args.camera_utc_offset is not None:
+        project.camera_utc_offset_h = args.camera_utc_offset
+    inv = project.inventory
+    lights = inv.lights()
+    db = _db(args.lensfun_db)
+    library = load_profile_library(args.profile_dir)
+    plan = plan_calibration(lights, db, None, lens_name=project.lens_profile or None,
+                            use_lensfun=project.use_lensfun, profiles=library)
+    cam = db.find_camera(lights[0].camera_make, lights[0].camera_model) if lights and not db.empty else None
+    crop = cam.crop_factor if cam else 1.0
+    site = None
+    if project.latitude is not None and project.longitude is not None:
+        site = Site(project.latitude, project.longitude, project.elevation_m)
+    params = AlignParams(rho=args.rho, rotation_model=args.rotation, coarse_rotation=args.any_angle,
+                         solve_rotation=args.rotation != "none")
+    say = (lambda m: None) if args.quiet else print
+    try:
+        result = run_alignment(lights, default_loader(plan, crop), params, window=args.window, site=site,
+                               clock_error_s=args.clock_error, crop_factor=crop,
+                               utc_offset_h=project.camera_utc_offset_h, progress=say)
+    except RuntimeError as exc:
+        print(exc)
+        return 1
+    out = Path(args.output) if args.output else path.with_name(path.stem + "_align.json")
+    result.save(out)
+    project.parameters["align"] = {"file": str(out), "rho": args.rho, "rotation": args.rotation,
+                                   "window": args.window, "clock_error": args.clock_error}
+    project.save(path)
+    print()
+    print(result.describe())
+    print(f"\nAlignment saved to {out}")
     return 0
 
 
