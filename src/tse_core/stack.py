@@ -468,6 +468,8 @@ def write_outputs(hdr, weight, crop, matches, infos, ref_index, moon_frame, sun,
     header = {"OBJECT": "Solar corona", "BUNIT": "relative", "CROPX0": X0, "CROPY0": Y0,
               "REFFRAME": ref_index, "MOONFRM": moon_frame,
               "COMMENT": "Linear HDR stack in units of the reference exposure, camera RGB"}
+    if wb is not None:
+        header.update({"WBR": float(wb[0]), "WBG": float(wb[1]), "WBB": float(wb[2])})
     mf = infos[moon_frame]
     header.update({"MOONX": mf.moon_x - X0, "MOONY": mf.moon_y - Y0, "MOONR": mf.moon_r})
     if sun:

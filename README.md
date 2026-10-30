@@ -19,7 +19,7 @@ from each frame's metadata.
 | 1 | RAW inventory, bracket detection, lensfun lookup, calibration planning, project files | **done** |
 | 2 | Geometry (lunar limb, Moon track, Sun centre) and phase correlation alignment | **done** (command line) |
 | 3 | Moon-aware linear HDR stacking | **done** (command line) |
-| 4 | NRGF, FNRGF, FNRGF-N, adaptive kernel filter | planned |
+| 4 | NRGF, FNRGF, FNRGF-N, adaptive filter, natural layer, blend | **done** (command line) |
 | 5 | Full GUI and packaging | planned |
 
 ## Supported files
@@ -203,6 +203,38 @@ A full 45-megapixel frame needs about 3 GB of free memory at the peak.
 | `<name>_weight.fit` | sum of weights per pixel (where the data came from) |
 | `<name>_preview.tif` | 16-bit asinh stretch with the camera white balance, for a quick look only |
 | `<name>_stack.json` | gains, offsets and settings |
+
+## Enhancement (Phase 4)
+
+```bash
+tse enhance eclipse2024.json          # uses the HDR stack saved by 'tse stack'
+```
+
+Writes one 16-bit RGB TIFF per layer, all the same size and lined up pixel
+for pixel, ready to stack as layers in Photoshop, plus a suggested blend:
+
+| Layer | What it shows |
+| --- | --- |
+| `natural` | log stretch with most of the radial fall-off removed (`--flatten`, default 0.8); the eye-view look |
+| `nrgf` | normalizing-radial-graded filter (Morgan et al. 2006): each circle around the Sun normalized to the same mean and spread |
+| `fnrgf` | Fourier NRGF (Druckmüllerová et al. 2011): mean and spread follow position angle too, so faint and bright regions at the same height get similar contrast |
+| `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
+| `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the log image: fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
+| `blend` | suggested mix, `--blend natural=0.4,fnrgf_n=0.3,adaptive=0.3` by default (`--blend none` to skip) |
+
+The Sun's centre and radius come from the stack header, so the circles are
+centred on the true Sun, not the Moon. Circles that leave a rectangular
+frame are completed from further in, so the frame edge does not show as an
+arc.
+
+Colour: by default the inner corona (1.2-2.5 solar radii) is made neutral,
+since K-corona light is scattered sunlight; `--white camera` uses the
+camera's as-shot balance, `--saturation 0` gives monochrome. Colour is faded
+to grey where the signal is buried in noise. The Moon is black (an
+earthshine layer is planned).
+
+FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
+`--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
 
 ## Calibration rules
 

@@ -15,6 +15,7 @@ from .frames import format_exposure, parse_duration
 from .inventory import Inventory, find_raw_files
 from .lensfun import LensfunDatabase, corner_falloff, download_database, import_database
 from .metadata import ExifToolReader, rawpy_available, read_frames
+from .enhance import DEFAULT_BLEND, LAYERS
 from .project import EventProject
 from .vignetting_profile import VignettingProfile, fit_profile_from_files, load_profile_library
 
@@ -123,6 +124,27 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lensfun-db")
     p.add_argument("--quiet", action="store_true")
 
+    p = sub.add_parser("enhance", help="reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend")
+    p.add_argument("project", help="project file (run 'tse stack' on it first)")
+    p.add_argument("--hdr", help="HDR FITS file (default: the one saved by 'tse stack')")
+    p.add_argument("--output", "-o", help="output folder (default: next to the project)")
+    p.add_argument("--name", help="output file name prefix (default: the project name)")
+    p.add_argument("--layers", default=",".join(LAYERS),
+                   help=f"comma-separated layers to write (default: all of {', '.join(LAYERS)})")
+    p.add_argument("--blend", default=",".join(f"{k}={v}" for k, v in DEFAULT_BLEND.items()),
+                   help="suggested blend as layer=weight pairs, or 'none' (default: %(default)s)")
+    p.add_argument("--order", type=int, default=10, help="FNRGF Fourier order (default 10)")
+    p.add_argument("--segments", type=int, default=50, help="FNRGF angular segments (default 50)")
+    p.add_argument("--mean-att", help="FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0)")
+    p.add_argument("--std-att", help="FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0)")
+    p.add_argument("--noise-m", type=float, default=0.7, help="FNRGF-N noise compensation, 0..0.99 (default 0.7)")
+    p.add_argument("--flatten", type=float, default=0.8,
+                   help="natural layer: how much of the radial fall-off to remove, 0..1 (default 0.8)")
+    p.add_argument("--saturation", type=float, default=1.0, help="colour saturation, 0 = monochrome (default 1)")
+    p.add_argument("--white", choices=["corona", "camera", "none"], default="corona",
+                   help="white balance: inner corona neutral (default), the camera's as-shot, or none")
+    p.add_argument("--quiet", action="store_true")
+
     sub.add_parser("doctor", help="show which optional readers are available")
 
     args = parser.parse_args(argv)
@@ -146,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_align(args)
     if args.command == "stack":
         return cmd_stack(args)
+    if args.command == "enhance":
+        return cmd_enhance(args)
     if args.command == "flat-profile":
         return cmd_flat_profile(args)
     return 1
@@ -517,6 +541,67 @@ def cmd_stack(args) -> int:
         return 1
     project.parameters["stack"] = {"align": str(align_path), "radii": radii, "moon_frame": result.moon_frame,
                                    **result.outputs}
+    project.save(path)
+    print()
+    print(result.describe())
+    return 0
+
+
+def _floats(text):
+    return [float(v) for v in text.split(",") if v.strip()] if text else None
+
+
+def cmd_enhance(args) -> int:
+    import numpy as np
+
+    from .enhance import EnhanceParams, enhance
+    from .fits import read_fits
+
+    path = Path(args.project)
+    project = EventProject.load(path)
+    stack = project.parameters.get("stack", {})
+    hdr_path = args.hdr or stack.get("hdr")
+    if not hdr_path or not Path(hdr_path).exists():
+        print(f"No HDR stack found{' at ' + hdr_path if hdr_path else ''}; run 'tse stack {path}' first.")
+        return 1
+    weight_path = stack.get("weight") if not args.hdr else str(hdr_path).replace("_hdr.fit", "_weight.fit")
+    layers = tuple(x.strip() for x in args.layers.split(",") if x.strip())
+    bad = [x for x in layers if x not in LAYERS]
+    if bad:
+        print(f"unknown layer(s): {', '.join(bad)}; choose from {', '.join(LAYERS)}")
+        return 1
+    blend = {}
+    if args.blend and args.blend.lower() != "none":
+        try:
+            for item in args.blend.split(","):
+                k, v = item.split("=")
+                blend[k.strip()] = float(v)
+        except ValueError:
+            print("--blend takes layer=weight pairs, for example natural=0.4,fnrgf_n=0.3,adaptive=0.3")
+            return 1
+        bad = [k for k in blend if k not in LAYERS]
+        if bad:
+            print(f"unknown blend layer(s): {', '.join(bad)}; choose from {', '.join(LAYERS)}")
+            return 1
+    data, header = read_fits(hdr_path)
+    hdr = np.ascontiguousarray(np.moveaxis(data, 0, -1)) if data.ndim == 3 else np.repeat(data[..., None], 3, 2)
+    del data
+    if weight_path and Path(weight_path).exists():
+        weight, _ = read_fits(weight_path)
+    else:
+        print("no weight map found; treating every pixel as equally reliable (FNRGF-N noise estimate is rough)")
+        weight = np.ones(hdr.shape[:2], np.float32)
+    if "MOONX" not in header:
+        print(f"{hdr_path} has no Moon/Sun geometry in its header; was it made by 'tse stack'?")
+        return 1
+    params = EnhanceParams(layers=layers, segments=args.segments, order=args.order,
+                           mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
+                           noise_m=args.noise_m, flatten=args.flatten, saturation=args.saturation,
+                           white=args.white, blend=blend)
+    say = (lambda m: None) if args.quiet else print
+    out_dir = Path(args.output) if args.output else path.parent
+    result, _ = enhance(hdr, weight, header, params, out_dir=out_dir, name=args.name or path.stem, progress=say)
+    project.parameters["enhance"] = {"hdr": str(hdr_path), **result.layers}
     project.save(path)
     print()
     print(result.describe())
