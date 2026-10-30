@@ -62,6 +62,7 @@ class EnhanceParams:
     mgn_k: float = 0.7
     saturation: float = 1.0  # colour saturation of every layer (0 = monochrome)
     white: str = "corona"  # "corona" (inner corona is white), "camera" (as-shot), or "none"
+    neutral_background: bool = True  # make the sky background grey (removes colour casts in the faint corona)
     moon_margin_px: float = 1.5
     blend: dict = field(default_factory=lambda: dict(DEFAULT_BLEND))
 
@@ -388,8 +389,27 @@ def mgn(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, flo
 # ---------------------------------------------------------------------------
 
 
+def sky_background(rgb: np.ndarray, r: np.ndarray, valid: np.ndarray, g: Geometry) -> np.ndarray:
+    """Per-channel level of the darkest sky, far from the Sun.
+
+    Twilight sky, airglow and small black-level residuals add a constant to
+    each channel. It is invisible in the bright inner corona but a log
+    stretch or a radial filter brings the faint outer corona up to the same
+    brightness, and then a few counts' difference between channels shows as
+    an overall colour cast.
+    """
+    far = valid & (r > 3.0 * g.sun_r)
+    if far.sum() < 1000:
+        far = valid & (r > np.percentile(r[valid], 80)) if valid.any() else valid
+    if far.sum() < 100:
+        return np.zeros(3, np.float32)
+    lum = rgb[..., :3].mean(axis=2)[far]
+    dark = lum <= np.percentile(lum, 5)
+    return np.array([np.median(rgb[..., c][far][dark]) for c in range(3)], np.float32)
+
+
 def white_balance(rgb: np.ndarray, r: np.ndarray, valid: np.ndarray, g: Geometry, mode: str,
-                  camera_wb: Optional[Sequence[float]]) -> np.ndarray:
+                  camera_wb: Optional[Sequence[float]], background: Optional[np.ndarray] = None) -> np.ndarray:
     """Channel multipliers. 'corona': the inner corona (1.2-2.5 R) is white, as K-corona light is
     scattered sunlight; 'camera': the as-shot multipliers stored with the stack."""
     if mode == "camera" and camera_wb:
@@ -398,7 +418,8 @@ def white_balance(rgb: np.ndarray, r: np.ndarray, valid: np.ndarray, g: Geometry
         ring = valid & (r > 1.2 * g.sun_r) & (r < 2.5 * g.sun_r)
         if ring.sum() < 100:
             ring = valid
-        med = np.array([np.median(rgb[..., c][ring]) for c in range(3)])
+        bg = np.zeros(3) if background is None else background
+        med = np.array([np.median(rgb[..., c][ring]) - bg[c] for c in range(3)])
         m = med[1] / np.maximum(med, 1e-12)
     else:
         m = np.ones(3)
@@ -432,11 +453,15 @@ class EnhanceResult:
     layers: dict  # name -> output path (or array when not written)
     white: list
     noise_scale: float
+    background: list
     scales: list
     notes: list = field(default_factory=list)
 
     def describe(self) -> str:
         lines = [f"White balance multipliers (R, G, B): {', '.join(f'{v:.3f}' for v in self.white)}",
+                 f"Sky background after white balance (R, G, B): "
+                 f"{', '.join(f'{v:.3g}' for v in self.background)}"
+                 + (" (neutralized)" if self.background and max(self.background) != min(self.background) else ""),
                  f"Adaptive filter scales (px): {', '.join(f'{s:.1f}' for s in self.scales)}"]
         lines += [f"{k}: {v}" for k, v in self.layers.items()]
         lines += [f"Note: {n}" for n in self.notes]
@@ -464,11 +489,15 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     camera_wb = None
     if all(k in header for k in ("WBR", "WBG", "WBB")):
         camera_wb = [header["WBR"], header["WBG"], header["WBB"]]
-    wb = white_balance(hdr, r, valid, g, p.white, camera_wb)
+    bg = sky_background(hdr, r, valid, g)
+    wb = white_balance(hdr, r, valid, g, p.white, camera_wb, bg)
     hdr *= wb[None, None, :]
+    bg = bg * wb
+    if p.neutral_background:
+        hdr -= (bg - bg.mean())[None, None, :]
     rgb = hdr
     lum = rgb.mean(axis=2)
-    say(f"white balance {wb.round(3).tolist()}")
+    say(f"white balance {wb.round(3).tolist()}; sky background {bg.tolist()}")
 
     noise = noise_map(lum, weight, valid)
     nlev = float(np.median(noise[valid & (noise > 0)])) if (valid & (noise > 0)).any() else 0.0
@@ -527,12 +556,12 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             del img
             say(f"wrote {paths[k]}")
         info = {"params": {k: (list(v) if isinstance(v, tuple) else v) for k, v in asdict(p).items()},
-                "white": wb.tolist(), "noise_level": nlev, "scales": scales, "geometry": asdict(g)}
+                "white": wb.tolist(), "background": bg.tolist(), "noise_level": nlev, "scales": scales, "geometry": asdict(g)}
         (out / f"{name}_enhance.json").write_text(json.dumps(info, indent=2, default=float), encoding="utf-8")
         paths["info"] = str(out / f"{name}_enhance.json")
     else:
         colour = {k: np.clip(v[..., None] * col, 0.0, 1.0).astype(np.float32) for k, v in layers.items()}
-    return EnhanceResult(paths, wb.tolist(), nlev, scales, notes), colour
+    return EnhanceResult(paths, wb.tolist(), nlev, bg.tolist(), scales, notes), colour
 
 
 def _write_tiff(path: Path, img: np.ndarray) -> Path:

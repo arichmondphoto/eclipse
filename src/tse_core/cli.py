@@ -143,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--saturation", type=float, default=1.0, help="colour saturation, 0 = monochrome (default 1)")
     p.add_argument("--white", choices=["corona", "camera", "none"], default="corona",
                    help="white balance: inner corona neutral (default), the camera's as-shot, or none")
+    p.add_argument("--keep-background-colour", action="store_true",
+                   help="do not neutralize the colour of the sky background")
     p.add_argument("--quiet", action="store_true")
 
     sub.add_parser("doctor", help="show which optional readers are available")
@@ -597,7 +599,8 @@ def cmd_enhance(args) -> int:
     params = EnhanceParams(layers=layers, segments=args.segments, order=args.order,
                            mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
                            noise_m=args.noise_m, flatten=args.flatten, saturation=args.saturation,
-                           white=args.white, blend=blend)
+                           white=args.white, blend=blend,
+                           neutral_background=not args.keep_background_colour)
     say = (lambda m: None) if args.quiet else print
     out_dir = Path(args.output) if args.output else path.parent
     result, _ = enhance(hdr, weight, header, params, out_dir=out_dir, name=args.name or path.stem, progress=say)

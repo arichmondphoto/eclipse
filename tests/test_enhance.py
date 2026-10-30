@@ -159,3 +159,27 @@ def test_cli_enhance(tmp_path, capsys):
     assert cli.main(["enhance", str(path), "--white", "camera", "--blend", "none", "--layers", "natural",
                      "--quiet"]) == 0
     assert "blend" not in EventProject.load(path).parameters["enhance"]
+
+
+def test_sky_background_cast_is_removed():
+    """A small green sky offset would tint the whole stretched image green."""
+    img, g = _scene(size=(300, 400), sun=(200.0, 150.0), r_sun=30.0, noise=0.0005)
+    sky = np.array([0.002, 0.006, 0.003], np.float32)  # green-heavy sky / black-level residual
+    hdr = np.stack([img, img, img], axis=-1) + sky
+    weight = np.ones(img.shape, np.float32)
+    header = {"SUNX": g.sun_x, "SUNY": g.sun_y, "SUNR": g.sun_r, "MOONX": g.moon_x, "MOONY": g.moon_y,
+              "MOONR": g.moon_r}
+    res, layers = E.enhance(hdr.copy(), weight, header, E.EnhanceParams(layers=("natural", "fnrgf_n")))
+    assert res.white == pytest.approx([1.0, 1.0, 1.0], abs=0.02)  # the corona itself is white
+    r, _, _ = _valid(img.shape, g)
+    outer = r > 3.5 * g.sun_r  # faint corona, where the sky matters
+
+    def green(out):
+        sel = outer & (out.mean(axis=2) > 0.05)
+        return np.median(((out[..., 1] - 0.5 * (out[..., 0] + out[..., 2])) / out.mean(axis=2))[sel])
+
+    for name in ("natural", "fnrgf_n"):
+        assert abs(green(layers[name])) < 0.005, name
+    _, cast = E.enhance(hdr.copy(), weight, header, E.EnhanceParams(layers=("natural",), blend={},
+                                                                         neutral_background=False))
+    assert green(cast["natural"]) > 0.01  # the cast it fixes
