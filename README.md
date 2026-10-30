@@ -77,6 +77,7 @@ tse lens "AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" --focal 400 --aperture 8
 tse flat-profile FLATS                       # fit and save a vignetting profile from your own flats
 tse inventory RAW --profile my_profile.json  # use one profile for every frame
 tse frame DSC_4100.NEF                       # show everything read from one file
+tse frames eclipse2024.json --exclude DSC_9108.nef   # leave a frame out (--include to undo)
 tse eclipse --date 2024-04-08 --lat 36.9422 --lon -90.3343 --utc-offset -5   # contacts and duration
 tse align eclipse2024.json --lat 36.9422 --lon -90.3343 --elev 110           # align and find the Sun
 ```

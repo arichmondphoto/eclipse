@@ -30,3 +30,25 @@ def test_lens_command(capsys):
                      "--lensfun-db", str(DATA)]) == 0
     out = capsys.readouterr().out.splitlines()[0]
     assert "Nikon AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" in out and "82%" in out
+
+
+def test_frames_exclude_and_include(tmp_path, capsys):
+    from tse_core.inventory import Inventory
+    from tse_core.project import EventProject
+
+    project = EventProject(name="t")
+    project.set_inventory(Inventory(make_frames(ECLIPSE_2024)))
+    path = tmp_path / "p.json"
+    project.save(path)
+    assert cli.main(["frames", str(path), "--exclude", "DSC_0021.NEF", "dsc_0034.nef"]) == 0
+    loaded = EventProject.load(path)
+    roles = {f.file_name: f.role for f in loaded.inventory.frames}
+    assert roles["DSC_0021.NEF"] == roles["DSC_0034.NEF"] == "excluded"
+    assert len(loaded.inventory.lights()) == 35
+    # A re-scan of the folder keeps the exclusions.
+    loaded.set_inventory(Inventory(make_frames(ECLIPSE_2024)))
+    assert len(loaded.inventory.lights()) == 35
+    assert cli.main(["frames", str(path), "--include", "DSC_0021.NEF"]) == 0
+    assert len(EventProject.load(path).inventory.lights()) == 36
+    assert cli.main(["frames", str(path), "--exclude", "nope.nef"]) == 1
+    assert "not in this project" in capsys.readouterr().out

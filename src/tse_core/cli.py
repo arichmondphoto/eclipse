@@ -73,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--delta-t", type=float, help="TT-UT in seconds (default: the measured or predicted value)")
     p.add_argument("--elements", help="JSON file with Besselian elements for other eclipses")
 
+    p = sub.add_parser("frames", help="list a project's frames, or exclude / include some")
+    p.add_argument("project")
+    p.add_argument("--exclude", nargs="+", metavar="FILE", help="leave these frames out (file names)")
+    p.add_argument("--include", nargs="+", metavar="FILE", help="use these frames again")
+
     p = sub.add_parser("elements-update", help="download NASA's Besselian elements for every eclipse (1600-2400)")
     p.add_argument("--from", dest="source", help="use a downloaded copy of NASA's canon CSV instead")
 
@@ -112,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_frame(args)
     if args.command == "eclipse":
         return cmd_eclipse(args)
+    if args.command == "frames":
+        return cmd_frames(args)
     if args.command == "elements-update":
         return cmd_elements_update(args.source)
     if args.command == "align":
@@ -279,6 +286,38 @@ def cmd_lens(args) -> int:
             vign = "no vignetting data for these settings"
         print(f"{m.score:5.1f}  {m.lens.label()}  [{m.lens.source_file}]  {vign}")
     return 0
+
+
+def cmd_frames(args) -> int:
+    path = Path(args.project)
+    project = EventProject.load(path)
+    inv = project.inventory
+    by_name = {f.file_name.lower(): f for f in inv.frames}
+    changed, unknown = [], []
+    for names, role in ((args.exclude or [], "excluded"), (args.include or [], "light")):
+        for name in names:
+            f = by_name.get(Path(name).name.lower())
+            if f is None:
+                unknown.append(name)
+                continue
+            if f.role != role:
+                f.role = role
+                if "role" not in f.overrides:
+                    f.overrides.append("role")
+                changed.append(f"{f.file_name}: {role}")
+    if changed:
+        project.store_inventory(inv)
+        project.save(path)
+    for c in changed:
+        print(c)
+    for u in unknown:
+        print(f"not in this project: {u}")
+    if not (args.exclude or args.include):
+        for f in inv.frames:
+            print(f"{f.index:>3}  {f.file_name:<16} {f.exposure_text or '':>8}  {f.role}")
+    lights = sum(f.role == "light" for f in inv.frames)
+    print(f"{lights} of {len(inv.frames)} frames in use")
+    return 1 if unknown else 0
 
 
 def cmd_elements_update(source=None) -> int:
