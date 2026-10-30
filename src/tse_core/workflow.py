@@ -460,3 +460,65 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
     project.parameters["earthshine"] = {**result.outputs, "frames": result.frames}
     project.save(path)
     return result
+
+
+def read_image(path: str, step: int = 1) -> np.ndarray:
+    """A 16-bit (or 8-bit) TIFF/PNG layer as float RGB in 0..1, optionally every ``step``-th pixel."""
+    if str(path).lower().endswith((".tif", ".tiff")):
+        import tifffile
+
+        data = tifffile.imread(path)
+    else:
+        from PIL import Image
+
+        data = np.asarray(Image.open(path).convert("RGB"))
+    data = data[::step, ::step]
+    if data.ndim == 2:
+        data = np.repeat(data[..., None], 3, axis=2)
+    scale = 65535.0 if data.dtype == np.uint16 else 255.0
+    return data[..., :3].astype(np.float32) / scale
+
+
+def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, mode: str = "screen",
+                preview_side: Optional[int] = None, name: Optional[str] = None,
+                say: Optional[Say] = None, cancel=None):
+    """The chosen enhanced layer with the earthshine blended into the lunar disc.
+
+    With ``preview_side`` returns a reduced image (no file); otherwise writes
+    ``<name>_final.tif`` next to the project and returns its path.
+    """
+    from .earthshine import composite
+
+    say = reporter(say, cancel)
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    base_path = resolve(path, project.parameters.get("enhance", {}).get(base_layer))
+    if not base_path:
+        raise WorkflowError(f"No '{base_layer}' layer yet: write the full-size layers on the Enhance tab first.")
+    earth_path = resolve(path, project.parameters.get("earthshine", {}).get("earthshine"))
+    if not earth_path:
+        raise WorkflowError("No earthshine layer yet: click 'Stack earthshine' first.")
+    step = 1
+    if preview_side:
+        import tifffile
+
+        with tifffile.TiffFile(base_path) as t:
+            h, w = t.pages[0].shape[:2]
+        step = max(1, int(math.ceil(max(h, w) / preview_side)))
+    say("reading the layers")
+    base = read_image(base_path, step)
+    earth = read_image(earth_path, step)
+    if base.shape != earth.shape:
+        raise WorkflowError("The earthshine layer and the enhanced layer differ in size: re-run the earthshine "
+                            "step after the latest stack.")
+    out = composite(base, earth, strength, mode)
+    if preview_side:
+        return out
+    say("writing the final image")
+    import tifffile
+
+    final = path.parent / f"{name or path.stem}_final.tif"
+    tifffile.imwrite(final, (out * 65535 + 0.5).astype(np.uint16), photometric="rgb")
+    project.parameters["final"] = {"file": str(final), "base": base_layer, "strength": strength, "mode": mode}
+    project.save(path)
+    return str(final)

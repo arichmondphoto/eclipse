@@ -69,4 +69,20 @@ n = len(QMessageBox.log)
 win.earthshine_tab.run()
 print("earthshine message:", QMessageBox.log[-1][1][:80])
 assert len(QMessageBox.log) == n + 1 and "Stack step" in QMessageBox.log[-1][1]
+# Final image: needs an earthshine layer; with a fake one the size of the blend, preview and write work.
+import tifffile
+blend = tifffile.imread(et.outputs["blend"])
+fake = np.zeros_like(blend)
+tifffile.imwrite(T / "e_earthshine.tif", fake, photometric="rgb")
+pp = EventProject.load(path)
+pp.parameters["earthshine"] = {"earthshine": str(T / "e_earthshine.tif")}
+pp.save(path)
+win.reload_project()
+es = win.earthshine_tab
+es.strength.setValue(1.5)
+es.preview_final()
+assert es._final_shown
+es.write_final()
+assert Path(es.final_path).exists() and EventProject.load(path).parameters["final"]["strength"] == 1.5
+print("final image:", Path(es.final_path).name)
 print("GUI SMOKE OK")

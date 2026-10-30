@@ -298,6 +298,12 @@ gentle gradient, is removed with a smooth surface (`--glare-order`, default
 | `<name>_earthshine_crop.tif` | the same, cropped to the Moon |
 | `<name>_earthshine.fit` | the Moon-aligned linear stack before glare removal |
 
+To skip Photoshop, blend it in here: `tse final eclipse2024.json` (or the
+**Blend into the image** box on the Earthshine tab, with a preview) puts the
+earthshine into the lunar disc of the suggested blend (`--base` picks
+another layer), at `--strength` (1 = as stacked) in `--mode` screen
+(default), lighten or add, and writes `<name>_final.tif`.
+
 The report gives the lunar detail over the noise; below about 3 the layer
 is mostly noise (short exposures, low ISO or a bright sky).
 

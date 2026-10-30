@@ -156,3 +156,45 @@ def test_workflow_and_cli(tmp_path, monkeypatch, run, capsys):
     assert "Lunar surface detail" in out
     saved = EventProject.load(tmp_path / "e.json").parameters["earthshine"]
     assert Path(saved["earthshine"]).exists() and sorted(saved["frames"]) == [0, 1, 2, 3]
+
+
+def test_composite_fills_disc_and_keeps_corona():
+    from tse_core.earthshine import composite
+
+    base = np.full((10, 10, 3), 0.7, np.float32)
+    base[3:7, 3:7] = 0.0  # black lunar disc in the corona layer
+    earth = np.zeros_like(base)
+    earth[3:7, 3:7] = 0.3
+    for mode in ("screen", "lighten", "add"):
+        out = composite(base, earth, 1.0, mode)
+        assert np.allclose(out[0, 0], 0.7) and np.allclose(out[4, 4], 0.3), mode
+    assert np.allclose(composite(base, earth, 2.0)[4, 4], 0.6)
+    with pytest.raises(ValueError):
+        composite(base, earth, 1.0, "multiply")
+
+
+def test_final_image_workflow(tmp_path):
+    import tifffile
+
+    from tse_core import workflow as W
+    from tse_core.project import EventProject
+
+    base = (np.full((40, 60, 3), 0.5) * 65535).astype(np.uint16)
+    base[10:30, 20:40] = 0
+    earth = np.zeros_like(base)
+    earth[12:28, 22:38] = 20000
+    tifffile.imwrite(tmp_path / "e_blend.tif", base, photometric="rgb")
+    tifffile.imwrite(tmp_path / "e_earthshine.tif", earth, photometric="rgb")
+    p = EventProject(name="e")
+    p.parameters["enhance"] = {"blend": "e_blend.tif"}
+    p.parameters["earthshine"] = {"earthshine": "e_earthshine.tif"}
+    p.save(tmp_path / "e.json")
+    prev = W.final_image(tmp_path / "e.json", preview_side=30)
+    assert prev.shape == (20, 30, 3)
+    out = W.final_image(tmp_path / "e.json", strength=1.5, mode="lighten")
+    img = tifffile.imread(out)
+    assert img[20, 30, 0] == pytest.approx(min(65535, 20000 * 1.5), abs=2)
+    assert img[0, 0, 0] == pytest.approx(32768, abs=2)
+    assert EventProject.load(tmp_path / "e.json").parameters["final"]["mode"] == "lighten"
+    with pytest.raises(W.WorkflowError, match="'natural' layer"):
+        W.final_image(tmp_path / "e.json", base_layer="natural")

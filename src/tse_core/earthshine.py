@@ -228,3 +228,32 @@ def _tiff(path: Path, grey: np.ndarray) -> Path:
         path = path.with_suffix(".png")
         Image.fromarray((rgb >> 8).astype(np.uint8)).save(path)
         return path
+
+
+# ---------------------------------------------------------------------------
+# Compositing into the corona image
+# ---------------------------------------------------------------------------
+
+MODES = ("screen", "lighten", "add")
+
+
+def composite(base: np.ndarray, earth: np.ndarray, strength: float = 1.0, mode: str = "screen") -> np.ndarray:
+    """Put the earthshine layer into the corona image, as Photoshop's blend modes would.
+
+    Both are display images in 0..1 of the same size. The corona layers are
+    black inside the lunar disc and the earthshine layer is black outside it,
+    so any of the modes leaves the corona untouched and fills the disc;
+    they differ only where both have light (the soft edge of the limb).
+    ``strength`` scales the earthshine first (like layer opacity, but it can
+    go above 1 to brighten a faint Moon).
+    """
+    e = np.clip(earth * strength, 0.0, 1.0)
+    if mode == "screen":
+        out = 1.0 - (1.0 - base) * (1.0 - e)
+    elif mode == "lighten":
+        out = np.maximum(base, e)
+    elif mode == "add":
+        out = base + e
+    else:
+        raise ValueError(f"unknown mode {mode!r}; choose from {', '.join(MODES)}")
+    return np.clip(out, 0.0, 1.0).astype(np.float32)

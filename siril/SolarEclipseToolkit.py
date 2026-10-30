@@ -1089,6 +1089,55 @@ class EarthshineTab(StepTab):
         self.open_btn = QPushButton("Open earthshine layer in Siril")
         self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.layer_path))
         self.settings_layout.addWidget(self.open_btn)
+
+        final = QGroupBox("Blend into the image (instead of Photoshop)")
+        ff = QFormLayout(final)
+        self.base = QComboBox()
+        for k in ("blend", "natural", "fnrgf_n", "fnrgf", "nrgf", "adaptive"):
+            self.base.addItem(LAYER_NAMES[k], k)
+        ff.addRow("Corona layer:", self.base)
+        self.strength = QDoubleSpinBox()
+        self.strength.setRange(0.0, 3.0)
+        self.strength.setSingleStep(0.1)
+        self.strength.setValue(1.0)
+        ff.addRow("Earthshine strength:", self.strength)
+        self.mode = QComboBox()
+        self.mode.addItems(["screen", "lighten", "add"])
+        ff.addRow("Blend mode:", self.mode)
+        fb = QHBoxLayout()
+        self.final_preview_btn = QPushButton("Preview")
+        self.final_preview_btn.clicked.connect(self.preview_final)
+        self.final_btn = QPushButton("Write final image")
+        self.final_btn.clicked.connect(self.write_final)
+        fb.addWidget(self.final_preview_btn)
+        fb.addWidget(self.final_btn)
+        ff.addRow(fb)
+        self.open_final_btn = QPushButton("Open final image in Siril")
+        self.open_final_btn.clicked.connect(lambda: self.main.open_in_siril(self.final_path))
+        ff.addRow(self.open_final_btn)
+        self.settings_layout.addWidget(final)
+        self.run_buttons += [self.final_preview_btn, self.final_btn]
+        self.final_path = ""
+        self.final_timer = QTimer(self)
+        self.final_timer.setSingleShot(True)
+        self.final_timer.setInterval(500)
+        self.final_timer.timeout.connect(self.preview_final)
+        self._final_shown = False
+        for w in (self.strength,):
+            w.valueChanged.connect(self._final_changed)
+        for w in (self.base, self.mode):
+            w.currentIndexChanged.connect(self._final_changed)
+        _tip(final, "Puts the earthshine into the lunar disc of one of the enhanced corona layers and writes the "
+             "finished picture as a 16-bit TIFF (<project>_final.tif), so Photoshop is optional. Needs the "
+             "full-size layers from the Enhance tab and the earthshine stack above.")
+        _tip(self.base, "Which enhanced corona layer to use. Blend (default) is the suggested mix; any single "
+             "layer works too. Change the blend itself on the Enhance tab and write the layers again.", ff)
+        _tip(self.strength, "How bright the earthshine is in the final picture: 1 = as stacked, 0 = a black "
+             "Moon, above 1 brightens a faint Moon (and its noise).", ff)
+        _tip(self.mode, "How the two are combined, as Photoshop's layer modes. The corona is black inside the "
+             "disc and the earthshine black outside it, so they differ only at the soft edge of the limb. "
+             "screen (default): smooth and never clips; lighten: the brighter of the two; add: the sum "
+             "(can clip at the limb).", ff)
         self.settings_layout.addStretch(1)
         self.layer_path = ""
         self.view = ImageView()
@@ -1111,7 +1160,46 @@ class EarthshineTab(StepTab):
         _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken; "
              "they would blur the lunar surface.")
 
+    def _final_changed(self, *_a) -> None:
+        if self._final_shown:
+            self.final_timer.start()
+
+    def preview_final(self) -> None:
+        if self.worker is not None:
+            return
+        base, k, mode = self.base.currentData(), self.strength.value(), self.mode.currentText()
+        self.start("Preview of the final image",
+                   lambda p, say, cancel: W.final_image(p, base, k, mode, preview_side=1400, say=say, cancel=cancel),
+                   self._final_preview_done, reload=False)
+
+    def _final_preview_done(self, img) -> None:
+        self._final_shown = True
+        self.view.show_array(img)
+
+    def write_final(self) -> None:
+        base, k, mode = self.base.currentData(), self.strength.value(), self.mode.currentText()
+        self.start("Writing the final image",
+                   lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel), self._final_done)
+
+    def _final_done(self, path) -> None:
+        self.final_path = path
+        self.open_final_btn.setEnabled(True)
+        self.log.appendPlainText(f"Final image written to {path}")
+        QMessageBox.information(self, "Final image", f"Wrote\n{path}")
+
     def load_project(self, project: EventProject, path: Path) -> None:
+        fin = project.parameters.get("final", {})
+        self.final_path = W.resolve(path, fin.get("file"))
+        self.open_final_btn.setEnabled(bool(self.final_path))
+        if fin.get("base"):
+            i = self.base.findData(fin["base"])
+            if i >= 0:
+                self.base.setCurrentIndex(i)
+        if fin.get("mode"):
+            self.mode.setCurrentText(fin["mode"])
+        if fin.get("strength") is not None:
+            self.strength.setValue(float(fin["strength"]))
+        self._final_shown = False
         e = project.parameters.get("earthshine", {})
         self.layer_path = W.resolve(path, e.get("earthshine"))
         self.open_btn.setEnabled(bool(self.layer_path))

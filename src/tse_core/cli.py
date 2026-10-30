@@ -163,6 +163,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lensfun-db")
     p.add_argument("--quiet", action="store_true")
 
+    p = sub.add_parser("final", help="blend the earthshine into an enhanced layer and write the finished image")
+    p.add_argument("project")
+    p.add_argument("--base", default="blend", choices=list(LAYERS) + ["blend"],
+                   help="enhanced layer to use as the corona (default: blend)")
+    p.add_argument("--strength", type=float, default=1.0, help="earthshine brightness, 1 = as stacked (default 1)")
+    p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"], help="blend mode (default screen)")
+    p.add_argument("--name", help="output file name prefix (default: the project name)")
+    p.add_argument("--quiet", action="store_true")
+
     sub.add_parser("doctor", help="show which optional readers are available")
 
     args = parser.parse_args(argv)
@@ -190,6 +199,14 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_enhance(args)
     if args.command == "earthshine":
         return cmd_earthshine(args)
+    if args.command == "final":
+        from .workflow import final_image
+
+        out, code = _run(final_image, args.project, args.base, args.strength, args.mode, name=args.name,
+                         quiet=args.quiet)
+        if not code:
+            print(f"Final image written to {out}")
+        return code
     if args.command == "flat-profile":
         return cmd_flat_profile(args)
     return 1
