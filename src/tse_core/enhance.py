@@ -45,7 +45,8 @@ from scipy import ndimage
 Say = Callable[[str], None]
 
 LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive")
-DEFAULT_BLEND = {"natural": 0.4, "fnrgf_n": 0.3, "adaptive": 0.3}
+# The natural layer is the base; the others are soft-light layers at these opacities.
+DEFAULT_BLEND = {"natural": 1.0, "fnrgf_n": 0.7, "adaptive": 0.5}
 
 
 @dataclass
@@ -237,11 +238,17 @@ def ring_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray,
     # the last ring where it had data, scaled by the smooth radial trend: coronal structure
     # is close to radial, so this continues streamers outwards instead of inventing an edge.
     have = cnt > 1e-3 * np.maximum(cnt.max(axis=1, keepdims=True), 1e-12)
-    trend_m = _trend(ring_mean, rc > 0)
-    trend_s = _trend(ring_std, rc > 0)
-    mean = _fill_segments(mean, have, trend_m)
-    std = _fill_segments(std, have, trend_s)
-    nstd = _fill_segments(nstd, have, trend_s)
+    complete = have.all(axis=1)
+    mean = _fill_segments(mean, have, _trend(ring_mean, complete))
+    std = _fill_segments(std, have, _trend(seg_std, complete))
+    nstd = _fill_segments(nstd, have, _trend(seg_std, complete))
+    # Whole-circle statistics again, now from the completed circles, so the NRGF and the natural
+    # layer do not jump where one side of a circle leaves the frame and the sky there differs.
+    data = rc > 0
+    ring_mean = np.where(data, mean.mean(axis=1), ring_mean)
+    ring_std = np.where(data, np.sqrt((std**2 + (mean - mean.mean(axis=1, keepdims=True)) ** 2).mean(axis=1)),
+                        ring_std)
+    seg_std = np.where(data, std.mean(axis=1), seg_std)
     # Fourier coefficients of the (now complete) circles: the paper's eqs. 2-4.
     centres = 2 * math.pi * (np.arange(segments) + 0.5) / segments
     cols = [np.full(segments, 1.0 / segments)]
@@ -252,10 +259,28 @@ def ring_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray,
     return RingStats(out[0], out[1], out[2], order, ring_mean, ring_std, seg_std)
 
 
-def _trend(prof: np.ndarray, have: np.ndarray, sigma: float = 15.0) -> np.ndarray:
-    """Smooth, positive radial trend of a ring profile (for scaling carried-over values)."""
-    v = np.log(np.maximum(_carry(prof, have), 1e-30))
-    return np.exp(ndimage.gaussian_filter1d(v, sigma, mode="nearest"))
+def _trend(prof: np.ndarray, complete: np.ndarray, sigma: float = 15.0) -> np.ndarray:
+    """Smooth radial trend of a profile, for scaling values carried outwards.
+
+    Taken only from circles that lie wholly inside the frame (partial circles
+    are biased by whichever side is left), and continued beyond them as a
+    power law fitted to the outer quarter of those circles.
+    """
+    n = len(prof)
+    idx = np.nonzero(complete & (prof > 0))[0]
+    if len(idx) < 10:
+        return np.ones(n)
+    v = np.log(np.maximum(prof, 1e-30))
+    filled = np.interp(np.arange(n), idx, v[idx])
+    sm = ndimage.gaussian_filter1d(filled, sigma, mode="nearest")
+    last = idx[-1]
+    fit = idx[idx >= idx[0] + 0.75 * (last - idx[0])]
+    if len(fit) >= 5:
+        slope, icpt = np.polyfit(np.log(fit + 0.5), sm[fit], 1)
+        slope = min(slope, 0.0)  # never brighten outwards
+        rr = np.arange(last + 1, n)
+        sm[last + 1:] = sm[last] + slope * (np.log(rr + 0.5) - np.log(last + 0.5))
+    return np.exp(sm)
 
 
 def _fill_segments(y: np.ndarray, have: np.ndarray, trend: np.ndarray) -> np.ndarray:
@@ -351,17 +376,39 @@ def radial_profile(x: np.ndarray, r: np.ndarray, valid: np.ndarray, smooth: floa
     return prof
 
 
-def natural(x: np.ndarray, r: np.ndarray, valid: np.ndarray, noise_level: float, flatten: float) -> np.ndarray:
+def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
+            flatten: float) -> np.ndarray:
     """Log stretch with part of the radial fall-off removed."""
     floor = max(noise_level, 1e-9)
     lg = np.log(np.maximum(x, 0) + floor).astype(np.float32)
-    prof = radial_profile(lg, r, valid)
+    # Circle averages from completed circles (see ring_stats), so no arcs at the frame edges.
+    prof = ring_stats(lg - lg[valid].min(), r, phi, valid, 36, 0, 2.0).ring_mean + lg[valid].min()
     ri = np.clip(r - 0.5, 0, len(prof) - 1.001)
     i0 = ri.astype(np.int32)
     t = ri - i0
     base = (1 - t) * prof[i0] + t * prof[i0 + 1]
     out = lg - np.float32(flatten) * base.astype(np.float32)
     out = stretch(out, valid, 0.5, 99.9)
+    out[~valid] = 0.0
+    return out
+
+
+def soft_light(base: np.ndarray, top: np.ndarray) -> np.ndarray:
+    """Photoshop-style soft light (Pegtop form): 50 % grey on top leaves the base unchanged."""
+    return (1 - 2 * top) * base * base + 2 * top * base
+
+
+def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray) -> np.ndarray:
+    """The natural layer as the base, each filter layer applied in soft light at its weight
+    (like layer opacity in Photoshop). The filter layers are centred on mid-grey, so they add
+    structure without lifting the dark sky."""
+    base = layers["natural"].copy() if "natural" in weights else np.full_like(next(iter(layers.values())), 0.5)
+    for k, w in weights.items():
+        if k == "natural":
+            continue
+        w = min(max(w, 0.0), 1.0)
+        base = (1 - w) * base + w * soft_light(base, layers[k])
+    out = stretch(base, valid, 0.05, 99.95)
     out[~valid] = 0.0
     return out
 
@@ -520,7 +567,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             continue
         say(f"layer {name_l}")
         if name_l == "natural":
-            y = natural(lum, r, valid, nlev, p.flatten)
+            y = natural(lum, r, phi, valid, nlev, p.flatten)
         elif name_l == "nrgf":
             y = to_unit(nrgf(lum, r, valid, stats), valid)
         elif name_l == "fnrgf":
@@ -535,11 +582,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     notes = []
     blend_w = {k: float(v) for k, v in p.blend.items() if v and k in layers}
     if blend_w:
-        tot = sum(blend_w.values())
-        b = sum(layers[k] * (v / tot) for k, v in blend_w.items())
-        b = stretch(b, valid, 0.2, 99.9)
-        b[~valid] = 0.0
-        layers["blend"] = b
+        layers["blend"] = soft_light_blend(layers, blend_w, valid)
     unknown = set(p.blend) - set(LAYERS)
     if unknown:
         notes.append(f"unknown blend layer(s) ignored: {', '.join(sorted(unknown))}")

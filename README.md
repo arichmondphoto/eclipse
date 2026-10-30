@@ -220,7 +220,22 @@ for pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | `fnrgf` | Fourier NRGF (Druckmüllerová et al. 2011): mean and spread follow position angle too, so faint and bright regions at the same height get similar contrast |
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
 | `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the log image: fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
-| `blend` | suggested mix, `--blend natural=0.4,fnrgf_n=0.3,adaptive=0.3` by default (`--blend none` to skip) |
+| `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light at the given opacities, `--blend natural=1,fnrgf_n=0.7,adaptive=0.5` by default (`--blend none` to skip); the same thing you would do with layers in Photoshop |
+
+The layers are already stretched: each filter maps the linear data to
+display brightness itself (a log stretch for `natural` and `adaptive`, the
+filter's own normalization and a soft S-curve for the NRGF family). Run
+`tse enhance` on the linear HDR stack, never on a stretched copy, and use
+only gentle curves or levels on the results.
+
+In Photoshop: `natural` at the bottom in Normal mode, `fnrgf_n` above it in
+Soft Light (40-70 %), `adaptive` above that in Soft Light (20-40 %). The
+filter layers are centred on mid-grey, which Soft Light treats as "no
+change"; desaturate them so the colour comes from the natural layer.
+
+The sky background is made neutral grey before filtering, so a small
+per-channel sky or black-level offset does not tint the faint corona
+(`--keep-background-colour` to skip).
 
 The Sun's centre and radius come from the stack header, so the circles are
 centred on the true Sun, not the Moon. Circles that leave a rectangular
