@@ -458,6 +458,8 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
     canvas = tuple(info["crop"]) if len(info["crop"]) == 4 else (info["crop"][0], info["crop"][1], info["crop"][2],
                                                                  info["crop"][2])
     p = params or EarthshineParams()
+    if p.albedo_map and not Path(p.albedo_map).exists() and resolve(path, p.albedo_map):
+        p.albedo_map = resolve(path, p.albedo_map)
     gmax = max((matches[f.index].gain for f in infos if f.index in matches), default=0)
     use = [f for f in infos if f.index in matches and matches[f.index].gain >= gmax * 2.0 ** (-p.stops)]
     if not use:
@@ -475,6 +477,8 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
     except (RuntimeError, ValueError) as exc:
         raise WorkflowError(str(exc)) from exc
     project.parameters["earthshine"] = {**result.outputs, "frames": result.frames}
+    if p.albedo_map:
+        project.parameters["earthshine"].update(albedo_map=p.albedo_map, albedo_strength=p.albedo_strength)
     project.save(path)
     return result
 

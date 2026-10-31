@@ -50,6 +50,9 @@ class EarthshineParams:
     limb_glare: bool = True  # also model the steep glare just inside the limb
     limb_shape: bool = True  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
     colour_limb: bool = True  # near the limb use the blue channel, which has less red chromosphere glare
+    albedo_map: str = ""  # lunar albedo map (equirectangular, 0 deg longitude centred) to guide the glare removal
+    albedo_strength: float = 0.5  # how much the map guides it, 0..1 (only used with a map)
+    albedo_min_match: float = 0.6  # the map is not used if it matches the middle of the disc less well than this
     limb_px: float = 1.5  # the layer reaches this far past the limb, to meet the corona layers' black disc
     feather_px: float = 1.0  # soft edge of the disc in the layer
     saturation_level: float = 0.95
@@ -366,15 +369,58 @@ def limb_falloff(res: np.ndarray, good: np.ndarray, cx: float, cy: float, r: flo
     return out
 
 
-def remove_glare(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams"):
-    """The lunar surface left after taking away the glare: returns (detail, glare)."""
-    glare = glare_surface(img, good, cx, cy, r, p.glare_order, limb=p.limb_glare)
+def remove_glare(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams",
+                 prior: Optional[np.ndarray] = None):
+    """The lunar surface left after taking away the glare: returns (detail, glare).
+
+    ``prior``: what the lunar surface is expected to add (from an albedo map). It is taken
+    away only while the glare is *estimated*, so the estimate does not mistake maria for
+    glare; the detail returned is always ``img`` minus the glare, i.e. your data.
+    """
+    est = img if prior is None else np.where(good, img - prior, 0.0).astype(np.float32)
+    glare = glare_surface(est, good, cx, cy, r, p.glare_order, limb=p.limb_glare)
     if p.limb_glare:
         if p.limb_shape:
-            glare = glare + limb_falloff(np.where(good, img - glare, 0.0).astype(np.float32), good, cx, cy, r,
+            glare = glare + limb_falloff(np.where(good, est - glare, 0.0).astype(np.float32), good, cx, cy, r,
                                          d0=p.margin_px)
-        glare = glare * limb_background(img, glare, good, cx, cy, r)
+        glare = glare * limb_background(est, glare, good, cx, cy, r)
     return np.where(good, img - glare, 0.0).astype(np.float32), glare
+
+
+def remove_glare_guided(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams",
+                        prior: np.ndarray, iters: int = 2):
+    """:func:`remove_glare` with an albedo-map prior, corrected towards the data first.
+
+    Wherever the data can tell (what is left after the glare estimate is not glare-shaped),
+    the prior is pulled towards the data, a blurred step at a time; so a feature the map has
+    but your Moon does not is mostly rejected, and the map only fills in what the data cannot
+    separate from glare. On simulations a false mare 25 px inside the limb comes through at
+    about 15-20% of its strength in the map (times ``albedo_strength``), and not at all
+    40 px or more inside.
+    """
+    pr = prior.astype(np.float32).copy()
+    sig = max(1.0, 0.02 * r)
+    for _ in range(iters):
+        _, glare = remove_glare(img, good, cx, cy, r, p, pr)
+        resid = np.where(good, img - pr - glare, 0.0).astype(np.float32)
+        num = ndimage.gaussian_filter(resid, sig)
+        den = ndimage.gaussian_filter(good.astype(np.float32), sig)
+        pr = np.where(good, pr + num / np.maximum(den, 1e-6), 0.0).astype(np.float32)
+    return remove_glare(img, good, cx, cy, r, p, pr)
+
+
+def albedo_prior(amap: np.ndarray, detail: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float,
+                 p: "EarthshineParams", orientation=None):
+    """The albedo map turned to the image and scaled to ``detail`` (see moonmap.guide).
+
+    Returns (prior or None, orientation, note): None when the map does not match well enough.
+    """
+    from .moonmap import guide
+
+    tmpl, o, k = guide(amap, detail, good, cx, cy, r, orientation)
+    if o.correlation < p.albedo_min_match or k <= 0:
+        return None, o, (f"{o.describe()}: too poor a match (below {p.albedo_min_match:.2f}), map not used")
+    return (p.albedo_strength * tmpl).astype(np.float32), o, o.describe()
 
 
 def colour_blend_limb(detail: np.ndarray, detail_c: np.ndarray, good: np.ndarray, rr: np.ndarray, r: float,
@@ -403,7 +449,8 @@ def colour_blend_limb(detail: np.ndarray, detail_c: np.ndarray, good: np.ndarray
 
 
 def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: float, cy: float, moon_r: float,
-                 p: EarthshineParams, limb_channel: Optional[np.ndarray] = None):
+                 p: EarthshineParams, limb_channel: Optional[np.ndarray] = None,
+                 albedo: Optional[np.ndarray] = None):
     """From the Moon-aligned stack to the picture: glare removed, smoothed by how certain it is.
 
     Returns (detail, shown, snr, keep_from, notes): ``keep_from`` is the depth inside the
@@ -414,8 +461,20 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
     yy, xx = np.mgrid[0:h, 0:w]
     rr = np.hypot(xx - cx, yy - cy)
     detail, glare = remove_glare(lum, good, cx, cy, moon_r, p)
+    orientation = None
+    if albedo is not None and p.albedo_strength > 0:
+        prior, orientation, note = albedo_prior(albedo, detail, good, cx, cy, moon_r, p)
+        notes.append(note)
+        if prior is not None:
+            detail, glare = remove_glare_guided(lum, good, cx, cy, moon_r, p, prior)
+        else:
+            orientation = None
     if limb_channel is not None and p.colour_limb:
         detail_c, _ = remove_glare(limb_channel, good, cx, cy, moon_r, p)
+        if orientation is not None:
+            prior_c, _, _ = albedo_prior(albedo, detail_c, good, cx, cy, moon_r, p, orientation)
+            if prior_c is not None:
+                detail_c, _ = remove_glare_guided(limb_channel, good, cx, cy, moon_r, p, prior_c)
         detail, k, corr = colour_blend_limb(detail, detail_c, good, rr, moon_r)
         if not (corr > 0.6 and k > 0):
             notes.append(f"the blue channel does not match the others well (correlation {corr:.2f}); "
@@ -529,7 +588,16 @@ def stack_earthshine(
     if good.sum() < 100:
         raise ValueError("no usable pixels inside the lunar disc")
 
-    detail, shown, snr, keep_from, more = process_disc(lum, weight, good, cx, cy, moon_r, p, limb_channel=rgb[2])
+    albedo = None
+    if p.albedo_map and p.albedo_strength > 0:
+        from .moonmap import load_map
+
+        try:
+            albedo = load_map(p.albedo_map)
+        except (OSError, ValueError) as exc:
+            notes.append(f"albedo map not used: {exc}")
+    detail, shown, snr, keep_from, more = process_disc(lum, weight, good, cx, cy, moon_r, p, limb_channel=rgb[2],
+                                                       albedo=albedo)
     notes += more
 
     outputs = {}

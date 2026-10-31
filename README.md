@@ -385,7 +385,24 @@ match the others and blended into all channels from 10% to 25% of the
 radius in: much of the glare that changes quickly round the limb is red
 light from the chromosphere and prominences (`--no-colour-limb`; skipped
 when blue does not match the other channels). `<name>_earthshine_rgb.fit`
-holds the stack per channel. `--no-limb-glare` turns this off.
+holds the stack per channel. `--no-limb-glare` turns all of the limb glare
+handling off.
+
+**Albedo map (optional).** `--albedo-map lroc_color_2k.jpg` (or **Albedo
+map** on the Earthshine tab) uses a map of the Moon's surface brightness to
+help tell maria near the limb from glare. Any 2:1 equirectangular map with
+0° longitude in the middle works, for example the colour map from NASA's
+[CGI Moon Kit](https://svs.gsfc.nasa.gov/4720) (credit: NASA's Scientific
+Visualization Studio). The map is turned to match your Moon (rotation,
+mirror and libration are searched against the pattern in the middle of your
+disc, so no clock or site is needed); if the match is below 0.6 it is not
+used. It is blurred, scaled to your data and only subtracted while the glare
+is *estimated*; the glare estimate is then subtracted from your data, so
+nothing from the map is added to the picture. Where your data can tell the
+surface from glare, the map is first pulled towards your data, so a feature
+the map has and your Moon does not is mostly rejected. On simulations a
+false mare 25 px inside the limb came through at about 15–20% of
+`--albedo-strength` (default 0.5), and not at all 45 px or more inside.
 
 The shown layer gets a little extra smoothing (up to `--edge-smooth`, 3 px)
 only where the noise is high: the last pixels by the limb, where the long

@@ -162,6 +162,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="do not fit the limb glare as light fading inward (that fit keeps maria by the limb)")
     p.add_argument("--no-colour-limb", action="store_true",
                    help="do not use the blue channel near the limb (it has less red chromosphere glare)")
+    p.add_argument("--albedo-map", default="",
+                   help="lunar albedo map (2:1, 0 deg longitude centred, e.g. lroc_color_2k.jpg from NASA's CGI Moon "
+                        "Kit) to guide the glare removal near the limb")
+    p.add_argument("--albedo-strength", type=float, default=0.5,
+                   help="how much the map guides it, 0-1 (default 0.5); nothing from the map is added to the picture")
     p.add_argument("--glare-order", type=int, default=2,
                    help="smoothness of the glare removed from the disc: polynomial order (default 2)")
     p.add_argument("--smooth", type=float, default=1.0, help="smoothing of the layer in pixels (default 1, 0 = none)")
@@ -613,7 +618,8 @@ def cmd_earthshine(args) -> int:
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
                               brightness=args.brightness, limb_glare=not args.no_limb_glare,
                               limb_darkening=args.limb_darkening, edge_smooth=args.edge_smooth,
-                              limb_shape=not args.no_limb_shape, colour_limb=not args.no_colour_limb)
+                              limb_shape=not args.no_limb_shape, colour_limb=not args.no_colour_limb,
+                              albedo_map=args.albedo_map, albedo_strength=args.albedo_strength)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,
                         output=args.output, name=args.name, profile_dir=args.profile_dir,
                         lensfun_db=args.lensfun_db, fmt=args.format, quiet=args.quiet)

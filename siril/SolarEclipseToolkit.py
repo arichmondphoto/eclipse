@@ -1180,6 +1180,19 @@ class EarthshineTab(StepTab):
         self.edge_smooth.setValue(3.0)
         self.edge_smooth.setSuffix(" px")
         f.addRow("Smoothing near the limb:", self.edge_smooth)
+        arow = QHBoxLayout()
+        self.albedo_path = QLineEdit()
+        self.albedo_path.setPlaceholderText("none (optional)")
+        abrowse = QPushButton("Browse…")
+        abrowse.clicked.connect(self._pick_albedo)
+        arow.addWidget(self.albedo_path, 1)
+        arow.addWidget(abrowse)
+        f.addRow("Albedo map:", arow)
+        self.albedo_strength = QDoubleSpinBox()
+        self.albedo_strength.setRange(0.0, 1.0)
+        self.albedo_strength.setSingleStep(0.1)
+        self.albedo_strength.setValue(0.5)
+        f.addRow("Map guidance:", self.albedo_strength)
         self.include_rejected = QCheckBox("Include frames flagged as off the Moon's track")
         f.addRow(self.include_rejected)
         self.settings_layout.addWidget(box)
@@ -1264,6 +1277,15 @@ class EarthshineTab(StepTab):
              "steeply, far faster than the glare surface above can follow. Left in, it shows as a bright ring "
              "inside the limb and leaves the middle of the Moon dark. Leave this on unless you want to see that "
              "raw glare.")
+        _tip(self.albedo_path, "Optional: a map of the Moon's surface brightness, in the usual 2:1 world-map "
+             "layout with 0 degrees longitude in the middle (for example lroc_color_2k.jpg from NASA's CGI Moon "
+             "Kit, svs.gsfc.nasa.gov/4720). It helps tell maria near the limb from glare. It is turned to match your "
+             "Moon automatically and only guides the glare removal: nothing from the map is added to your picture.",
+             f)
+        _tip(self.albedo_strength, "How much the albedo map guides the glare removal near the limb, from 0 (not at "
+             "all) to 1. Where your data can tell maria from glare, it overrides the map; the map only decides what "
+             "the data cannot, in the outer ~30 px. On tests a mare the map has but the Moon does not came through "
+             "at about 15-20% of this strength 25 px inside the limb, and not at all further in.", f)
         _tip(self.limb_shape, "Glare from just outside the Moon can only get fainter going inward, while a sea "
              "(mare) near the edge is a dark dip and highlands a bright bump. With this on, only light that "
              "fades inward is taken away around the edge, so seas near the limb such as Crisium survive.")
@@ -1299,6 +1321,12 @@ class EarthshineTab(StepTab):
                 self.base.setCurrentIndex(0)  # nothing chosen: back to the last-written blend
         self._show_base()
         self._final_changed()
+
+    def _pick_albedo(self) -> None:
+        start = self.albedo_path.text().strip() or str(self.main.frames.project_dir())
+        fname, _ = QFileDialog.getOpenFileName(self, "Lunar albedo map", start, "Images (*.jpg *.jpeg *.tif *.tiff *.png)")
+        if fname:
+            self.albedo_path.setText(fname)
 
     def _show_base(self) -> None:
         self.base_label.setText(f"File: {Path(self.base_file).name}" if self.base.currentData() == "file"
@@ -1348,6 +1376,11 @@ class EarthshineTab(StepTab):
         QMessageBox.information(self, "Final image", f"Wrote\n{path}")
 
     def load_project(self, project: EventProject, path: Path) -> None:
+        es = project.parameters.get("earthshine", {})
+        if es.get("albedo_map"):
+            self.albedo_path.setText(W.resolve(path, es["albedo_map"]) or es["albedo_map"])
+        if es.get("albedo_strength") is not None:
+            self.albedo_strength.setValue(float(es["albedo_strength"]))
         fin = project.parameters.get("final", {})
         self.final_path = W.resolve(path, fin.get("file"))
         self.open_final_btn.setEnabled(bool(self.final_path))
@@ -1377,7 +1410,9 @@ class EarthshineTab(StepTab):
                                   smooth=self.smooth.value(), brightness=self.brightness.value(),
                                   limb_glare=self.limb_glare.isChecked(), limb_darkening=self.limb_dark.value(),
                                   edge_smooth=self.edge_smooth.value(), limb_shape=self.limb_shape.isChecked(),
-                                  colour_limb=self.colour_limb.isChecked())
+                                  colour_limb=self.colour_limb.isChecked(),
+                                  albedo_map=self.albedo_path.text().strip(),
+                                  albedo_strength=self.albedo_strength.value())
         inc = self.include_rejected.isChecked()
         proj = self.main.ensure_saved()
         if proj is None:
