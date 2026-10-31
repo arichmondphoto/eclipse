@@ -235,20 +235,54 @@ def adaptive_smooth(img: np.ndarray, good: np.ndarray, factor: np.ndarray, base:
     return np.where(good, out, 0.0).astype(np.float32)
 
 
-def extend_to_limb(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r_in: float, r_out: float) -> np.ndarray:
-    """Carry the values just inside ``r_in`` straight out to ``r_out`` (along each radius).
+def extend_to_limb(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r_in: float, r_out: float,
+                   depth: float = 8.0, along: float = 16.0, blend: float = 6.0) -> np.ndarray:
+    """Fill from ``r_in`` out to ``r_out`` with the brightness just inside, followed round the limb.
 
-    The stack stays a few pixels inside the limb, where the frames' limbs and
-    the chromosphere would leak in; the corona layers only start just outside
-    it. Without this the gap between the two shows as a dark ring.
+    The stack stays a few pixels inside the limb (where the frames' limbs and the
+    chromosphere would leak in), and the last pixels it has are mostly noise; the
+    corona layers only start just outside the limb. Without a fill the gap shows as
+    a dark ring; copying single noisy pixels outwards shows as dark teeth. So the
+    fill is the median of a ``depth`` px ring just inside ``r_in``, in bins round
+    the limb about ``along`` px long (smoothed between bins), and it is blended in
+    over ``blend`` px so there is no seam.
     """
     h, w = img.shape
     yy, xx = np.mgrid[0:h, 0:w]
     rr = np.hypot(xx - cx, yy - cy)
-    band = (rr >= r_in) & (rr <= r_out + 1.0)
+    phi = np.arctan2(yy - cy, xx - cx)
     out = np.where(good, img, 0.0).astype(np.float32)
+    band = (rr >= r_in - blend) & (rr <= r_out + 1.0)
     if not band.any():
         return out
+    nb = max(16, int(round(2 * math.pi * r_in / max(along, 1.0))))
+    ring = good & (rr < r_in) & (rr >= r_in - depth)
+    if ring.sum() < nb:
+        ring = good & (rr < r_in) & (rr >= r_in - 3 * depth)
+    if not ring.any():
+        return out
+    bins = ((phi + math.pi) / (2 * math.pi) * nb).astype(int) % nb
+    prof = np.full(nb, np.nan)
+    vals = img[ring]
+    bi = bins[ring]
+    order = np.argsort(bi, kind="stable")
+    bi, vals = bi[order], vals[order]
+    starts = np.searchsorted(bi, np.arange(nb))
+    ends = np.searchsorted(bi, np.arange(nb), side="right")
+    for k in range(nb):
+        if ends[k] > starts[k]:
+            prof[k] = np.median(vals[starts[k]:ends[k]])
+    ok = np.isfinite(prof)
+    idx = np.arange(nb)
+    prof = np.interp(idx, idx[ok], prof[ok], period=nb)
+    prof = ndimage.gaussian_filter1d(prof, 1.0, mode="wrap")
+    pos = (phi[band] + math.pi) / (2 * math.pi) * nb - 0.5
+    fill = ndimage.map_coordinates(prof, [pos], order=1, mode="grid-wrap")
+    t = np.clip((rr[band] - (r_in - blend)) / max(blend, 1e-6), 0.0, 1.0)
+    t = 0.5 - 0.5 * np.cos(math.pi * t)
+    inner = np.where(good[band], out[band], fill)
+    out[band] = (inner * (1 - t) + fill * t).astype(np.float32)
+    return out
     # Sample a little inside the edge, from a copy smoothed with only the good pixels counted.
     g = good.astype(np.float32)
     num = ndimage.gaussian_filter(out, 1.0)

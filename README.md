@@ -380,8 +380,9 @@ The shown layer gets a little extra smoothing (up to `--edge-smooth`, 3 px)
 only where the noise is high: the last pixels by the limb, where the long
 exposures are saturated. Real structure such as diffraction spikes from a
 bright prominence is left alone. Where the noise is still ~20x that of the
-middle (the last ~10 px), the picture is carried straight out to 1.5 px
-past the limb. That is where the corona layers' black disc ends, so no dark
+middle (the last ~10 px), the edge is filled out to 1.5 px past the limb
+with the brightness just inside, taken round the limb in ~16 px steps
+(a median, so single noisy pixels do not show as teeth) and blended in. That is where the corona layers' black disc ends, so no dark
 ring shows between them. Removing the glare also removes the disc's overall
 shading, so it is put back: brightest in the middle and darker towards the
 limb, like a ball lit from the front (`--limb-darkening`, default 0.6 = the

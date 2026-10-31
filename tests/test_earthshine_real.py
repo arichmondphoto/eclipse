@@ -101,3 +101,20 @@ def test_shown_layer_is_calm_at_the_limb(disc):
                      for t in np.radians(np.arange(-180, 180, 5))])
     lo, hi = np.percentile(shown[body], [5, 95])
     assert ((secs < lo) | (secs > hi)).mean() < 0.05
+
+
+def test_edge_fill_has_no_teeth(disc):
+    """The filled edge follows the brightness round the limb smoothly: no dark or bright
+    teeth from single noisy pixels copied outwards."""
+    lum, weight, good, cx, cy, r, rr, phi = disc
+    detail, shown, snr, keep, notes = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
+    body = good & (rr < r * 0.9)
+    lo, hi = np.percentile(shown[body], [0.5, 99.5])
+    img = np.clip((shown - lo) / (hi - lo), 0, 1)
+    out = ES.extend_to_limb(img, good & (rr < r - keep), cx, cy, r - keep, r + 1.0)
+    band = (rr > r - keep + 1) & (rr < r)
+    # Neighbours round the limb differ by far less than the grain of the body.
+    shifted = ndimage.shift(out, (0, 1), order=0)
+    step = np.abs(out - shifted)[band & (np.abs(np.cos(phi)) < 0.3)]
+    grain = np.abs(img - ndimage.shift(img, (0, 1), order=0))[body]
+    assert np.percentile(step, 95) < 0.3 * np.percentile(grain, 95)
