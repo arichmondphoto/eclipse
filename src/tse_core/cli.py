@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("final", help="blend the earthshine into an enhanced layer and write the finished image")
     p.add_argument("project")
-    p.add_argument("--base", default="blend", choices=list(LAYERS) + ["blend"],
+    p.add_argument("--base", default="blend", choices=["blend", "natural"],
                    help="enhanced layer to use as the corona (default: blend, the last one written)")
     p.add_argument("--base-file", help="use this image as the corona instead (the size of the HDR stack)")
     p.add_argument("--strength", type=float, default=1.0, help="earthshine brightness, 1 = as stacked (default 1)")

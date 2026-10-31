@@ -1170,8 +1170,7 @@ class EarthshineTab(StepTab):
         ff = QFormLayout(final)
         self.base = QComboBox()
         self.base.addItem("Last-written blend", "blend")
-        for k in ("natural", "fnrgf_n", "fnrgf", "nrgf", "adaptive"):
-            self.base.addItem(f"Last-written {LAYER_NAMES[k]}", k)
+        self.base.addItem("Last-written Natural", "natural")
         self.base.addItem("From file…", "file")
         self.base_file = ""
         self.base.activated.connect(self._base_chosen)
@@ -1214,7 +1213,8 @@ class EarthshineTab(StepTab):
              "finished picture as a 16-bit TIFF (<project>_final.tif), so Photoshop is optional. Needs the "
              "full-size layers from the Enhance tab and the earthshine stack above.")
         _tip(self.base, "The corona picture the earthshine goes into.\n\nLast-written blend (default): the blend "
-             "most recently written on the Enhance tab; any single layer works too.\n\nFrom file…: pick any "
+             "most recently written on the Enhance tab.\n\nLast-written Natural: the natural layer alone, for a picture "
+             "without the filter layers.\n\nFrom file…: pick any "
              "image, for example a blend you saved earlier under another name, or one you finished elsewhere. "
              "It must be the full size of the HDR stack (not cropped or resized), so the Moon lines up.", ff)
         _tip(self.strength, "How bright the earthshine is in the final picture: 1 = as stacked, 0 = a black "
