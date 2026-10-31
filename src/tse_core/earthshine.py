@@ -45,6 +45,8 @@ class EarthshineParams:
     glare_order: int = 2  # polynomial order of the glare (a gentle gradient); higher also eats large maria
     smooth: float = 1.0  # Gaussian smoothing of the shown layer, px (0 = none)
     brightness: float = 0.6  # brightest lunar surface in the layer, 0..1 (the corona stays brighter)
+    limb_darkening: float = 0.6  # how much darker the limb is than the middle (0 = even, 1 = black at the limb)
+    edge_smooth: float = 3.0  # most smoothing where the noise is high near the limb, px
     limb_glare: bool = True  # also model the steep glare just inside the limb
     limb_px: float = 1.5  # the layer reaches this far past the limb, to meet the corona layers' black disc
     feather_px: float = 1.0  # soft edge of the disc in the layer
@@ -196,6 +198,21 @@ def limb_background(lum: np.ndarray, glare: np.ndarray, good: np.ndarray, cx: fl
     return out
 
 
+def limb_profile(rho: np.ndarray, darkening: float) -> np.ndarray:
+    """Brightness across the disc: 1 in the middle, ``1 - darkening`` at the limb.
+
+    The glare removal takes away the disc's overall brightness along with the
+    glare, leaving it evenly lit. A sphere lit from almost straight ahead
+    (the Earth is nearly behind us) looks brightest in the middle and darker
+    towards the limb, where the surface is seen obliquely; this puts that back
+    (sqrt(1 - rho^2), the cosine of the viewing angle). It also keeps the
+    noisier last pixels by the limb dim instead of smoothing them away.
+    """
+    mu = np.sqrt(np.clip(1.0 - np.asarray(rho, np.float64) ** 2, 0.0, 1.0))
+    d = float(np.clip(darkening, 0.0, 1.0))
+    return ((1.0 - d) + d * mu).astype(np.float32)
+
+
 def adaptive_smooth(img: np.ndarray, good: np.ndarray, factor: np.ndarray, base: float, cap: float = 12.0) -> np.ndarray:
     """Gaussian smoothing of ``base`` px, widened to ``base`` x ``factor`` (up to ``cap``) pixel by pixel.
 
@@ -268,14 +285,13 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
     noise = float(np.median(pix_noise[good]))
     body = good & (rr < moon_r * 0.5)
     noise_body = float(np.median(pix_noise[body])) if body.sum() > 100 else noise
-    # Smooth more where the picture is less certain: where the noise is higher (near the limb the
-    # long exposures are saturated) and where much glare was taken away (by a bright prominence).
-    floor = float(np.median(glare[body])) if body.sum() > 100 else float(np.median(glare[good]))
-    excess = ndimage.gaussian_filter(np.clip((glare - floor) / max(abs(floor), 1e-12), 0, None), 4.0)
-    factor = np.maximum(pix_noise / max(noise_body, 1e-30), (1.0 + excess) ** 1.5)
-    shown = adaptive_smooth(detail, good, factor, p.smooth) if p.smooth > 0 else detail
-    # Nearer the limb than where the noise is still ~10x that of the middle (more than the widest
-    # smoothing can calm), carry the picture out to the limb instead: only noise is left there.
+    # A little more smoothing where the noise is higher (near the limb the long exposures are
+    # saturated), up to ``edge_smooth`` px; diffraction spikes and other real structure are left alone.
+    factor = pix_noise / max(noise_body, 1e-30)
+    shown = (adaptive_smooth(detail, good, factor, p.smooth, cap=max(p.edge_smooth, p.smooth))
+             if p.smooth > 0 else detail)
+    # Nearer the limb than where the noise is still ~20x that of the middle, carry the picture
+    # out to the limb instead: only noise is left in those last few pixels.
     rings = np.arange(int(p.margin_px), int(moon_r * 0.2))
     ri = np.clip((moon_r - rr).astype(int), 0, rings[-1] + 1) if len(rings) else None
     keep_from = p.margin_px
@@ -283,16 +299,9 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
         ratio = pix_noise / max(noise_body, 1e-30)
         for d in rings:
             m = good & (ri == d)
-            if m.sum() > 20 and np.median(ratio[m]) < 10.0:
+            if m.sum() > 20 and np.median(ratio[m]) < 20.0:
                 keep_from = max(float(d), p.margin_px)
                 break
-    # Over the last few percent of the radius what is left of the glare is about as large as the
-    # lunar detail, so the contrast there is eased down (to 30%) towards the limb.
-    if p.limb_glare:
-        mid = float(np.median(shown[good & (rr < moon_r * 0.9)]))
-        c = np.clip((moon_r - rr - keep_from) / (0.06 * moon_r), 0.0, 1.0)
-        c = 0.3 + 0.7 * (0.5 - 0.5 * np.cos(math.pi * c))
-        shown = np.where(good, mid + (shown - mid) * c, 0.0).astype(np.float32)
     big = ndimage.gaussian_filter(detail, max(3.0, moon_r / 40))
     snr = float((np.percentile(big[good], 95) - np.percentile(big[good], 5)) / (noise / max(3.0, moon_r / 40) + 1e-30))
     if snr < 3:
@@ -397,6 +406,8 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     r_in = moon_r - (p.margin_px if keep_from is None else keep_from)
     shown_good = good & (np.hypot(xx - cx, yy - cy) < r_in)
     img = extend_to_limb(img, shown_good, cx, cy, r_in, edge)
+    # Brighter in the middle, darker towards the limb (also over the carried-out edge).
+    img = img * limb_profile(np.minimum(np.hypot(xx - cx, yy - cy) / moon_r, 1.0), p.limb_darkening)
     yy, xx = np.mgrid[0:h, 0:w]
     rr = np.hypot(xx - cx, yy - cy)
     fe = max(p.feather_px, 0.5)

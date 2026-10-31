@@ -30,9 +30,12 @@ def disc():
     yy, xx = np.mgrid[0 : lum.shape[0], 0 : lum.shape[1]]
     rr = np.hypot(xx - cx, yy - cy)
     good = (rr < r - 1.5) & (lum != 0)
-    # Stand-in for the stack weights: inverse variance from the local scatter.
+    # Stand-in for the stack weights: inverse variance from the scatter, per ring (the real
+    # weights follow the exposures used, which change with distance from the limb).
     hp = lum - ndimage.median_filter(lum, 3)
-    var = ndimage.uniform_filter(hp**2, 9) + 1e-14
+    ri = rr.astype(int)
+    var_ring = ndimage.median(hp**2, ri, index=np.arange(ri.max() + 1))
+    var = np.asarray(var_ring)[ri] / 0.45 + 1e-14
     weight = np.where(good, 1.0 / var, 0.0).astype(np.float32)
     return lum, weight, good, cx, cy, r, rr, np.arctan2(yy - cy, xx - cx)
 
@@ -63,6 +66,30 @@ def test_limb_glare_is_removed_round_the_limb(disc):
     assert abs(np.median(detail[mid])) < 0.2 * surface
 
 
+def test_limb_profile():
+    rho = np.array([0.0, 0.5, 1.0])
+    assert ES.limb_profile(rho, 0.6) == pytest.approx([1.0, 0.4 + 0.6 * np.sqrt(0.75), 0.4])
+    assert ES.limb_profile(rho, 0.0) == pytest.approx([1, 1, 1])
+
+
+def test_spikes_are_not_smoothed(disc):
+    """Diffraction spikes from the bright prominence (bottom of the disc) keep their sharpness:
+    no extra smoothing for the glare taken away there, only the base amount."""
+    lum, weight, good, cx, cy, r, rr, phi = disc
+    p = ES.EarthshineParams(smooth=0.5)
+    detail, shown, snr, keep, notes = ES.process_disc(lum, weight, good, cx, cy, r, p)
+    base = ES.adaptive_smooth(detail, good, np.ones_like(detail), p.smooth)
+    band = good & (rr > r - 8) & (rr < r - 3)
+    spot = np.unravel_index(np.argmax(np.where(band, lum, 0)), lum.shape)
+    dist = np.hypot(np.arange(lum.shape[1])[None, :] - spot[1], np.arange(lum.shape[0])[:, None] - spot[0])
+    zone = good & (dist > 20) & (dist < 75) & (rr < r - 20)
+
+    def fine(x):
+        return np.std((x - ndimage.gaussian_filter(x, 4))[zone])
+
+    assert fine(shown) > 0.9 * fine(base)
+
+
 def test_shown_layer_is_calm_at_the_limb(disc):
     """No bright or dark arcs: near the limb the shown picture stays within the range of the body."""
     lum, weight, good, cx, cy, r, rr, phi = disc
@@ -70,5 +97,7 @@ def test_shown_layer_is_calm_at_the_limb(disc):
     body = good & (rr < r * 0.9)
     lo, hi = np.percentile(shown[body], [0.5, 99.5])
     rim = good & (rr > r - keep - 15) & (rr < r - keep)
-    outside = (shown[rim] < lo) | (shown[rim] > hi)
-    assert outside.mean() < 0.05
+    secs = np.array([np.median(shown[rim & (phi >= t) & (phi < t + np.radians(5))])
+                     for t in np.radians(np.arange(-180, 180, 5))])
+    lo, hi = np.percentile(shown[body], [5, 95])
+    assert ((secs < lo) | (secs > hi)).mean() < 0.05

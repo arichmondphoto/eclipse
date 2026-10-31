@@ -222,7 +222,7 @@ def test_limb_glare_removed_and_layer_meets_the_corona(run, tmp_path):
     from tse_core.earthshine import composite
 
     mos, infos, tex, matches, ref = run
-    p = EarthshineParams()
+    p = EarthshineParams(limb_darkening=0.0)  # evenly lit, so a dark ring would stand out
     res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
                                         (0, 0, SIZE, SIZE), p, out_dir=tmp_path, name="t")
     X0, Y0, w, h = res.crop
@@ -286,3 +286,17 @@ def test_limb_glare_that_changes_quickly_round_the_limb():
     sm = ndimage.gaussian_filter(detail, 1.0)
     assert abs(np.median(sm[at_spot]) - np.median(sm[away])) < 1.5e-4  # earthshine itself is 4e-4
     assert _corr_with_truth(detail, res.crop, (ref.moon_x, ref.moon_y), tex) > 0.78
+
+
+def test_limb_darkening_in_the_layer(run, tmp_path):
+    import tifffile
+
+    mos, infos, tex, matches, ref = run
+    res, *_ = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
+                               (0, 0, SIZE, SIZE), EarthshineParams(limb_darkening=0.6), out_dir=tmp_path, name="d")
+    layer = tifffile.imread(res.outputs["earthshine"]).mean(axis=2)
+    yy, xx = np.mgrid[0:SIZE, 0:SIZE]
+    rf = np.hypot(xx - ref.moon_x, yy - ref.moon_y) / MOON_R
+    middle = np.median(layer[rf < 0.3])
+    edge = np.median(layer[(rf > 0.95) & (rf < 1.0)])
+    assert 0.3 < edge / middle < 0.6  # about 40-50% of the middle near the limb

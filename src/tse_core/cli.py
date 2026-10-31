@@ -163,6 +163,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--smooth", type=float, default=1.0, help="smoothing of the layer in pixels (default 1, 0 = none)")
     p.add_argument("--brightness", type=float, default=0.6,
                    help="brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona)")
+    p.add_argument("--limb-darkening", type=float, default=0.6,
+                   help="how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit)")
+    p.add_argument("--edge-smooth", type=float, default=3.0,
+                   help="most smoothing of the noisier pixels near the limb, px (default 3)")
     p.add_argument("--include-rejected", action="store_true")
     p.add_argument("--output", "-o", help="output folder (default: next to the project)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
@@ -603,7 +607,8 @@ def cmd_earthshine(args) -> int:
     from .workflow import earthshine
 
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
-                              brightness=args.brightness, limb_glare=not args.no_limb_glare)
+                              brightness=args.brightness, limb_glare=not args.no_limb_glare,
+                              limb_darkening=args.limb_darkening, edge_smooth=args.edge_smooth)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,
                         output=args.output, name=args.name, profile_dir=args.profile_dir,
                         lensfun_db=args.lensfun_db, fmt=args.format, quiet=args.quiet)

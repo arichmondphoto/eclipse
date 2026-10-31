@@ -1163,6 +1163,17 @@ class EarthshineTab(StepTab):
         self.brightness.setSingleStep(0.05)
         self.brightness.setValue(0.6)
         f.addRow("Brightness:", self.brightness)
+        self.limb_dark = QDoubleSpinBox()
+        self.limb_dark.setRange(0.0, 1.0)
+        self.limb_dark.setSingleStep(0.05)
+        self.limb_dark.setValue(0.6)
+        f.addRow("Darker towards the limb:", self.limb_dark)
+        self.edge_smooth = QDoubleSpinBox()
+        self.edge_smooth.setRange(0.0, 12.0)
+        self.edge_smooth.setSingleStep(0.5)
+        self.edge_smooth.setValue(3.0)
+        self.edge_smooth.setSuffix(" px")
+        f.addRow("Smoothing near the limb:", self.edge_smooth)
         self.include_rejected = QCheckBox("Include frames flagged as off the Moon's track")
         f.addRow(self.include_rejected)
         self.settings_layout.addWidget(box)
@@ -1252,6 +1263,13 @@ class EarthshineTab(StepTab):
              "also starts removing large maria; 1 removes a straight gradient only.", f)
         _tip(self.smooth, "Softens the noise in the layer, in pixels. Earthshine is faint, so a little smoothing "
              "(default 1) helps; 0 for none, 2-3 for very noisy data.", f)
+        _tip(self.limb_dark, "How much darker the edge of the Moon is than the middle: 0 = evenly lit, 0.6 = the "
+             "limb at 40% of the middle (the default), 1 = fading to black at the limb. Removing the glare also "
+             "removes the disc's overall shading; this puts back the look of a ball lit from the front, and keeps "
+             "the noisier last pixels by the limb dim.", f)
+        _tip(self.edge_smooth, "The last pixels by the limb are much noisier (the long exposures are saturated "
+             "there), so they get extra smoothing, up to this many pixels where the noise is highest. The rest "
+             "of the Moon only gets the Smoothing above. Lower it to keep more grain at the edge.", f)
         _tip(self.brightness, "How bright the brightest lunar surface is in the layer, from 0 to 1. Earthshine is "
              "much fainter than the corona, so the default 0.6 keeps it subdued; adjust to taste in Photoshop.", f)
         _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken; "
@@ -1344,7 +1362,8 @@ class EarthshineTab(StepTab):
 
         params = EarthshineParams(stops=self.stops.value(), glare_order=self.glare.value(),
                                   smooth=self.smooth.value(), brightness=self.brightness.value(),
-                                  limb_glare=self.limb_glare.isChecked())
+                                  limb_glare=self.limb_glare.isChecked(), limb_darkening=self.limb_dark.value(),
+                                  edge_smooth=self.edge_smooth.value())
         inc = self.include_rejected.isChecked()
         proj = self.main.ensure_saved()
         if proj is None:

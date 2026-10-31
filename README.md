@@ -376,15 +376,18 @@ degrees at the limb, widening further in (lunar features smaller than the
 window are kept; larger ones within ~0.25 radius of the limb are
 flattened). `--no-limb-glare` turns this off.
 
-The shown layer is smoothed more where it is less certain. That is where
-the noise is higher (the last pixels by the limb, where the long exposures
-are saturated) and where a lot of glare was taken away (around a bright
-prominence). The contrast is eased down over the last ~6% of the radius.
-Where the noise is still ~10x that of the middle, the picture is carried
-straight out to 1.5 px past the limb. That is where the corona layers'
-black disc ends, so no dark ring shows between them. The stretch is set
-from the body of the disc. `<name>_earthshine_weight.fit` holds the stack
-weights next to the linear stack.
+The shown layer gets a little extra smoothing (up to `--edge-smooth`, 3 px)
+only where the noise is high: the last pixels by the limb, where the long
+exposures are saturated. Real structure such as diffraction spikes from a
+bright prominence is left alone. Where the noise is still ~20x that of the
+middle (the last ~10 px), the picture is carried straight out to 1.5 px
+past the limb. That is where the corona layers' black disc ends, so no dark
+ring shows between them. Removing the glare also removes the disc's overall
+shading, so it is put back: brightest in the middle and darker towards the
+limb, like a ball lit from the front (`--limb-darkening`, default 0.6 = the
+limb at 40% of the middle; 0 = evenly lit). The stretch is set from the
+body of the disc. `<name>_earthshine_weight.fit` holds the stack weights
+next to the linear stack.
 
 | File | Contents |
 | --- | --- |
