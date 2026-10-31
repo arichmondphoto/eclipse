@@ -88,7 +88,7 @@ def test_steps_report_missing_inputs(tmp_path):
 
 
 def test_paths_stored_relative_to_another_folder(tmp_path, monkeypatch):
-    """A project made by 'tse' run inside its folder stores bare file names; the GUI (Siril) runs
+    """A project made by 'totality' run inside its folder stores bare file names; the GUI (Siril) runs
     from elsewhere and must still find the alignment and stack files."""
     import json
 

@@ -28,7 +28,7 @@ dev = ["pytest>=7"]
 all = ["rawpy>=0.19", "PyQt6>=6.5"]
 
 [project.scripts]
-tse = "tse_core.cli:main"
+totality = "tse_core.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

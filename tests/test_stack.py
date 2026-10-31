@@ -167,7 +167,7 @@ def test_crop_box_inside_image():
 
 
 def test_cli_stack(tmp_path, monkeypatch, capsys):
-    """tse stack: frames from the project, transforms from the alignment file, rejected frames skipped."""
+    """totality stack: frames from the project, transforms from the alignment file, rejected frames skipped."""
     import json
 
     from conftest import make_frames

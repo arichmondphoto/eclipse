@@ -5,7 +5,7 @@ Rules, from the development plan:
 * **Vignetting**, first match wins and only one is ever applied:
   a profile the user chose explicitly; the user's own master flat if one
   matches the frame's aperture and focal length; a saved profile fitted
-  from the user's flats (``tse flat-profile``) for the same lens and
+  from the user's flats (``totality flat-profile``) for the same lens and
   settings; a lensfun profile; otherwise none.
 * **Darks**: matched to each light by exposure time and ISO. Without a
   match, hot pixels are removed by cosmetic correction instead.
@@ -150,7 +150,7 @@ def plan_calibration(
         if lens_warning:
             warnings.append(lens_warning)
     elif use_lensfun:
-        warnings.append("lensfun database not found; run 'tse lensfun-update' to download it")
+        warnings.append("lensfun database not found; run 'totality lensfun-update' to download it")
 
     camera_crop = _camera_crop(lights, db)
     results: list[FrameCalibration] = []
@@ -211,7 +211,7 @@ def plan_calibration(
     if no_vign:
         warnings.append(
             f"{len(no_vign)} light frame(s) will not be corrected for vignetting; shoot flats with the same lens, "
-            "focal length and aperture, then run 'tse flat-profile <flats folder>'"
+            "focal length and aperture, then run 'totality flat-profile <flats folder>'"
         )
 
     return CalibrationPlan(
@@ -261,7 +261,7 @@ def choose_lens(
         hint = f"; if your lens is the {others[0]}, choose it with --lens \"{others[0]}\"" if others else ""
         return None, labels, (
             f"'{best.lens.label()}' has no vignetting data in lensfun{hint}; "
-            "or shoot flats and run 'tse flat-profile'"
+            "or shoot flats and run 'totality flat-profile'"
         )
     return best.lens, labels, ""
 

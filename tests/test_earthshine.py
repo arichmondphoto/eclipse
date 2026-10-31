@@ -121,7 +121,7 @@ def test_moon_aligned_matrix():
 
 
 def test_workflow_and_cli(tmp_path, monkeypatch, run, capsys):
-    """tse earthshine: frames from the project, alignment and brightness from earlier steps."""
+    """totality earthshine: frames from the project, alignment and brightness from earlier steps."""
     import json
     from dataclasses import asdict
 

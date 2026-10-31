@@ -110,7 +110,7 @@ def elements_for(day: date | datetime | str, path: Optional[str | os.PathLike] =
         key = (day + timedelta(days=offset)).isoformat()
         if key in table:
             return table[key]
-    hint = "" if CANON_CACHE.is_file() else " Run 'tse elements-update' to download NASA's catalogue of every eclipse."
+    hint = "" if CANON_CACHE.is_file() else " Run 'totality elements-update' to download NASA's catalogue of every eclipse."
     raise KeyError(f"no Besselian elements for {day}.{hint}")
 
 

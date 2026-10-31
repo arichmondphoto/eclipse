@@ -5,7 +5,7 @@ Run from Siril (Scripts menu, Siril 1.4 or later) or on its own with any
 Python 3.10+ that has PyQt6:
 
     python SolarEclipseToolkit.py            # GUI
-    python SolarEclipseToolkit.py --help     # command-line options (same as 'tse')
+    python SolarEclipseToolkit.py --help     # command-line options (same as 'totality')
 
 Four tabs, one per step, each saving into the event's project file:
 

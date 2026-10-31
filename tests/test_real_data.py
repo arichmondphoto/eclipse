@@ -1,6 +1,6 @@
 """Regression tests on real data: the 2024-04-08 stack from Lake Wappapello (Nikon D850, 400 mm).
 
-``data/eclipse2024_bin8.npz`` is the linear HDR stack made by ``tse stack``, binned 8 x 8
+``data/eclipse2024_bin8.npz`` is the linear HDR stack made by ``totality stack``, binned 8 x 8
 (1036 x 690 px, Sun radius 51.7 px), stored as float16 scaled by 1e4. It keeps what made
 the first enhancement runs go wrong and synthetic data did not show:
 

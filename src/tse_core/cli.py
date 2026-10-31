@@ -1,4 +1,4 @@
-"""Command-line tools: ``tse inventory``, ``tse lens``, ``tse lensfun-update``."""
+"""Command-line tools: ``totality inventory``, ``totality lens``, ``totality lensfun-update``."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from .vignetting_profile import VignettingProfile, fit_profile_from_files, load_
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="tse", description="Solar Eclipse Toolkit")
+    parser = argparse.ArgumentParser(prog="totality", description="Solar Eclipse Toolkit")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("inventory", help="read every RAW file in a folder and report brackets and calibration")
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from", dest="source", help="use a downloaded copy of NASA's canon CSV instead")
 
     p = sub.add_parser("align", help="align the light frames of a project on the corona and find the Sun's centre")
-    p.add_argument("project", help="project file made by 'tse inventory --project'")
+    p.add_argument("project", help="project file made by 'totality inventory --project'")
     p.add_argument("--lat", type=float, help="observing site latitude (saved in the project)")
     p.add_argument("--lon", type=float, help="observing site longitude, east positive (saved in the project)")
     p.add_argument("--elev", type=float, help="observing site elevation, metres")
@@ -108,8 +108,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quiet", action="store_true")
 
     p = sub.add_parser("stack", help="merge the aligned frames into one linear HDR image")
-    p.add_argument("project", help="project file (run 'tse align' on it first)")
-    p.add_argument("--align", help="alignment results file (default: the one saved by 'tse align')")
+    p.add_argument("project", help="project file (run 'totality align' on it first)")
+    p.add_argument("--align", help="alignment results file (default: the one saved by 'totality align')")
     p.add_argument("--output", "-o", help="output folder (default: next to the project)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--square", action="store_true",
@@ -127,8 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quiet", action="store_true")
 
     p = sub.add_parser("enhance", help="reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend")
-    p.add_argument("project", help="project file (run 'tse stack' on it first)")
-    p.add_argument("--hdr", help="HDR FITS file (default: the one saved by 'tse stack')")
+    p.add_argument("project", help="project file (run 'totality stack' on it first)")
+    p.add_argument("--hdr", help="HDR FITS file (default: the one saved by 'totality stack')")
     p.add_argument("--output", "-o", help="output folder (default: next to the project)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--layers", default=",".join(LAYERS),
@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quiet", action="store_true")
 
     p = sub.add_parser("earthshine", help="Moon-aligned stack of the long exposures: a layer for the black lunar disc")
-    p.add_argument("project", help="project file (run 'tse stack' on it first)")
+    p.add_argument("project", help="project file (run 'totality stack' on it first)")
     p.add_argument("--stops", type=float, default=6.0,
                    help="use frames within this many stops of the longest exposure (default 6)")
     p.add_argument("--glare-order", type=int, default=2,
@@ -182,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quiet", action="store_true")
 
     p = sub.add_parser("prominences", help="find the prominences and write them as a layer (transparent elsewhere)")
-    p.add_argument("project", help="project file (run 'tse stack' on it first)")
+    p.add_argument("project", help="project file (run 'totality stack' on it first)")
     p.add_argument("--height", type=float, default=0.3, help="how far above the solar limb to look, in solar radii "
                                                             "(default 0.3)")
     p.add_argument("--sensitivity", type=float, default=4.0,
@@ -200,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("final-prominences", help="put the prominence layer on top of the final image")
     p.add_argument("project")
     p.add_argument("--base", default="final", choices=["final", "blend", "natural"],
-                   help="final: the image from 'tse final' (default); blend or natural: the last-written layer")
+                   help="final: the image from 'totality final' (default); blend or natural: the last-written layer")
     p.add_argument("--base-file", help="put them on this image instead (the size of the HDR stack)")
     p.add_argument("--strength", type=float, default=1.0, help="opacity (normal) or brightness (screen, lighten)")
     p.add_argument("--mode", default="normal", choices=["normal", "screen", "lighten"],
@@ -400,7 +400,7 @@ def cmd_lensfun_update(args) -> int:
         print(f"Download failed: {exc.reason}")
         if "CERTIFICATE" in str(exc.reason).upper():
             print(certificate_help("https://github.com/lensfun/lensfun/archive/refs/heads/master.zip",
-                                   "tse lensfun-update --from <path to the zip>"))
+                                   "totality lensfun-update --from <path to the zip>"))
         return 1
     except (FileNotFoundError, ValueError) as exc:
         print(exc)
@@ -413,7 +413,7 @@ def cmd_lensfun_update(args) -> int:
 def cmd_lens(args) -> int:
     db = _db(args.lensfun_db)
     if db.empty:
-        print("lensfun database not found; run 'tse lensfun-update' first")
+        print("lensfun database not found; run 'totality lensfun-update' first")
         return 1
     matches = db.match_lens(args.name, focal=args.focal)
     if not matches:
@@ -476,9 +476,9 @@ def cmd_elements_update(source=None) -> int:
 
         print(f"Download failed: {exc.reason}")
         if "CERTIFICATE" in str(exc.reason).upper():
-            print(certificate_help(CANON_URL, "tse elements-update --from <path to the .csv file>"))
+            print(certificate_help(CANON_URL, "totality elements-update --from <path to the .csv file>"))
         else:
-            print(f"Download {CANON_URL} in a browser and run: tse elements-update --from <file>")
+            print(f"Download {CANON_URL} in a browser and run: totality elements-update --from <file>")
         return 1
     except (OSError, ValueError) as exc:
         print(exc)
@@ -673,7 +673,7 @@ def cmd_doctor() -> int:
     except ImportError:
         print("certificates: certifi only (pip install truststore to use your system's certificates)")
     db = LensfunDatabase.load()
-    print(f"lensfun:  {len(db.lenses)} lenses from {len(db.files)} file(s)" if not db.empty else "lensfun:  database not found (run 'tse lensfun-update')")
+    print(f"lensfun:  {len(db.lenses)} lenses from {len(db.files)} file(s)" if not db.empty else "lensfun:  database not found (run 'totality lensfun-update')")
     return 0
 
 

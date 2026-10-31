@@ -74,5 +74,5 @@ def test_contexts_always_verify():
 
 
 def test_help_mentions_offline_route():
-    text = net.certificate_help("https://x/y.csv", "tse elements-update --from <file>")
-    assert "antivirus" in text and "tse elements-update --from" in text
+    text = net.certificate_help("https://x/y.csv", "totality elements-update --from <file>")
+    assert "antivirus" in text and "totality elements-update --from" in text

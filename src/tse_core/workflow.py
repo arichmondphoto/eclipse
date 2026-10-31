@@ -72,7 +72,7 @@ def _locate_frames(project_path, frames) -> None:
             missing.append(f.file_name)
     if missing:
         raise WorkflowError(f"{len(missing)} RAW file(s) not found, for example {missing[0]}. If the folder moved, "
-                            "read it again on the Frames tab (or run 'tse inventory' on the new folder).")
+                            "read it again on the Frames tab (or run 'totality inventory' on the new folder).")
 
 
 def _db(path: Optional[str]) -> LensfunDatabase:
@@ -154,7 +154,7 @@ def align(project_path, opts: AlignOptions, say: Optional[Say] = None, cancel=No
             say(str(exc.args[0]))
         except OSError as exc:
             say(f"Could not download NASA's eclipse catalogue ({exc}); the Sun centre will be skipped. "
-                "Run 'tse elements-update --from <file>' with a copy downloaded in a browser.")
+                "Run 'totality elements-update --from <file>' with a copy downloaded in a browser.")
     params = AlignParams(rho=opts.rho, rotation_model=opts.rotation, coarse_rotation=opts.any_angle,
                          solve_rotation=opts.rotation != "none")
     try:

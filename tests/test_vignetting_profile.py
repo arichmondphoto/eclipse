@@ -95,7 +95,7 @@ def test_plan_uses_library_profile_for_the_d_lens(lens_db):
     assert "Own-flats profile" in plan.describe()
     # Without the profile the frames go uncorrected and the warning says what to do.
     plan = plan_calibration(frames, lens_db)
-    assert any("tse flat-profile" in w for w in plan.warnings)
+    assert any("totality flat-profile" in w for w in plan.warnings)
 
 
 def test_fits_master_flat_and_cli(tmp_path, capsys):
@@ -156,4 +156,4 @@ def test_no_lensfun_warning_when_profile_covers_every_frame(lens_db):
     # Without the profile, the D lens warning must not point at another maker's lens.
     plan = plan_calibration(frames, lens_db)
     text = " ".join(plan.warnings)
-    assert "no vignetting data" in text and "Sigma" not in text and "tse flat-profile" in text
+    assert "no vignetting data" in text and "Sigma" not in text and "totality flat-profile" in text

@@ -43,8 +43,8 @@ From the repository folder:
 
 ```bash
 pip install -e ".[all]"      # exifread, numpy, rawpy, PyQt6
-tse doctor                   # shows which readers are available
-tse lensfun-update           # downloads the lensfun lens database once
+totality doctor                   # shows which readers are available
+totality lensfun-update           # downloads the lensfun lens database once
 ```
 
 Downloads check certificates against your system's store (the same
@@ -57,9 +57,9 @@ browser and use `--from`:
 
 ```bash
 # https://github.com/lensfun/lensfun/archive/refs/heads/master.zip
-tse lensfun-update --from ~/Downloads/lensfun-master.zip
+totality lensfun-update --from ~/Downloads/lensfun-master.zip
 # https://eclipse.gsfc.nasa.gov/eclipse_besselian_from_mysqldump2.csv
-tse elements-update --from ~/Downloads/eclipse_besselian_from_mysqldump2.csv
+totality elements-update --from ~/Downloads/eclipse_besselian_from_mysqldump2.csv
 ```
 
 ### In Siril
@@ -83,7 +83,7 @@ The window has one tab per step, and each step saves into the project file:
 
 Long steps run in the background: progress shows in the log under each tab
 and **Cancel** stops at the next step. **Open … in Siril** loads a result
-into Siril. The same steps run from the command line with `tse`, using the
+into Siril. The same steps run from the command line with `totality`, using the
 same project file.
 
 ### Project folders
@@ -98,7 +98,7 @@ Eclipse 2024/
     bias/        optional
 ```
 
-**Project → New from folder…** in the GUI, or `tse inventory "Eclipse 2024"`
+**Project → New from folder…** in the GUI, or `totality inventory "Eclipse 2024"`
 on the command line, reads the light frames from `lights/` and the
 calibration frames from the other subfolders, saves the project file as
 `Eclipse 2024/Eclipse 2024.json`, and writes every result (alignment,
@@ -108,23 +108,26 @@ and **Write final image** ask where to save and under what name.
 
 ## Command line
 
+The command is `totality` (it was `tse` before 31 Oct 2026; run
+`pip install -e .` again after updating so the new name is installed).
+
 ```bash
-tse inventory "D:/Eclipse 2024/RAW" --project eclipse2024.json --csv frames.csv
-tse inventory RAW --c2 2024-04-08T13:47:30 --c3 2024-04-08T13:51:45   # mark frames outside totality
-tse inventory RAW --flats FLATS --darks DARKS --bias BIAS              # optional calibration frames
-tse inventory RAW --lens "Nikon AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" # force a lens profile
-tse lens "AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" --focal 400 --aperture 8
-tse flat-profile FLATS                       # fit and save a vignetting profile from your own flats
-tse inventory RAW --profile my_profile.json  # use one profile for every frame
-tse frame DSC_4100.NEF                       # show everything read from one file
-tse frames eclipse2024.json --exclude DSC_9108.nef   # leave a frame out (--include to undo)
-tse eclipse --date 2024-04-08 --lat 36.9422 --lon -90.3343 --utc-offset -5   # contacts and duration
-tse align eclipse2024.json --lat 36.9422 --lon -90.3343 --elev 110           # align and find the Sun
+totality inventory "D:/Eclipse 2024/RAW" --project eclipse2024.json --csv frames.csv
+totality inventory RAW --c2 2024-04-08T13:47:30 --c3 2024-04-08T13:51:45   # mark frames outside totality
+totality inventory RAW --flats FLATS --darks DARKS --bias BIAS              # optional calibration frames
+totality inventory RAW --lens "Nikon AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" # force a lens profile
+totality lens "AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" --focal 400 --aperture 8
+totality flat-profile FLATS                       # fit and save a vignetting profile from your own flats
+totality inventory RAW --profile my_profile.json  # use one profile for every frame
+totality frame DSC_4100.NEF                       # show everything read from one file
+totality frames eclipse2024.json --exclude DSC_9108.nef   # leave a frame out (--include to undo)
+totality eclipse --date 2024-04-08 --lat 36.9422 --lon -90.3343 --utc-offset -5   # contacts and duration
+totality align eclipse2024.json --lat 36.9422 --lon -90.3343 --elev 110           # align and find the Sun
 ```
 
 ## Alignment (Phase 2)
 
-`tse align` loads every light frame as 2x2 superpixels (no demosaicing),
+`totality align` loads every light frame as 2x2 superpixels (no demosaicing),
 applies the calibration plan, and then:
 
 1. **Finds the Moon** in each frame: the limb is located along 720 radial
@@ -165,8 +168,8 @@ bundled for 2017, 2024, 2026 and 2027. For every other eclipse from 1600 to
 first time it needs it, or on request:
 
 ```bash
-tse elements-update                    # download NASA's catalogue now
-tse elements-update --from canon.csv   # or install a copy downloaded in a browser
+totality elements-update                    # download NASA's catalogue now
+totality elements-update --from canon.csv   # or install a copy downloaded in a browser
 ```
 
 **Any focal length.** The tangential filter length, mask softness and
@@ -192,8 +195,8 @@ Moon tracking only use time differences, so a wrong clock never affects them.
 ## HDR stacking (Phase 3)
 
 ```bash
-tse stack eclipse2024.json            # uses the alignment saved by 'tse align'
-tse stack eclipse2024.json --square   # quicker: a square 10 solar radii wide
+totality stack eclipse2024.json            # uses the alignment saved by 'totality align'
+totality stack eclipse2024.json --square   # quicker: a square 10 solar radii wide
 ```
 
 Every frame is read again at full resolution: black level subtracted per
@@ -244,7 +247,7 @@ A full 45-megapixel frame needs about 3 GB of free memory at the peak.
 ## Enhancement (Phase 4)
 
 ```bash
-tse enhance eclipse2024.json          # uses the HDR stack saved by 'tse stack'
+totality enhance eclipse2024.json          # uses the HDR stack saved by 'totality stack'
 ```
 
 Writes one 16-bit RGB TIFF per layer, all the same size and lined up pixel
@@ -267,7 +270,7 @@ High-pass Filter; HDR = High Dynamic Range (the merged exposures).
 The layers are already stretched: each filter maps the linear data to
 display brightness itself (a log stretch for `natural` and `adaptive`, the
 filter's own normalization and a soft S-curve for the NRGF family). Run
-`tse enhance` on the linear HDR stack, never on a stretched copy, and use
+`totality enhance` on the linear HDR stack, never on a stretched copy, and use
 only gentle curves or levels on the results.
 
 In Photoshop: `natural` at the bottom in Normal mode, `fnrgf_n` above it in
@@ -300,7 +303,7 @@ FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 ## Earthshine
 
 ```bash
-tse earthshine eclipse2024.json       # after 'tse stack'
+totality earthshine eclipse2024.json       # after 'totality stack'
 ```
 
 The Moon's night side, lit by sunlight reflected from the Earth. The Moon
@@ -318,7 +321,7 @@ gentle gradient, is removed with a smooth surface (`--glare-order`, default
 | `<name>_earthshine_crop.tif` | the same, cropped to the Moon |
 | `<name>_earthshine.fit` | the Moon-aligned linear stack before glare removal |
 
-To skip Photoshop, blend it in here: `tse final eclipse2024.json` (or the
+To skip Photoshop, blend it in here: `totality final eclipse2024.json` (or the
 **Blend into the image** box on the Earthshine tab, with a preview) puts the
 earthshine into the lunar disc of the last-written blend (`--base natural`
 for the natural layer, `--base-file` any image the size of the stack, such
@@ -331,8 +334,8 @@ is mostly noise (short exposures, low ISO or a bright sky).
 ## Prominences
 
 ```bash
-tse prominences eclipse2024.json              # writes <name>_prominences.tif
-tse final-prominences eclipse2024.json        # puts them on top of the final image
+totality prominences eclipse2024.json              # writes <name>_prominences.tif
+totality final-prominences eclipse2024.json        # puts them on top of the final image
 ```
 
 Prominences glow in hydrogen-alpha (red) and weaker blue hydrogen lines, so
@@ -347,7 +350,7 @@ thin pink rim along the limb (red light lower than `--chromosphere-arcsec`,
 default 12), keeping the bases of taller prominences.
 
 The layer is transparent outside the prominences (TIFF and PNG), so it sits
-on top in Photoshop in Normal mode. `tse final-prominences` (or tab 6) puts
+on top in Photoshop in Normal mode. `totality final-prominences` (or tab 6) puts
 it on the final image from the Earthshine step, the last-written blend or
 natural layer (`--base`), or any image (`--base-file`), in normal mode by
 default, which keeps their colour over the bright inner corona.
@@ -395,7 +398,7 @@ profile once:
 2. An even light source filling the frame: a light panel, a white screen,
    or a twilight sky through a white T-shirt. Expose so the histogram peak
    is near the middle. 20 to 30 frames.
-3. `tse flat-profile FLATS` fits a smooth, radially symmetric profile per
+3. `totality flat-profile FLATS` fits a smooth, radially symmetric profile per
    colour channel and saves it to your profile library
    (`~/.solar-eclipse-toolkit/profiles`, or `TSE_PROFILE_DIR`).
 
@@ -403,7 +406,7 @@ The profile keeps only the lens's falloff: dust in the flats is rejected,
 and a light source that is brighter on one side is fitted as a tilt and
 removed. Because the profile is measured on the sensor in millimetres, it
 corrects any camera with the same lens, so one set of flats serves both a
-D800 and a D850. `tse inventory` then picks it up automatically. A FITS
+D800 and a D850. `totality inventory` then picks it up automatically. A FITS
 master flat stacked in Siril can be used instead of RAW flats.
 
 ## Tests
