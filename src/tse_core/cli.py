@@ -146,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--saturation", type=float, default=1.0, help="colour saturation, 0 = monochrome (default 1)")
     p.add_argument("--white", choices=["corona", "camera", "none"], default="corona",
                    help="white balance: inner corona neutral (default), the camera's as-shot, or none")
+    p.add_argument("--format", choices=["tif", "png", "jpg"], default="tif",
+                   help="picture type: 16-bit TIFF (default), 16-bit PNG or 8-bit JPG; all 300 dpi")
     p.add_argument("--keep-sky", "--keep-background-colour", dest="keep_background_colour", action="store_true",
                    help="do not model and remove the sky background (level, colour and gradient)")
     p.add_argument("--quiet", action="store_true")
@@ -162,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--include-rejected", action="store_true")
     p.add_argument("--output", "-o", help="output folder (default: next to the project)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
+    p.add_argument("--format", choices=["tif", "png", "jpg"], default="tif",
+                   help="picture type: 16-bit TIFF (default), 16-bit PNG or 8-bit JPG; all 300 dpi")
     p.add_argument("--profile-dir")
     p.add_argument("--lensfun-db")
     p.add_argument("--quiet", action="store_true")
@@ -174,6 +178,34 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--strength", type=float, default=1.0, help="earthshine brightness, 1 = as stacked (default 1)")
     p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"], help="blend mode (default screen)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
+    p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <name>_final.tif")
+    p.add_argument("--quiet", action="store_true")
+
+    p = sub.add_parser("prominences", help="find the prominences and write them as a layer (transparent elsewhere)")
+    p.add_argument("project", help="project file (run 'tse stack' on it first)")
+    p.add_argument("--height", type=float, default=0.3, help="how far above the solar limb to look, in solar radii "
+                                                            "(default 0.3)")
+    p.add_argument("--sensitivity", type=float, default=4.0,
+                   help="red excess needed, in noise standard deviations (default 4; lower finds fainter ones)")
+    p.add_argument("--min-redness", type=float, default=1.2,
+                   help="red/green ratio needed; the white corona is about 1 (default 1.2)")
+    p.add_argument("--no-chromosphere", action="store_true", help="leave out the thin pink rim along the limb")
+    p.add_argument("--chromosphere-arcsec", type=float, default=12.0,
+                   help="height of the rim left out by --no-chromosphere, arcsec (default 12)")
+    p.add_argument("--brightness", type=float, default=1.0)
+    p.add_argument("--saturation", type=float, default=1.2)
+    p.add_argument("--output", "-o", help="layer file (.tif, .png or .jpg); default <project>_prominences.tif")
+    p.add_argument("--quiet", action="store_true")
+
+    p = sub.add_parser("final-prominences", help="put the prominence layer on top of the final image")
+    p.add_argument("project")
+    p.add_argument("--base", default="final", choices=["final", "blend", "natural"],
+                   help="final: the image from 'tse final' (default); blend or natural: the last-written layer")
+    p.add_argument("--base-file", help="put them on this image instead (the size of the HDR stack)")
+    p.add_argument("--strength", type=float, default=1.0, help="opacity (normal) or brightness (screen, lighten)")
+    p.add_argument("--mode", default="normal", choices=["normal", "screen", "lighten"],
+                   help="normal (default) keeps their colour over the bright inner corona")
+    p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <project>_final_prominences.tif")
     p.add_argument("--quiet", action="store_true")
 
     sub.add_parser("doctor", help="show which optional readers are available")
@@ -207,9 +239,19 @@ def main(argv: list[str] | None = None) -> int:
         from .workflow import final_image
 
         out, code = _run(final_image, args.project, args.base, args.strength, args.mode, name=args.name,
-                         base_file=args.base_file, quiet=args.quiet)
+                         base_file=args.base_file, output_file=args.output, quiet=args.quiet)
         if not code:
             print(f"Final image written to {out}")
+        return code
+    if args.command == "prominences":
+        return cmd_prominences(args)
+    if args.command == "final-prominences":
+        from .workflow import final_with_prominences
+
+        out, code = _run(final_with_prominences, args.project, args.base, args.strength, args.mode,
+                         output_file=args.output, base_file=args.base_file, quiet=args.quiet)
+        if not code:
+            print(f"Image written to {out}")
         return code
     if args.command == "flat-profile":
         return cmd_flat_profile(args)
@@ -542,7 +584,7 @@ def cmd_enhance(args) -> int:
                            white=args.white, blend=blend, blend_modes=blend_modes,
                            neutral_background=not args.keep_background_colour)
     out, code = _run(enhance_project, args.project, params, hdr_file=args.hdr, output=args.output,
-                     name=args.name, quiet=args.quiet)
+                     name=args.name, fmt=args.format, quiet=args.quiet)
     if code:
         return code
     result, notes = out
@@ -562,7 +604,22 @@ def cmd_earthshine(args) -> int:
                               brightness=args.brightness)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,
                         output=args.output, name=args.name, profile_dir=args.profile_dir,
-                        lensfun_db=args.lensfun_db, quiet=args.quiet)
+                        lensfun_db=args.lensfun_db, fmt=args.format, quiet=args.quiet)
+    if code:
+        return code
+    print()
+    print(result.describe())
+    return 0
+
+
+def cmd_prominences(args) -> int:
+    from .prominences import ProminenceParams
+    from .workflow import prominence_layer
+
+    params = ProminenceParams(height=args.height, sensitivity=args.sensitivity, min_redness=args.min_redness,
+                              chromosphere=not args.no_chromosphere, chromosphere_arcsec=args.chromosphere_arcsec,
+                              brightness=args.brightness, saturation=args.saturation)
+    result, code = _run(prominence_layer, args.project, params, output_file=args.output, quiet=args.quiet)
     if code:
         return code
     print()

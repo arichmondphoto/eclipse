@@ -17,6 +17,10 @@ Four tabs, one per step, each saving into the event's project file:
    reduced-size preview, then the full-size 16-bit TIFF layers.
 5. Earthshine: the lunar surface from a Moon-aligned stack of the long
    exposures, as a layer that fits the corona layers' black disc.
+6. Prominences: found by colour at the limb, written as a transparent layer
+   and put on top of the final image.
+
+Picture outputs can be 16-bit TIFF, 16-bit PNG or 8-bit JPG, all 300 dpi.
 
 Long steps run in the background with progress in the log and a Cancel button.
 """
@@ -38,7 +42,7 @@ if _SRC.is_dir() and str(_SRC) not in sys.path:
 try:
     import sirilpy as s
 
-    for _pkg in ("PyQt6", "numpy", "scipy", "exifread", "rawpy", "tifffile", "certifi", "truststore"):
+    for _pkg in ("PyQt6", "numpy", "scipy", "exifread", "rawpy", "tifffile", "pillow", "certifi", "truststore"):
         try:
             s.ensure_installed(_pkg)
         except Exception as exc:  # report and keep going; a missing reader shows up when it is needed
@@ -61,6 +65,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
 
 from tse_core import workflow as W  # noqa: E402
 from tse_core.brackets import detect_brackets  # noqa: E402
+from tse_core import imageout as IO  # noqa: E402
 from tse_core.enhance import LAYERS, EnhanceParams  # noqa: E402
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
 from tse_core.frames import format_exposure, parse_duration  # noqa: E402
@@ -1084,10 +1089,10 @@ class EnhanceTab(StepTab):
         target = self._ask_layers_name()
         if target is None:
             return
-        out_dir, name = target
+        out_dir, name, fmt = target
         self.start("Writing full-size layers",
                    lambda p, say, cancel: W.enhance_project(p, params, output=out_dir, name=name, say=say,
-                                                            cancel=cancel), self._done)
+                                                            cancel=cancel, fmt=fmt), self._done)
 
     def _ask_layers_name(self):
         """Where to write the layers: a folder and a name; each layer is <name>_<layer>.tif."""
@@ -1099,16 +1104,16 @@ class EnhanceTab(StepTab):
             default = Path(last).with_name(Path(last).name.rsplit("_", 1)[0] + ".tif")
         else:
             default = Path(proj).with_suffix(".tif")
-        fname, _ = QFileDialog.getSaveFileName(
-            self, "Save layers as (each layer is saved as <name>_<layer>.tif)", str(default), "TIFF (*.tif)")
+        fname, filt = QFileDialog.getSaveFileName(
+            self, "Save layers as (each layer is saved as <name>_<layer>)", str(default), IO.FILTER)
         if not fname:
             return None
-        f = Path(fname)
+        f = _with_ext(fname, filt)
         stem = f.stem
         for k in list(LAYER_NAMES):
             if stem.endswith("_" + k):
                 stem = stem[: -len(k) - 1]
-        return str(f.parent), stem
+        return str(f.parent), stem, f.suffix.lstrip(".")
 
     def _done(self, out) -> None:
         result, _notes = out
@@ -1289,11 +1294,10 @@ class EarthshineTab(StepTab):
         if proj is None:
             return
         default = self.final_path or str(Path(proj).with_name(Path(proj).stem + "_final.tif"))
-        fname, _ = QFileDialog.getSaveFileName(self, "Save final image as", default, "TIFF (*.tif)")
+        fname, filt = QFileDialog.getSaveFileName(self, "Save final image as", default, IO.FILTER)
         if not fname:
             return
-        if not fname.lower().endswith((".tif", ".tiff")):
-            fname += ".tif"
+        fname = str(_with_ext(fname, filt))
         self.start("Writing the final image",
                    lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname,
                                                         base_file=bfile),
@@ -1334,8 +1338,19 @@ class EarthshineTab(StepTab):
         params = EarthshineParams(stops=self.stops.value(), glare_order=self.glare.value(),
                                   smooth=self.smooth.value(), brightness=self.brightness.value())
         inc = self.include_rejected.isChecked()
+        proj = self.main.ensure_saved()
+        if proj is None:
+            return
+        default = self.layer_path or str(Path(proj).with_name(Path(proj).stem + "_earthshine.tif"))
+        fname, filt = QFileDialog.getSaveFileName(self, "Save earthshine layer as", default, IO.FILTER)
+        if not fname:
+            return
+        f = _with_ext(fname, filt)
+        name = f.stem[: -len("_earthshine")] if f.stem.endswith("_earthshine") else f.stem
+        out_dir, fmt = str(f.parent), f.suffix.lstrip(".")
         self.start("Stacking earthshine",
-                   lambda p, say, cancel: W.earthshine(p, params, include_rejected=inc, say=say, cancel=cancel),
+                   lambda p, say, cancel: W.earthshine(p, params, include_rejected=inc, output=out_dir, name=name,
+                                                       fmt=fmt, say=say, cancel=cancel),
                    self._done)
 
     def _done(self, result) -> None:
@@ -1343,6 +1358,254 @@ class EarthshineTab(StepTab):
         self.layer_path = result.outputs.get("earthshine", "")
         self.open_btn.setEnabled(bool(self.layer_path))
         self.view.show_file(result.outputs.get("crop", ""))
+
+
+# ---------------------------------------------------------------------------
+# Prominences
+# ---------------------------------------------------------------------------
+
+
+class ProminencesTab(StepTab):
+    """Find the prominences by colour, preview them, write them as a layer and put them on top."""
+
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window)
+        self.region = None
+        self.layer_path = ""
+        self.final_path = ""
+        self.base_file = ""
+        self._shown = False
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(600)
+        self.timer.timeout.connect(self.preview)
+
+        box = QGroupBox("Find prominences")
+        f = QFormLayout(box)
+        self.height_spin = self._dspin(0.05, 1.0, 0.3, 0.05, " solar radii")
+        f.addRow("Look up to:", self.height_spin)
+        self.sensitivity = self._dspin(1.0, 15.0, 4.0, 0.5, " × noise")
+        f.addRow("Red excess needed:", self.sensitivity)
+        self.min_redness = self._dspin(1.0, 3.0, 1.2, 0.05, "")
+        f.addRow("Redness needed:", self.min_redness)
+        self.chromo = QCheckBox("Include the chromosphere (thin pink rim)")
+        self.chromo.setChecked(True)
+        self.chromo.toggled.connect(self.changed)
+        f.addRow(self.chromo)
+        self.chromo_h = self._dspin(2.0, 40.0, 12.0, 1.0, " arcsec")
+        f.addRow("Rim height:", self.chromo_h)
+        self.brightness = self._dspin(0.1, 3.0, 1.0, 0.1, "")
+        f.addRow("Brightness:", self.brightness)
+        self.saturation = self._dspin(0.0, 3.0, 1.2, 0.1, "")
+        f.addRow("Saturation:", self.saturation)
+        self.settings_layout.addWidget(box)
+        row = QHBoxLayout()
+        self.preview_btn = QPushButton("Preview")
+        self.preview_btn.clicked.connect(self.preview)
+        self.write_btn = QPushButton("Write prominence layer")
+        self.write_btn.clicked.connect(self.write_layer)
+        row.addWidget(self.preview_btn)
+        row.addWidget(self.write_btn)
+        self.settings_layout.addLayout(row)
+
+        top = QGroupBox("Put them on top")
+        tf = QFormLayout(top)
+        self.base = QComboBox()
+        self.base.addItem("Final image (Earthshine tab)", "final")
+        self.base.addItem("Last-written blend", "blend")
+        self.base.addItem("Last-written Natural", "natural")
+        self.base.addItem("From file…", "file")
+        self.base.activated.connect(self._base_chosen)
+        tf.addRow("Image:", self.base)
+        self.base_label = QLabel("")
+        self.base_label.setWordWrap(True)
+        tf.addRow(self.base_label)
+        self.strength = self._dspin(0.0, 1.0, 1.0, 0.05, "", final=True)
+        tf.addRow("Strength:", self.strength)
+        self.mode = QComboBox()
+        self.mode.addItems(["normal", "screen", "lighten"])
+        self.mode.currentIndexChanged.connect(self._final_changed)
+        tf.addRow("Blend mode:", self.mode)
+        r2 = QHBoxLayout()
+        self.final_preview_btn = QPushButton("Preview")
+        self.final_preview_btn.clicked.connect(self.preview_final)
+        self.final_btn = QPushButton("Write final image")
+        self.final_btn.clicked.connect(self.write_final)
+        r2.addWidget(self.final_preview_btn)
+        r2.addWidget(self.final_btn)
+        tf.addRow(r2)
+        self.open_btn = QPushButton("Open final image in Siril")
+        self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.final_path))
+        tf.addRow(self.open_btn)
+        self.settings_layout.addWidget(top)
+        self.settings_layout.addStretch(1)
+        self.run_buttons += [self.preview_btn, self.write_btn, self.final_preview_btn, self.final_btn]
+        self.view = ImageView()
+        self.results_layout.addWidget(self.view, 1)
+        self._final_shown = False
+
+        _tip(box, "Prominences glow in the red light of hydrogen (with some blue), so they look pink or magenta "
+             "once the corona is white. They are found by colour: pixels clearly redder than the white corona "
+             "around them. They come from the HDR stack, so every prominence the moving Moon uncovered at any "
+             "time during totality is included; the layer stops at the lunar limb, so nothing covers the Moon "
+             "or the earthshine.")
+        _tip(self.height_spin, "How far above the solar limb to look, in solar radii (the Sun's radius = 1). Most "
+             "prominences reach 0.05-0.2; raise it for a tall or erupting one. Default 0.3.", f)
+        _tip(self.sensitivity, "How far above the noise the red excess must be. Lower (2-3) finds fainter "
+             "threads but may pick up noise specks; higher (6-10) keeps only the clear ones. Default 4.", f)
+        _tip(self.min_redness, "How much redder than green a pixel must be (the white corona is about 1.0). Lower "
+             "(1.1) catches pale prominences; higher (1.4+) keeps only strongly coloured ones. Default 1.2.", f)
+        _tip(self.chromo, "The chromosphere is the thin pink rim along the edge of the Sun, seen near second and "
+             "third contact. Untick to leave it out: red light lower than 'Rim height' is removed, except the "
+             "bases of taller prominences.")
+        _tip(self.chromo_h, "How high the rim reaches above the solar limb when it is left out, in arcseconds. "
+             "Default 12; raise it if bits of rim remain, lower it if small prominences disappear.", f)
+        _tip(self.brightness, "Brightness of the prominences in the layer (1 = as measured).", f)
+        _tip(self.saturation, "Colour strength of the prominences: 1 = as measured, higher = more vivid pink.", f)
+        _tip(self.write_btn, "Writes the prominence layer the full size of the stack. TIFF and PNG keep "
+             "transparency around the prominences, so in Photoshop it sits on top in Normal mode; a JPG has none, "
+             "so it is on black (use Screen or Lighten then).")
+        _tip(self.base, "The picture the prominences go on.\n\nFinal image (default): the one written on the "
+             "Earthshine tab, with the earthshine.\n\nLast-written blend / Natural: the layers from the Enhance "
+             "tab.\n\nFrom file…: any image the full size of the stack.", tf)
+        _tip(self.strength, "Opacity of the prominences (Normal mode), or their brightness (Screen, Lighten).", tf)
+        _tip(self.mode, "normal (default): the prominences cover what is under them, so their colour shows even "
+             "over the bright inner corona. screen and lighten: as in Photoshop; they tend to wash the colour "
+             "out where the corona is bright.", tf)
+
+    def _dspin(self, lo, hi, val, step, suffix, final=False) -> QDoubleSpinBox:
+        sp = QDoubleSpinBox()
+        sp.setRange(lo, hi)
+        sp.setSingleStep(step)
+        sp.setValue(val)
+        sp.setSuffix(suffix)
+        sp.valueChanged.connect(self._final_changed if final else self.changed)
+        return sp
+
+    def params(self):
+        from tse_core.prominences import ProminenceParams
+
+        return ProminenceParams(height=self.height_spin.value(), sensitivity=self.sensitivity.value(),
+                                min_redness=self.min_redness.value(), chromosphere=self.chromo.isChecked(),
+                                chromosphere_arcsec=self.chromo_h.value(), brightness=self.brightness.value(),
+                                saturation=self.saturation.value())
+
+    def load_project(self, project: EventProject, path: Path) -> None:
+        self.region = None  # the stack may have changed
+        pr = project.parameters.get("prominences", {})
+        self.layer_path = W.resolve(path, pr.get("layer"))
+        fp = project.parameters.get("final_prominences", {})
+        self.final_path = W.resolve(path, fp.get("file"))
+        self.open_btn.setEnabled(bool(self.final_path))
+        self.base_file = W.resolve(path, fp.get("base_file")) if fp.get("base_file") else ""
+        self._shown = self._final_shown = False
+
+    def changed(self, *_a) -> None:
+        if self._shown:
+            self.timer.start()
+
+    def preview(self) -> None:
+        if self.worker is not None:
+            return
+        params, cached = self.params(), self.region
+
+        def job(path, say, cancel):
+            import numpy as np
+
+            from tse_core.prominences import composite_top
+
+            region = cached or W.load_sun_region(path)
+            result, layer, alpha = W.prominence_layer(path, params, preview=True, region=region, say=say,
+                                                      cancel=cancel)
+            # Show them over a dim view of the inner corona, for placement.
+            lum = np.nan_to_num(region.rgb).mean(axis=2)
+            top = float(np.percentile(lum[lum > 0], 99.5)) if (lum > 0).any() else 1.0
+            back = (np.arcsinh(20 * np.clip(lum, 0, None) / top) / np.arcsinh(20) * 0.5)[..., None].repeat(3, 2)
+            return region, result, composite_top(back.astype(np.float32), layer, alpha)
+
+        self.start("Finding prominences", job, self._preview_done, reload=False)
+
+    def _preview_done(self, out) -> None:
+        self.region, result, img = out
+        self._shown = True
+        self.log.appendPlainText(result.describe())
+        self.view.show_array(img)
+
+    def write_layer(self) -> None:
+        proj = self.main.ensure_saved()
+        if proj is None:
+            return
+        default = self.layer_path or str(Path(proj).with_name(Path(proj).stem + "_prominences.tif"))
+        fname, filt = QFileDialog.getSaveFileName(self, "Save prominence layer as", default, IO.FILTER)
+        if not fname:
+            return
+        out = str(_with_ext(fname, filt))
+        params, cached = self.params(), self.region
+        self.start("Writing the prominence layer",
+                   lambda p, say, cancel: W.prominence_layer(p, params, output_file=out, region=cached, say=say,
+                                                             cancel=cancel), self._layer_done)
+
+    def _layer_done(self, result) -> None:
+        self.log.appendPlainText(result.describe())
+        self.layer_path = result.outputs.get("prominences", "")
+
+    # --- on top of the final image
+    def _base_chosen(self, *_a) -> None:
+        if self.base.currentData() == "file":
+            start = self.base_file or str(self.main.frames_tab.project_dir())
+            fname, _ = QFileDialog.getOpenFileName(self, "Image to put the prominences on", start,
+                                                   "Images (*.tif *.tiff *.png *.jpg *.jpeg)")
+            if fname:
+                self.base_file = fname
+            elif not self.base_file:
+                self.base.setCurrentIndex(0)
+        self.base_label.setText(f"File: {Path(self.base_file).name}" if self.base.currentData() == "file"
+                                and self.base_file else "")
+        self._final_changed()
+
+    def _base_args(self):
+        if self.base.currentData() == "file":
+            return "final", self.base_file or None
+        return self.base.currentData(), None
+
+    def _final_changed(self, *_a) -> None:
+        if self._final_shown:
+            self.timer.stop()
+            QTimer.singleShot(500, self.preview_final)
+
+    def preview_final(self) -> None:
+        if self.worker is not None:
+            return
+        (base, bfile), k, mode = self._base_args(), self.strength.value(), self.mode.currentText()
+        self.start("Preview with prominences",
+                   lambda p, say, cancel: W.final_with_prominences(p, base, k, mode, preview_side=1400,
+                                                                   base_file=bfile, say=say, cancel=cancel),
+                   self._final_preview_done, reload=False)
+
+    def _final_preview_done(self, img) -> None:
+        self._final_shown = True
+        self.view.show_array(img)
+
+    def write_final(self) -> None:
+        (base, bfile), k, mode = self._base_args(), self.strength.value(), self.mode.currentText()
+        proj = self.main.ensure_saved()
+        if proj is None:
+            return
+        default = self.final_path or str(Path(proj).with_name(Path(proj).stem + "_final_prominences.tif"))
+        fname, filt = QFileDialog.getSaveFileName(self, "Save final image as", default, IO.FILTER)
+        if not fname:
+            return
+        out = str(_with_ext(fname, filt))
+        self.start("Writing the final image",
+                   lambda p, say, cancel: W.final_with_prominences(p, base, k, mode, output_file=out,
+                                                                   base_file=bfile, say=say, cancel=cancel),
+                   self._final_done)
+
+    def _final_done(self, path) -> None:
+        self.final_path = path
+        self.open_btn.setEnabled(True)
+        self.log.appendPlainText(f"Final image written to {path}")
+        QMessageBox.information(self, "Final image", f"Wrote\n{path}")
 
 
 # ---------------------------------------------------------------------------
@@ -1379,16 +1642,8 @@ class ImageView(QLabel):
         try:
             import numpy as np
 
-            if path.lower().endswith((".tif", ".tiff")):
-                import tifffile
-
-                data = tifffile.imread(path)
-                step = max(1, max(data.shape[:2]) // 1600)
-                data = data[::step, ::step].astype(np.float32) / (65535.0 if data.dtype == np.uint16 else 255.0)
-                self.show_array(data)
-            else:
-                self._pix = QPixmap(path)
-                self._rescale()
+            w, h = IO.image_size(path)
+            self.show_array(IO.read_image(path, step=max(1, max(w, h) // 1600)))
         except Exception as exc:  # a preview is a convenience; never fail a step over it
             self.setText(f"Could not show {Path(path).name}: {exc}")
 
@@ -1419,11 +1674,13 @@ class MainWindow(QMainWindow):
         self.stack_tab = StackTab(self)
         self.enhance_tab = EnhanceTab(self)
         self.earthshine_tab = EarthshineTab(self)
+        self.prominences_tab = ProminencesTab(self)
         self.tabs.addTab(self.frames_tab, "1 Frames")
         self.tabs.addTab(self.align_tab, "2 Align")
         self.tabs.addTab(self.stack_tab, "3 Stack")
         self.tabs.addTab(self.enhance_tab, "4 Enhance")
         self.tabs.addTab(self.earthshine_tab, "5 Earthshine")
+        self.tabs.addTab(self.prominences_tab, "6 Prominences")
         self.setCentralWidget(self.tabs)
 
         menu = self.menuBar().addMenu("&Project")
@@ -1486,7 +1743,7 @@ class MainWindow(QMainWindow):
         project = EventProject.load(path)
         self.frames_tab.project = project
         self.frames_tab.inventory = project.inventory
-        for tab in (self.align_tab, self.stack_tab, self.enhance_tab, self.earthshine_tab):
+        for tab in (self.align_tab, self.stack_tab, self.enhance_tab, self.earthshine_tab, self.prominences_tab):
             tab.load_project(project, Path(path))
         self._title(path)
 
@@ -1504,6 +1761,17 @@ class MainWindow(QMainWindow):
             self.link.siril.cmd("load", f'"{path}"')
         except Exception as exc:
             QMessageBox.warning(self, "Solar Eclipse Toolkit", f"Siril could not open the file:\n{exc}")
+
+
+def _with_ext(fname: str, filt: str = "") -> Path:
+    """The chosen file with an extension: the one typed, or the one of the chosen file type."""
+    f = Path(fname)
+    if f.suffix.lower() in IO.FORMATS:
+        return f
+    for ext in (".png", ".jpg", ".tif"):
+        if ext in (filt or ""):
+            return f.with_suffix(ext) if f.suffix else Path(str(f) + ext)
+    return Path(str(f) + ".tif")
 
 
 def _tip(widget, text: str, form=None) -> None:

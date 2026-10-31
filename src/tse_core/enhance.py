@@ -677,8 +677,10 @@ class EnhanceResult:
 
 
 def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[EnhanceParams] = None,
-            out_dir=None, name: str = "corona", progress: Optional[Say] = None) -> tuple[EnhanceResult, dict]:
-    """``hdr`` is (h, w, 3) linear. Writes one 16-bit TIFF per layer to ``out_dir``; without
+            out_dir=None, name: str = "corona", progress: Optional[Say] = None,
+            fmt: str = "tif") -> tuple[EnhanceResult, dict]:
+    """``hdr`` is (h, w, 3) linear. Writes one image per layer to ``out_dir`` (``fmt``: tif, png or
+    jpg; see ``imageout``); without
     ``out_dir`` returns the layers instead as {name: (h, w, 3) float32 in 0..1}."""
     say = progress or (lambda _m: None)
     p = params or EnhanceParams()
@@ -773,7 +775,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
         for k in list(layers):
             # One colour image at a time: a full 45 MP RGB layer is half a gigabyte.
             img = np.clip(layers[k][..., None] * col, 0.0, 1.0)
-            paths[k] = str(_write_tiff(out / f"{name}_{k}.tif", img))
+            paths[k] = str(write_image(with_format(out / f"{name}_{k}.tif", fmt), img))
             del img
             say(f"wrote {paths[k]}")
         info = {"params": {k: (list(v) if isinstance(v, tuple) else v) for k, v in asdict(p).items()},
@@ -785,16 +787,4 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     return EnhanceResult(paths, wb.tolist(), nlev, bg.tolist(), scales, notes), colour
 
 
-def _write_tiff(path: Path, img: np.ndarray) -> Path:
-    data = (np.clip(img, 0, 1) * 65535 + 0.5).astype(np.uint16)
-    try:
-        import tifffile
-
-        tifffile.imwrite(path, data, photometric="rgb")
-        return path
-    except ImportError:
-        from PIL import Image
-
-        path = path.with_suffix(".png")
-        Image.fromarray((data >> 8).astype(np.uint8)).save(path)
-        return path
+from .imageout import with_format, write_image  # noqa: E402

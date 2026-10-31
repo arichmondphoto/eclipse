@@ -528,17 +528,10 @@ def write_outputs(hdr, weight, crop, matches, infos, ref_index, moon_frame, sun,
     write_fits(hdr_path, np.moveaxis(hdr, -1, 0), header)
     w_path = out / f"{name}_weight.fit"
     write_fits(w_path, weight, {"COMMENT": "Sum of stacking weights per pixel"})
+    from .imageout import write_image
+
     preview = stretch_preview(hdr, wb)
-    prev_path = out / f"{name}_preview.tif"
-    try:
-        import tifffile
-
-        tifffile.imwrite(prev_path, preview, photometric="rgb")
-    except ImportError:
-        from PIL import Image
-
-        prev_path = out / f"{name}_preview.png"
-        Image.fromarray((preview >> 8).astype(np.uint8)).save(prev_path)
+    prev_path = write_image(out / f"{name}_preview.tif", preview.astype(np.float32) / 65535.0)
     meta_path = out / f"{name}_stack.json"
     meta_path.write_text(json.dumps({"crop": crop, "matches": [asdict(m) for m in matches.values()],
                                      "reference": ref_index, "moon_frame": moon_frame, "sun": sun,

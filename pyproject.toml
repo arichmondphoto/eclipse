@@ -17,6 +17,7 @@ dependencies = [
     "certifi",
     "truststore>=0.9",  # use the system's certificates (antivirus / company networks)
     "tifffile",
+    "pillow",  # JPG output and sRGB profiles
 ]
 
 [project.optional-dependencies]

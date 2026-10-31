@@ -400,7 +400,7 @@ def _scaled_params(params, scale: float):
 
 
 def enhance_project(project_path, params, hdr_file: Optional[str] = None, output: Optional[str] = None,
-                    name: Optional[str] = None, say: Optional[Say] = None, cancel=None):
+                    name: Optional[str] = None, say: Optional[Say] = None, cancel=None, fmt: str = "tif"):
     """Full-resolution enhancement, writing the TIFF layers. Returns (EnhanceResult, notes).
 
     Loads the HDR stack itself (the enhancement works on it in place to save memory).
@@ -413,7 +413,7 @@ def enhance_project(project_path, params, hdr_file: Optional[str] = None, output
     for n in data.notes:
         say(n)
     out_dir = Path(output) if output else path.parent
-    result, _ = enhance(data.hdr, data.weight, data.header, params, out_dir=out_dir, name=name or path.stem,
+    result, _ = enhance(data.hdr, data.weight, data.header, params, out_dir=out_dir, name=name or path.stem, fmt=fmt,
                         progress=say)
     project = EventProject.load(path)
     project.parameters["enhance"] = {"hdr": data.path, **result.layers}
@@ -428,7 +428,7 @@ def enhance_project(project_path, params, hdr_file: Optional[str] = None, output
 
 def earthshine(project_path, params=None, include_rejected: bool = False, output: Optional[str] = None,
                name: Optional[str] = None, profile_dir: Optional[str] = None, lensfun_db: Optional[str] = None,
-               say: Optional[Say] = None, cancel=None):
+               say: Optional[Say] = None, cancel=None, fmt: str = "tif"):
     """Moon-aligned stack of the long exposures; writes a layer that fits the corona layers' black disc.
 
     Needs the alignment and the HDR stack (for the measured frame brightness and the canvas).
@@ -470,7 +470,8 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
     try:
         result, _lum, _detail = stack_earthshine(use, lambda f: read_mosaic(frames[f.index].path), calibs, matches,
                                                  moon_xy, moon_r, canvas, p, out_dir=out_dir,
-                                                 name=name or path.stem, image_crop=crop_factor, progress=say)
+                                                 name=name or path.stem, image_crop=crop_factor, progress=say,
+                                                 fmt=fmt)
     except (RuntimeError, ValueError) as exc:
         raise WorkflowError(str(exc)) from exc
     project.parameters["earthshine"] = {**result.outputs, "frames": result.frames}
@@ -478,21 +479,7 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
     return result
 
 
-def read_image(path: str, step: int = 1) -> np.ndarray:
-    """A 16-bit (or 8-bit) TIFF/PNG layer as float RGB in 0..1, optionally every ``step``-th pixel."""
-    if str(path).lower().endswith((".tif", ".tiff")):
-        import tifffile
-
-        data = tifffile.imread(path)
-    else:
-        from PIL import Image
-
-        data = np.asarray(Image.open(path).convert("RGB"))
-    data = data[::step, ::step]
-    if data.ndim == 2:
-        data = np.repeat(data[..., None], 3, axis=2)
-    scale = 65535.0 if data.dtype == np.uint16 else 255.0
-    return data[..., :3].astype(np.float32) / scale
+from .imageout import image_size, read_image, with_format, write_image  # noqa: E402
 
 
 def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, mode: str = "screen",
@@ -524,10 +511,7 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
         raise WorkflowError("No earthshine layer yet: click 'Stack earthshine' first.")
     step = 1
     if preview_side:
-        import tifffile
-
-        with tifffile.TiffFile(base_path) as t:
-            h, w = t.pages[0].shape[:2]
+        w, h = image_size(base_path)
         step = max(1, int(math.ceil(max(h, w) / preview_side)))
     say("reading the layers")
     base = read_image(base_path, step)
@@ -541,12 +525,111 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
     if preview_side:
         return out
     say("writing the final image")
-    import tifffile
-
     final = Path(output_file) if output_file else path.parent / f"{name or path.stem}_final.tif"
-    final.parent.mkdir(parents=True, exist_ok=True)
-    tifffile.imwrite(final, (out * 65535 + 0.5).astype(np.uint16), photometric="rgb")
+    final = write_image(final, out)
     project.parameters["final"] = {"file": str(final), "base": base_layer, "base_file": base_file or "",
                                    "strength": strength, "mode": mode}
+    project.save(path)
+    return str(final)
+
+
+# ---------------------------------------------------------------------------
+# Prominences
+# ---------------------------------------------------------------------------
+
+
+def load_sun_region(project_path):
+    """The HDR stack around the Sun (where prominences are), for quick, repeated runs."""
+    from .prominences import sun_region
+
+    data = load_hdr(project_path)
+    region = sun_region(data.hdr, data.weight, data.header)
+    del data
+    return region
+
+
+def prominence_layer(project_path, params=None, output_file: Optional[str] = None, preview: bool = False,
+                     region=None, say: Optional[Say] = None, cancel=None):
+    """Find the prominences and write a layer the size of the HDR stack, transparent outside them
+    (TIFF and PNG; a JPG is on black). With ``preview`` returns (result, layer, alpha) over the
+    region around the Sun and writes nothing. Otherwise returns the result."""
+    from dataclasses import asdict
+
+    from .prominences import ProminenceParams, find_prominences, place
+
+    say = reporter(say, cancel)
+    path = Path(project_path).resolve()
+    p = params or ProminenceParams()
+    if region is None:
+        say("reading the HDR stack")
+        region = load_sun_region(path)
+    say("finding prominences")
+    result, layer, alpha = find_prominences(region, p)
+    if preview:
+        return result, layer, alpha
+    full = place(region, np.concatenate([layer, alpha[..., None]], axis=2))
+    out = Path(output_file) if output_file else path.parent / f"{path.stem}_prominences.tif"
+    say("writing the layer")
+    out = write_image(out, full)
+    result.outputs = {"prominences": str(out)}
+    project = EventProject.load(path)
+    project.parameters["prominences"] = {"layer": str(out), "params": asdict(p)}
+    project.save(path)
+    return result
+
+
+def _base_image(path: Path, project: EventProject, base: str, base_file: Optional[str]) -> str:
+    if base_file:
+        found = resolve(path, base_file)
+        if not found:
+            raise WorkflowError(f"Image not found: {base_file}")
+        return found
+    if base == "final":
+        found = resolve(path, project.parameters.get("final", {}).get("file"))
+        if not found:
+            raise WorkflowError("No final image yet: write one on the Earthshine tab first (or pick another base).")
+        return found
+    found = resolve(path, project.parameters.get("enhance", {}).get(base))
+    if not found:
+        raise WorkflowError(f"No '{base}' layer yet: write the full-size layers on the Enhance tab first.")
+    return found
+
+
+def final_with_prominences(project_path, base: str = "final", strength: float = 1.0, mode: str = "normal",
+                           preview_side: Optional[int] = None, output_file: Optional[str] = None,
+                           base_file: Optional[str] = None, say: Optional[Say] = None, cancel=None):
+    """The prominence layer on top of an image: by default the final image from the Earthshine tab
+    ("final"), or the last-written blend ("blend"), the natural layer ("natural"), or ``base_file``.
+    With ``preview_side`` returns a reduced image; otherwise writes ``output_file`` and returns its path."""
+    from .prominences import composite_top
+
+    say = reporter(say, cancel)
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    base_path = _base_image(path, project, base, base_file)
+    layer_path = resolve(path, project.parameters.get("prominences", {}).get("layer"))
+    if not layer_path:
+        raise WorkflowError("No prominence layer yet: click 'Write prominence layer' first.")
+    step = 1
+    if preview_side:
+        w, h = image_size(base_path)
+        step = max(1, int(math.ceil(max(h, w) / preview_side)))
+    say("reading the images")
+    img = read_image(base_path, step)
+    lay = read_image(layer_path, step, alpha=True)
+    if img.shape[:2] != lay.shape[:2]:
+        raise WorkflowError(f"{Path(base_path).name} is not the size of the HDR stack, so the prominences would "
+                            "not line up. Use an image that is not cropped or resized.")
+    rgb, alpha = lay[..., :3], lay[..., 3]
+    if Path(layer_path).suffix.lower() in (".jpg", ".jpeg"):
+        alpha = np.clip(rgb.max(axis=2) * 20.0, 0.0, 1.0)  # no transparency in a JPG: black is empty
+    out = composite_top(img, rgb, alpha, strength, mode)
+    if preview_side:
+        return out
+    say("writing the image")
+    final = Path(output_file) if output_file else path.parent / f"{path.stem}_final_prominences.tif"
+    final = write_image(final, out)
+    project.parameters["final_prominences"] = {"file": str(final), "base": base, "base_file": base_file or "",
+                                               "strength": strength, "mode": mode}
     project.save(path)
     return str(final)

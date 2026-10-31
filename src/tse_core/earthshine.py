@@ -113,6 +113,7 @@ def stack_earthshine(
     name: str = "earthshine",
     image_crop: float = 1.0,
     progress: Optional[Say] = None,
+    fmt: str = "tif",
 ) -> tuple[EarthshineResult, np.ndarray, np.ndarray]:
     """Stack the frames on the Moon. ``matches``: frame index -> Match (gain, offset) from the HDR stack.
 
@@ -177,11 +178,11 @@ def stack_earthshine(
 
     outputs = {}
     if out_dir is not None:
-        outputs = _write(lum, detail, shown, good, weight, crop, canvas, (cx, cy), moon_r, p, out_dir, name)
+        outputs = _write(lum, detail, shown, good, weight, crop, canvas, (cx, cy), moon_r, p, out_dir, name, fmt)
     return EarthshineResult([f.index for f in use], shifts, crop, snr, outputs, notes), lum, detail
 
 
-def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, out_dir, name) -> dict:
+def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, out_dir, name, fmt="tif") -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     X0, Y0, w, h = crop
@@ -197,7 +198,7 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     edge = moon_r - p.margin_px
     alpha = np.clip((edge - rr) / max(p.feather_px, 0.5), 0.0, 1.0)
     img = (img * alpha).astype(np.float32)
-    crop_tif = _tiff(out / f"{name}_earthshine_crop.tif", img)
+    crop_tif = write_image(with_format(out / f"{name}_earthshine_crop.tif", fmt), img)
     # The layer on the HDR stack's canvas: black outside the disc, so it drops into the corona layers.
     cx0, cy0, cw, ch = canvas
     layer = np.zeros((ch, cw), np.float32)
@@ -208,26 +209,13 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     ww = min(w - sx0, cw - tx0)
     if hh > 0 and ww > 0:
         layer[ty0 : ty0 + hh, tx0 : tx0 + ww] = img[sy0 : sy0 + hh, sx0 : sx0 + ww]
-    layer_tif = _tiff(out / f"{name}_earthshine.tif", layer)
+    layer_tif = write_image(with_format(out / f"{name}_earthshine.tif", fmt), layer)
     info = out / f"{name}_earthshine.json"
     info.write_text(json.dumps({"crop": crop, "canvas": canvas, "params": asdict(p)}, indent=2), encoding="utf-8")
     return {"earthshine": str(layer_tif), "crop": str(crop_tif), "linear": str(lin_path), "info": str(info)}
 
 
-def _tiff(path: Path, grey: np.ndarray) -> Path:
-    data = (np.clip(grey, 0, 1) * 65535 + 0.5).astype(np.uint16)
-    rgb = np.repeat(data[..., None], 3, axis=2)
-    try:
-        import tifffile
-
-        tifffile.imwrite(path, rgb, photometric="rgb")
-        return path
-    except ImportError:
-        from PIL import Image
-
-        path = path.with_suffix(".png")
-        Image.fromarray((rgb >> 8).astype(np.uint8)).save(path)
-        return path
+from .imageout import with_format, write_image  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

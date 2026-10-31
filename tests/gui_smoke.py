@@ -101,4 +101,22 @@ os.environ["STUB_SAVE"] = str(T / "out" / "from_file_final.tif")
 es.write_final()
 assert Path(es.final_path).name == "from_file_final.tif"
 assert EventProject.load(path).parameters["final"]["base_file"] == et.outputs["blend"]
+# Prominences on the real 2024 data: preview, layer as PNG, on top of the blend as a JPG.
+pt = win.prominences_tab
+pt.preview()
+assert pt.region is not None and pt._shown
+print("prominences:", pt.log.lines[-1].splitlines()[0])
+os.environ["STUB_SAVE"] = str(T / "out" / "proms")  # no extension typed: the chosen type (stub: TIFF)
+pt.write_layer()
+assert pt.layer_path.endswith(".tif") and Path(pt.layer_path).exists()
+pt.base.setCurrentIndex(pt.base.findData("blend"))
+pt.preview_final()
+assert pt._final_shown
+os.environ["STUB_SAVE"] = str(T / "out" / "with_proms.jpg")
+pt.write_final()
+assert pt.final_path.endswith("with_proms.jpg") and Path(pt.final_path).exists()
+# The enhance layers as PNG.
+os.environ["STUB_SAVE"] = str(T / "out" / "pngs.png")
+et.run()
+assert et.outputs["blend"].endswith("pngs_blend.png")
 print("GUI SMOKE OK")

@@ -20,7 +20,7 @@ from each frame's metadata.
 | 2 | Geometry (lunar limb, Moon track, Sun centre) and phase correlation alignment | **done** (command line) |
 | 3 | Moon-aware linear HDR stacking | **done** (command line) |
 | 4 | NRGF, FNRGF, FNRGF-N, adaptive filter, natural layer, blend | **done** (command line) |
-| 5 | Full GUI and packaging | **done**: Frames, Align, Stack, Enhance and Earthshine tabs, working in Siril |
+| 5 | Full GUI and packaging | **done**: Frames, Align, Stack, Enhance, Earthshine and Prominences tabs |
 
 ## Supported files
 
@@ -327,6 +327,45 @@ as a blend saved earlier), at `--strength` (1 = as stacked) in `--mode` screen
 
 The report gives the lunar detail over the noise; below about 3 the layer
 is mostly noise (short exposures, low ISO or a bright sky).
+
+## Prominences
+
+```bash
+tse prominences eclipse2024.json              # writes <name>_prominences.tif
+tse final-prominences eclipse2024.json        # puts them on top of the final image
+```
+
+Prominences glow in hydrogen-alpha (red) and weaker blue hydrogen lines, so
+they look pink or magenta once the corona is white. They are found by
+colour: pixels clearly redder than the corona at the same height, beyond the
+noise (`--sensitivity`, default 4) and the redness ratio (`--min-redness`,
+default 1.2), up to `--height` solar radii above the limb (default 0.3). They
+come from the HDR stack, so every prominence the moving Moon uncovered at any
+time is there, and the layer stops at the lunar limb of the Moon frame, so
+nothing covers the Moon or the earthshine. `--no-chromosphere` leaves out the
+thin pink rim along the limb (red light lower than `--chromosphere-arcsec`,
+default 12), keeping the bases of taller prominences.
+
+The layer is transparent outside the prominences (TIFF and PNG), so it sits
+on top in Photoshop in Normal mode. `tse final-prominences` (or tab 6) puts
+it on the final image from the Earthshine step, the last-written blend or
+natural layer (`--base`), or any image (`--base-file`), in normal mode by
+default, which keeps their colour over the bright inner corona.
+
+## Picture formats
+
+Every picture output (layers, earthshine, prominences, final images) can be
+written as:
+
+| Format | Bits | Compression | |
+| --- | --- | --- | --- |
+| TIFF (default) | 16 | none | highest quality, largest |
+| PNG | 16 | lossless | same quality, smaller |
+| JPG | 8 | quality 100, no colour subsampling, dithered | smallest; JPG cannot hold 16 bits or transparency |
+
+All are tagged 300 dpi (a printing label; the pixels are not changed) and
+sRGB. In the GUI the Save dialog's file type chooses; on the command line
+`--format tif|png|jpg` or the output file's extension.
 
 ## Calibration rules
 
