@@ -51,7 +51,12 @@ et.blend["fnrgf_n"].setValue(40)
 et.flatten.setValue(0.6)
 assert et.params().blend["fnrgf_n"] == 0.4 and et.params().flatten == 0.6
 et.layer_checks["nrgf"].setChecked(False)
+et.blend["adaptive"].setValue(10)
+et.blend_mode["adaptive"].setCurrentIndex(1)  # Overlay
+assert et.params().blend_modes["adaptive"] == "overlay"
+os.environ["STUB_SAVE"] = str(T / "out" / "custom_blend.tif")  # the name the user types
 et.run()
+assert Path(et.outputs["blend"]).name == "custom_blend.tif" and Path(et.outputs["natural"]).name == "custom_natural.tif"
 print("written:", sorted(et.outputs))
 assert "nrgf" not in et.outputs and "blend" in et.outputs and all(Path(v).exists() for v in et.outputs.values())
 assert "enhance" in EventProject.load(path).parameters
@@ -82,7 +87,9 @@ es = win.earthshine_tab
 es.strength.setValue(1.5)
 es.preview_final()
 assert es._final_shown
+os.environ["STUB_SAVE"] = str(T / "out" / "my picture")
 es.write_final()
+assert Path(es.final_path).name == "my picture.tif"
 assert Path(es.final_path).exists() and EventProject.load(path).parameters["final"]["strength"] == 1.5
 print("final image:", Path(es.final_path).name)
 print("GUI SMOKE OK")

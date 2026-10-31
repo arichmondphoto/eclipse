@@ -32,6 +32,51 @@ def find_raw_files(folder: str | os.PathLike, recursive: bool = False) -> list[s
     return sorted(files)
 
 
+FOLDER_NAMES = {
+    "lights": ("lights", "light", "lights_frames", "light frames"),
+    "darks": ("darks", "dark"),
+    "flats": ("flats", "flat"),
+    "bias": ("bias", "biases", "offset", "offsets"),
+}
+
+
+@dataclass
+class ProjectFolder:
+    """An event folder laid out as: <folder>/lights, and optionally darks, flats, bias.
+
+    The project file (<folder name>.json) and everything the processing writes
+    go in the folder itself. A folder without a 'lights' subfolder is treated
+    as the folder of light frames, with the project beside it as before.
+    """
+
+    root: Path
+    lights: Path
+    darks: Optional[Path] = None
+    flats: Optional[Path] = None
+    bias: Optional[Path] = None
+
+    @property
+    def is_project_folder(self) -> bool:
+        return self.lights != self.root
+
+    @property
+    def project_file(self) -> Path:
+        return self.root / f"{self.root.name}.json"
+
+    @classmethod
+    def scan(cls, folder: str | os.PathLike) -> "ProjectFolder":
+        root = Path(folder).resolve()
+        subs = {p.name.lower(): p for p in root.iterdir() if p.is_dir()} if root.is_dir() else {}
+
+        def find(kind: str) -> Optional[Path]:
+            return next((subs[n] for n in FOLDER_NAMES[kind] if n in subs), None)
+
+        lights = find("lights")
+        if lights is None:
+            return cls(root, root)
+        return cls(root, lights, find("darks"), find("flats"), find("bias"))
+
+
 @dataclass
 class Inventory:
     frames: list[FrameMeta] = field(default_factory=list)

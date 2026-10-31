@@ -67,6 +67,7 @@ class EnhanceParams:
     neutral_background: bool = True  # model and remove the sky (level, colour and gradient) before filtering
     moon_margin_px: float = 1.5
     blend: dict = field(default_factory=lambda: dict(DEFAULT_BLEND))
+    blend_modes: dict = field(default_factory=dict)  # layer -> "soft light" (default) or "overlay"
 
 
 @dataclass
@@ -474,16 +475,30 @@ def soft_light(base: np.ndarray, top: np.ndarray) -> np.ndarray:
     return (1 - 2 * top) * base * base + 2 * top * base
 
 
-def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray) -> np.ndarray:
-    """The natural layer as the base, each filter layer applied in soft light at its weight
-    (like layer opacity in Photoshop). The filter layers are centred on mid-grey, so they add
-    structure without lifting the dark sky."""
+def overlay(base: np.ndarray, top: np.ndarray) -> np.ndarray:
+    """Photoshop's overlay: 50 % grey on top leaves the base unchanged; stronger than soft light,
+    and it boosts contrast most in the mid-tones of the base."""
+    return np.where(base < 0.5, 2 * base * top, 1 - 2 * (1 - base) * (1 - top))
+
+
+BLEND_MODES = {"soft light": soft_light, "overlay": overlay}
+
+
+def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Optional[dict] = None) -> np.ndarray:
+    """The natural layer as the base, each filter layer applied at its weight (like layer opacity
+    in Photoshop) in its mode, soft light unless ``modes`` says overlay. The filter layers are
+    centred on mid-grey, which both modes treat as 'no change', so they add structure without
+    lifting the dark sky. Layers are applied in the order natural, NRGF, FNRGF, FNRGF-N, adaptive."""
+    modes = modes or {}
     base = layers["natural"].copy() if "natural" in weights else np.full_like(next(iter(layers.values())), 0.5)
-    for k, w in weights.items():
-        if k == "natural":
+    for k in LAYERS:
+        if k == "natural" or k not in weights:
             continue
-        w = min(max(w, 0.0), 1.0)
-        base = (1 - w) * base + w * soft_light(base, layers[k])
+        w = min(max(weights[k], 0.0), 1.0)
+        fn = BLEND_MODES.get(str(modes.get(k, "soft light")).lower().replace("_", " ").replace("softlight", "soft light"))
+        if fn is None:
+            raise ValueError(f"unknown blend mode {modes[k]!r} for {k}; use soft light or overlay")
+        base = (1 - w) * base + w * fn(base, layers[k])
     out = stretch(base, valid, 0.05, 99.95)
     out[~valid] = 0.0
     return out
@@ -745,7 +760,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     notes = []
     blend_w = {k: float(v) for k, v in p.blend.items() if v and k in layers}
     if blend_w:
-        layers["blend"] = soft_light_blend(layers, blend_w, valid)
+        layers["blend"] = soft_light_blend(layers, blend_w, valid, p.blend_modes)
     unknown = set(p.blend) - set(LAYERS)
     if unknown:
         notes.append(f"unknown blend layer(s) ignored: {', '.join(sorted(unknown))}")

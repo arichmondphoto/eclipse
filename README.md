@@ -86,6 +86,26 @@ and **Cancel** stops at the next step. **Open … in Siril** loads a result
 into Siril. The same steps run from the command line with `tse`, using the
 same project file.
 
+### Project folders
+
+Keep each event in its own folder:
+
+```
+Eclipse 2024/
+    lights/      the RAW frames from totality
+    darks/       optional
+    flats/       optional
+    bias/        optional
+```
+
+**Project → New from folder…** in the GUI, or `tse inventory "Eclipse 2024"`
+on the command line, reads the light frames from `lights/` and the
+calibration frames from the other subfolders, saves the project file as
+`Eclipse 2024/Eclipse 2024.json`, and writes every result (alignment,
+stack, earthshine) into the folder. Opening that folder again reopens the
+project. On the Enhance and Earthshine tabs, **Write full-size layers**
+and **Write final image** ask where to save and under what name.
+
 ## Command line
 
 ```bash
@@ -237,7 +257,7 @@ for pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | `fnrgf` | Fourier NRGF (Druckmüllerová et al. 2011): mean and spread follow position angle too, so faint and bright regions at the same height get similar contrast |
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
 | `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the log image: fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
-| `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light at the given opacities, `--blend natural=1,fnrgf_n=0.7,adaptive=0.5` by default (`--blend none` to skip); the same thing you would do with layers in Photoshop |
+| `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light (or Overlay) at the given opacities, `--blend natural=1,fnrgf_n=0.7,adaptive=0.5` by default; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay` (`--blend none` to skip); the same thing you would do with layers in Photoshop |
 
 **Names used:** NRGF = Normalizing-Radial-Graded Filter; FNRGF = Fourier
 Normalizing-Radial-Graded Filter; FNRGF-N = FNRGF with Noise compensation;

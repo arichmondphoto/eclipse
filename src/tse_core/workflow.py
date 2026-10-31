@@ -293,14 +293,30 @@ def parse_layers(text: str) -> tuple[str, ...]:
     return layers
 
 
+def parse_blend_modes(text: Optional[str]) -> dict:
+    """The modes in a blend string: 'fnrgf_n=0.7,adaptive=0.1:overlay' -> {'adaptive': 'overlay'}."""
+    modes = {}
+    if not text or text.strip().lower() == "none":
+        return modes
+    for item in text.split(","):
+        if ":" in item and "=" in item:
+            k, rest = item.split("=", 1)
+            mode = rest.split(":", 1)[1].strip().lower().replace("softlight", "soft light").replace("_", " ")
+            if mode not in ("soft light", "overlay"):
+                raise WorkflowError(f"unknown blend mode {mode!r}; use soft light or overlay")
+            modes[k.strip()] = mode
+    return modes
+
+
 def parse_blend(text: Optional[str]) -> dict:
+    """Layer weights in a blend string, e.g. 'natural=1,fnrgf_n=0.7,adaptive=0.1:overlay'."""
     blend: dict = {}
     if not text or text.strip().lower() == "none":
         return blend
     try:
         for item in text.split(","):
             k, v = item.split("=")
-            blend[k.strip()] = float(v)
+            blend[k.strip()] = float(v.split(":")[0])
     except ValueError as exc:
         raise WorkflowError("The blend takes layer=weight pairs, for example natural=1,fnrgf_n=0.7,adaptive=0.5") \
             from exc
@@ -481,11 +497,11 @@ def read_image(path: str, step: int = 1) -> np.ndarray:
 
 def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, mode: str = "screen",
                 preview_side: Optional[int] = None, name: Optional[str] = None,
-                say: Optional[Say] = None, cancel=None):
+                say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None):
     """The chosen enhanced layer with the earthshine blended into the lunar disc.
 
     With ``preview_side`` returns a reduced image (no file); otherwise writes
-    ``<name>_final.tif`` next to the project and returns its path.
+    ``output_file`` (default ``<name>_final.tif`` next to the project) and returns its path.
     """
     from .earthshine import composite
 
@@ -517,7 +533,8 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
     say("writing the final image")
     import tifffile
 
-    final = path.parent / f"{name or path.stem}_final.tif"
+    final = Path(output_file) if output_file else path.parent / f"{name or path.stem}_final.tif"
+    final.parent.mkdir(parents=True, exist_ok=True)
     tifffile.imwrite(final, (out * 65535 + 0.5).astype(np.uint16), photometric="rgb")
     project.parameters["final"] = {"file": str(final), "base": base_layer, "strength": strength, "mode": mode}
     project.save(path)

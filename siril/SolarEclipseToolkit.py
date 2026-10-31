@@ -64,7 +64,7 @@ from tse_core.brackets import detect_brackets  # noqa: E402
 from tse_core.enhance import LAYERS, EnhanceParams  # noqa: E402
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
 from tse_core.frames import format_exposure, parse_duration  # noqa: E402
-from tse_core.inventory import Inventory, find_raw_files  # noqa: E402
+from tse_core.inventory import Inventory, ProjectFolder, find_raw_files  # noqa: E402
 from tse_core.lensfun import LensfunDatabase, download_database  # noqa: E402
 from tse_core.metadata import read_frames  # noqa: E402
 from tse_core.project import EventProject  # noqa: E402
@@ -212,8 +212,39 @@ class FramesTab(QWidget):
     # --------------------------------------------------------------- actions
     def _pick_folder(self, edit: QLineEdit) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choose folder", edit.text() or self.link.working_dir())
-        if folder:
-            edit.setText(folder)
+        if not folder:
+            return
+        if edit is self.folder and ProjectFolder.scan(folder).is_project_folder:
+            self.use_project_folder(folder)
+            return
+        edit.setText(folder)
+
+    def use_project_folder(self, folder: str) -> bool:
+        """Set up from a project folder (lights/ and optional darks/, flats/, bias/); returns False if it
+        has no lights/ subfolder. An existing project file in the folder is opened."""
+        layout = ProjectFolder.scan(folder)
+        if not layout.is_project_folder:
+            return False
+        if layout.project_file.exists():
+            self.load_project_file(layout.project_file)
+        else:
+            self.project = EventProject(name=layout.root.name)
+            self.project_path = layout.project_file
+        self.folder.setText(str(layout.lights))
+        for edit, sub in ((self.bias_dir, layout.bias), (self.dark_dir, layout.darks), (self.flat_dir, layout.flats)):
+            edit.setText(str(sub) if sub else "")
+        self.scan()
+        self.save_project(self.project_path)
+        return True
+
+    def project_dir(self) -> Path:
+        """Where the project file and results belong: the project folder if there is one."""
+        if self.project_path is not None:
+            return Path(self.project_path).parent
+        raw = self.folder.text().strip()
+        if raw:
+            return Path(raw).resolve().parent  # the project folder (above lights/) or beside the frames
+        return Path(self.link.working_dir())
 
     def scan(self) -> None:
         folder = self.folder.text().strip()
@@ -342,7 +373,7 @@ class FramesTab(QWidget):
             return
         by_index = {f.index: f for f in self.inventory.frames}
         written = set()
-        out_dir = Path(self.link.working_dir())
+        out_dir = self.project_dir()
         for fc in lensfun_frames:
             f = by_index[fc.frame_index]
             if not (f.width and f.height):
@@ -376,9 +407,8 @@ class FramesTab(QWidget):
     # -------------------------------------------------------------- project
     def save_project(self, path: Path | None = None) -> None:
         if path is None:
-            name, _ = QFileDialog.getSaveFileName(
-                self, "Save project", str(self.project_path or Path(self.link.working_dir()) / "eclipse_project.json"),
-                "Project (*.json)")
+            default = self.project_path or self.project_dir() / f"{self.project.name or 'eclipse_project'}.json"
+            name, _ = QFileDialog.getSaveFileName(self, "Save project", str(default), "Project (*.json)")
             if not name:
                 return
             path = Path(name)
@@ -388,9 +418,12 @@ class FramesTab(QWidget):
         self.link.log(f"Solar Eclipse Toolkit: project saved to {path}")
 
     def open_project(self) -> None:
-        name, _ = QFileDialog.getOpenFileName(self, "Open project", self.link.working_dir(), "Project (*.json)")
+        name, _ = QFileDialog.getOpenFileName(self, "Open project", str(self.project_dir()), "Project (*.json)")
         if not name:
             return
+        self.load_project_file(name)
+
+    def load_project_file(self, name) -> None:
         self.project = EventProject.load(name)
         self.project_path = Path(name)
         self.inventory = self.project.inventory
@@ -399,6 +432,9 @@ class FramesTab(QWidget):
         self.c3.setText(self.project.third_contact)
         offset = self.project.camera_clock_offset_s
         self.clock.setText(f"{offset:+.0f}s" if offset else "")
+        for edit, files in ((self.bias_dir, self.project.bias_files), (self.dark_dir, self.project.dark_files),
+                            (self.flat_dir, self.project.flat_files)):
+            edit.setText(str(Path(files[0]).parent) if files else "")
         self._refresh_lens_choices()
         if not self.project.use_lensfun:
             self.lens_combo.setCurrentText(NO_PROFILE)
@@ -812,13 +848,21 @@ class EnhanceTab(StepTab):
             self.layer_checks[k] = c
         self.settings_layout.addWidget(lay)
 
-        blend = QGroupBox("Suggested blend (filter layers in Soft Light over the natural layer)")
+        blend = QGroupBox("Blend (filter layers over the natural layer)")
         bf = QFormLayout(blend)
         self.blend = {}
+        self.blend_mode = {}
         for k, default in (("fnrgf_n", 70), ("adaptive", 50), ("fnrgf", 0), ("nrgf", 0)):
             sp = self._spin(0, 100, default, " %")
-            bf.addRow(f"{LAYER_NAMES[k]}:", sp)
+            mode = QComboBox()
+            mode.addItems(["Soft Light", "Overlay"])
+            mode.currentIndexChanged.connect(self.changed)
+            row = QHBoxLayout()
+            row.addWidget(sp, 1)
+            row.addWidget(mode)
+            bf.addRow(f"{LAYER_NAMES[k]}:", row)
             self.blend[k] = sp
+            self.blend_mode[k] = mode
         self.settings_layout.addWidget(blend)
 
         tone = QGroupBox("Natural layer and colour")
@@ -908,12 +952,17 @@ class EnhanceTab(StepTab):
         for k, c in self.layer_checks.items():
             _tip(c, layer_tips[k] + "\n\nTicked layers are written as 16-bit TIFFs by 'Write full-size layers'. "
                  "The preview always shows every layer.")
-        blend_tip = ("How strongly this layer is applied in Soft Light over the natural layer in the suggested "
-                     "blend, like layer opacity in Photoshop. 0 % leaves it out.\n\nSoft Light treats mid-grey as "
-                     "'no change', so the filter layers add structure without lifting the dark sky. "
-                     "Defaults: FNRGF-N 70 %, adaptive 50 %. Lower them for a more natural look.")
+        blend_tip = ("How strongly this layer is applied over the natural layer in the blend, like layer "
+                     "opacity in Photoshop. 0 % leaves it out. The mode beside it picks Soft Light or Overlay.\n\n"
+                     "Both modes treat mid-grey as 'no change', so the filter layers add structure without "
+                     "lifting the dark sky. Defaults: FNRGF-N 70 %, adaptive 50 %, Soft Light. Lower them for a "
+                     "more natural look.")
         for k, sp in self.blend.items():
             _tip(sp, f"{LAYER_NAMES[k]}: " + blend_tip, bf)
+            _tip(self.blend_mode[k], "How this layer is applied, as Photoshop's layer modes. Both treat mid-grey "
+                 "as 'no change', so the sky stays dark.\n\nSoft Light (default): gentle, keeps the natural "
+                 "tones.\n\nOverlay: stronger, adds more contrast, mostly in the mid-tones. Use a lower "
+                 "strength with Overlay (for example 5-20 %).")
         _tip(self.flatten, "How much of the corona's brightness fall-off from the Sun the natural layer removes, "
              "from 0 (none: a plain log stretch, the inner corona dominates) to 1 (all of it: equal brightness at "
              "every height).\n\nDefault 0.8. Lower it (0.5-0.7) to keep more of the natural fall-off; raise it "
@@ -979,10 +1028,11 @@ class EnhanceTab(StepTab):
         blend = {"natural": 1.0}
         blend.update({k: sp.value() / 100.0 for k, sp in self.blend.items() if sp.value() > 0})
         layers = tuple(k for k, c in self.layer_checks.items() if c.isChecked())
+        modes = {k: c.currentText().lower() for k, c in self.blend_mode.items() if k in blend}
         return EnhanceParams(layers=layers, segments=self.segments.value(), order=self.order.value(),
                              noise_m=self.noise_m.value(), flatten=self.flatten.value(),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
-                             neutral_background=not self.keep_sky.isChecked())
+                             blend_modes=modes, neutral_background=not self.keep_sky.isChecked())
 
     def changed(self, *_args) -> None:
         if self.auto.isChecked() and self.small is not None:
@@ -1031,8 +1081,34 @@ class EnhanceTab(StepTab):
         if not params.layers:
             QMessageBox.information(self, "Enhance", "Tick at least one layer to write.")
             return
+        target = self._ask_layers_name()
+        if target is None:
+            return
+        out_dir, name = target
         self.start("Writing full-size layers",
-                   lambda p, say, cancel: W.enhance_project(p, params, say=say, cancel=cancel), self._done)
+                   lambda p, say, cancel: W.enhance_project(p, params, output=out_dir, name=name, say=say,
+                                                            cancel=cancel), self._done)
+
+    def _ask_layers_name(self):
+        """Where to write the layers: a folder and a name; each layer is <name>_<layer>.tif."""
+        proj = self.main.ensure_saved()
+        if proj is None:
+            return None
+        last = self.outputs.get("blend") or next(iter(self.outputs.values()), "")
+        if last:
+            default = Path(last).with_name(Path(last).name.rsplit("_", 1)[0] + ".tif")
+        else:
+            default = Path(proj).with_suffix(".tif")
+        fname, _ = QFileDialog.getSaveFileName(
+            self, "Save layers as (each layer is saved as <name>_<layer>.tif)", str(default), "TIFF (*.tif)")
+        if not fname:
+            return None
+        f = Path(fname)
+        stem = f.stem
+        for k in list(LAYER_NAMES):
+            if stem.endswith("_" + k):
+                stem = stem[: -len(k) - 1]
+        return str(f.parent), stem
 
     def _done(self, out) -> None:
         result, _notes = out
@@ -1178,8 +1254,18 @@ class EarthshineTab(StepTab):
 
     def write_final(self) -> None:
         base, k, mode = self.base.currentData(), self.strength.value(), self.mode.currentText()
+        proj = self.main.ensure_saved()
+        if proj is None:
+            return
+        default = self.final_path or str(Path(proj).with_name(Path(proj).stem + "_final.tif"))
+        fname, _ = QFileDialog.getSaveFileName(self, "Save final image as", default, "TIFF (*.tif)")
+        if not fname:
+            return
+        if not fname.lower().endswith((".tif", ".tiff")):
+            fname += ".tif"
         self.start("Writing the final image",
-                   lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel), self._final_done)
+                   lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname),
+                   self._final_done)
 
     def _final_done(self, path) -> None:
         self.final_path = path
@@ -1306,7 +1392,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
 
         menu = self.menuBar().addMenu("&Project")
-        for text, slot, key in (("&Open…", self.open_project, "Ctrl+O"),
+        for text, slot, key in (("&New from folder…", self.new_from_folder, "Ctrl+N"),
+                                ("&Open…", self.open_project, "Ctrl+O"),
                                 ("&Save", lambda: self.ensure_saved(), "Ctrl+S"),
                                 ("Save &as…", self.save_as, None)):
             act = QAction(text, self)
@@ -1329,6 +1416,21 @@ class MainWindow(QMainWindow):
         if ft.project_path is not None:
             self._title(ft.project_path)
         return ft.project_path
+
+    def new_from_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Choose the project folder (holding lights/, and "
+                                                        "optionally darks/, flats/, bias/)", str(self.frames_tab.project_dir()))
+        if not folder:
+            return
+        if not self.frames_tab.use_project_folder(folder):
+            QMessageBox.information(self, "New project",
+                                    "That folder has no 'lights' subfolder. Put the light frames in <folder>/lights "
+                                    "(and any calibration frames in darks, flats and bias), or choose the folder of "
+                                    "light frames on the Frames tab.")
+            return
+        self.tabs.setCurrentIndex(0)
+        self.enhance_tab.forget_preview()
+        self.reload_project()
 
     def save_as(self) -> None:
         self.frames_tab.save_project()

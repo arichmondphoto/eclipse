@@ -25,7 +25,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("inventory", help="read every RAW file in a folder and report brackets and calibration")
-    p.add_argument("folder")
+    p.add_argument("folder", help="the folder of light frames, or a project folder holding lights/ (and "
+                                  "optionally darks/, flats/, bias/); with a project folder the project file "
+                                  "and every result go in it")
     p.add_argument("--recursive", action="store_true")
     p.add_argument("--csv", help="write the frame table to this CSV file")
     p.add_argument("--project", help="create or update this project file (.json)")
@@ -132,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--layers", default=",".join(LAYERS),
                    help=f"comma-separated layers to write (default: all of {', '.join(LAYERS)})")
     p.add_argument("--blend", default=",".join(f"{k}={v}" for k, v in DEFAULT_BLEND.items()),
-                   help="suggested blend as layer=weight pairs, or 'none' (default: %(default)s)")
+                   help="suggested blend as layer=weight pairs, each optionally ':overlay' (default soft light), "
+                        "e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s)")
     p.add_argument("--order", type=int, default=10, help="FNRGF Fourier order (default 10)")
     p.add_argument("--segments", type=int, default=50, help="FNRGF angular segments (default 50)")
     p.add_argument("--mean-att", help="FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0)")
@@ -217,6 +220,18 @@ def _db(path: str | None) -> LensfunDatabase:
 
 
 def cmd_inventory(args) -> int:
+    from .inventory import ProjectFolder
+
+    layout = ProjectFolder.scan(args.folder)
+    if layout.is_project_folder:
+        print(f"Project folder {layout.root}: light frames from {layout.lights.name}/"
+              + "".join(f", {k} from {getattr(layout, k).name}/" for k in ("darks", "flats", "bias")
+                        if getattr(layout, k)))
+        args.folder = str(layout.lights)
+        args.bias = args.bias or (str(layout.bias) if layout.bias else None)
+        args.darks = args.darks or (str(layout.darks) if layout.darks else None)
+        args.flats = args.flats or (str(layout.flats) if layout.flats else None)
+        args.project = args.project or str(layout.project_file)
     files = find_raw_files(args.folder, args.recursive)
     if not files:
         print(f"No RAW files found in {args.folder}")
@@ -268,6 +283,9 @@ def cmd_inventory(args) -> int:
             project.third_contact = args.c3
         if args.clock_offset:
             project.camera_clock_offset_s = offset
+        project.bias_files = find_raw_files(args.bias) if args.bias else project.bias_files
+        project.dark_files = find_raw_files(args.darks) if args.darks else project.dark_files
+        project.flat_files = find_raw_files(args.flats) if args.flats else project.flat_files
         project.set_inventory(inv)
         project.save(path)
         print(f"Project saved to {path}")
@@ -508,18 +526,19 @@ def _floats(text):
 
 def cmd_enhance(args) -> int:
     from .enhance import EnhanceParams
-    from .workflow import WorkflowError, enhance_project, parse_blend, parse_layers
+    from .workflow import WorkflowError, enhance_project, parse_blend, parse_blend_modes, parse_layers
 
     try:
         layers = parse_layers(args.layers)
         blend = parse_blend(args.blend)
+        blend_modes = parse_blend_modes(args.blend)
     except WorkflowError as exc:
         print(exc)
         return 1
     params = EnhanceParams(layers=layers, segments=args.segments, order=args.order,
                            mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
                            noise_m=args.noise_m, flatten=args.flatten, saturation=args.saturation,
-                           white=args.white, blend=blend,
+                           white=args.white, blend=blend, blend_modes=blend_modes,
                            neutral_background=not args.keep_background_colour)
     out, code = _run(enhance_project, args.project, params, hdr_file=args.hdr, output=args.output,
                      name=args.name, quiet=args.quiet)

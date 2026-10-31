@@ -113,3 +113,47 @@ def test_paths_stored_relative_to_another_folder(tmp_path, monkeypatch):
     assert W.resolve(folder / "e.json", "missing.fit") == ""
     # Moved folder: absolute paths that no longer exist fall back to the name next to the project.
     assert W.resolve(folder / "e.json", "/old/place/e_hdr.fit") == str((folder / "e_hdr.fit").resolve())
+
+
+def test_project_folder_layout(tmp_path):
+    from tse_core.inventory import ProjectFolder
+
+    root = tmp_path / "Eclipse 2024"
+    for sub in ("Lights", "darks", "Flat", "offsets", "other"):
+        (root / sub).mkdir(parents=True)
+    pf = ProjectFolder.scan(root)
+    assert pf.is_project_folder
+    assert pf.lights.name == "Lights" and pf.darks.name == "darks" and pf.flats.name == "Flat"
+    assert pf.bias.name == "offsets"
+    assert pf.project_file == root.resolve() / "Eclipse 2024.json"
+    plain = ProjectFolder.scan(root / "Lights")
+    assert not plain.is_project_folder and plain.lights == (root / "Lights").resolve()
+
+
+def test_cli_inventory_uses_project_folder(tmp_path, monkeypatch, capsys):
+    """A project folder: frames from lights/, calibration from its subfolders, project file in the folder."""
+    from conftest import make_frames
+    from tse_core import cli
+    from tse_core import inventory as inv_mod
+    from tse_core.project import EventProject
+
+    root = tmp_path / "ev"
+    (root / "lights").mkdir(parents=True)
+    (root / "darks").mkdir()
+    frames = make_frames(["1/250", "1/60"])
+    for f in frames:
+        (root / "lights" / f.file_name).write_bytes(b"")
+    (root / "darks" / "D1.NEF").write_bytes(b"")
+
+    def fake_from_paths(paths, use_exiftool=True):
+        assert all("lights" in p for p in paths)
+        return inv_mod.Inventory(make_frames(["1/250", "1/60"]))
+
+    monkeypatch.setattr(cli.Inventory, "from_paths", staticmethod(fake_from_paths))
+    monkeypatch.setattr(cli, "read_frames", lambda files: [])
+    assert cli.main(["inventory", str(root), "--lensfun-db", str(tmp_path / "none")]) == 0
+    out = capsys.readouterr().out
+    assert "Project folder" in out
+    project = EventProject.load(root / "ev.json")
+    assert project.dark_files and project.dark_files[0].endswith("D1.NEF")
+    assert Path(project.raw_folder) == (root / "lights").resolve()

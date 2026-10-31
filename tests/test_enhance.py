@@ -205,3 +205,33 @@ def test_sky_model_removes_gradient_but_keeps_corona():
     # The corona at 2-3 solar radii is not taken for sky.
     mid = valid & (r > 2 * g.sun_r) & (r < 3 * g.sun_r)
     assert np.median((img - fitted)[mid] / corona[mid]) == pytest.approx(1.0, abs=0.15)
+
+
+def test_overlay_and_blend_modes():
+    base = np.array([0.2, 0.5, 0.8], np.float32)
+    grey = np.full(3, 0.5, np.float32)
+    assert np.allclose(E.overlay(base, grey), base)  # mid-grey: no change
+    assert np.allclose(E.soft_light(base, grey), base)
+    top = np.full(3, 0.8, np.float32)
+    # Overlay is the stronger of the two.
+    assert np.all(np.abs(E.overlay(base, top) - base) >= np.abs(E.soft_light(base, top) - base) - 1e-6)
+    valid = np.ones((4, 4), bool)
+    layers = {"natural": np.full((4, 4), 0.4, np.float32), "adaptive": np.full((4, 4), 0.9, np.float32),
+              "fnrgf": np.full((4, 4), 0.9, np.float32)}
+    layers["natural"][0, 0] = 0.0
+    layers["natural"][3, 3] = 1.0  # so the final stretch keeps the scale
+    a = E.soft_light_blend(layers, {"natural": 1, "adaptive": 0.5}, valid)
+    b = E.soft_light_blend(layers, {"natural": 1, "adaptive": 0.5}, valid, {"adaptive": "overlay"})
+    assert b[1, 1] > a[1, 1]
+    with pytest.raises(ValueError):
+        E.soft_light_blend(layers, {"natural": 1, "fnrgf": 0.1}, valid, {"fnrgf": "multiply"})
+
+
+def test_parse_blend_with_modes():
+    from tse_core import workflow as W
+
+    text = "natural=1,adaptive=0.1:soft light,fnrgf=0.05:overlay"
+    assert W.parse_blend(text) == {"natural": 1.0, "adaptive": 0.1, "fnrgf": 0.05}
+    assert W.parse_blend_modes(text) == {"adaptive": "soft light", "fnrgf": "overlay"}
+    with pytest.raises(W.WorkflowError):
+        W.parse_blend_modes("fnrgf=0.1:screen")
