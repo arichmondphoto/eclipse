@@ -313,29 +313,37 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
         glare = glare * limb_background(lum, glare, good, cx, cy, moon_r)
         detail = np.where(good, lum - glare, 0.0).astype(np.float32)
     # Noise from the stack weights (inverse variances up to one factor), measured on fine scales.
-    resid = detail - ndimage.gaussian_filter(detail, 1.0)
+    gm = good.astype(np.float32)
+    local = ndimage.gaussian_filter(detail, 1.0) / np.maximum(ndimage.gaussian_filter(gm, 1.0), 1e-6)
+    resid = np.where(good, detail - local, 0.0)
     scale = 1.4826 * np.median(np.abs(resid[good] * np.sqrt(weight[good]))) / 0.96
     pix_noise = np.where(good, scale / np.sqrt(np.maximum(weight, 1e-30)), 0.0)
     noise = float(np.median(pix_noise[good]))
     body = good & (rr < moon_r * 0.5)
     noise_body = float(np.median(pix_noise[body])) if body.sum() > 100 else noise
+    # How noisy each ring is, measured on the picture itself (the scatter of neighbouring pixels),
+    # as well as from the stack weights: the weights alone can understate it near the limb.
+    ri = np.clip((moon_r - rr).astype(int), 0, None)
+    scatter = np.abs(resid)
+    nring = int(ri[good].max()) + 1 if good.any() else 1
+    ring_med = np.asarray(ndimage.median(scatter, np.where(good, ri, -1), index=np.arange(nring)), float)
+    ring_med = np.nan_to_num(ring_med, nan=0.0)
+    body_scatter = float(np.median(scatter[body])) if body.sum() > 100 else float(np.median(scatter[good]))
+    ring_ratio = ring_med / max(body_scatter, 1e-30)
+    weight_ratio = pix_noise / max(noise_body, 1e-30)
+    factor = np.maximum(weight_ratio, ring_ratio[np.clip(ri, 0, nring - 1)])
     # A little more smoothing where the noise is higher (near the limb the long exposures are
     # saturated), up to ``edge_smooth`` px; diffraction spikes and other real structure are left alone.
-    factor = pix_noise / max(noise_body, 1e-30)
     shown = (adaptive_smooth(detail, good, factor, p.smooth, cap=max(p.edge_smooth, p.smooth))
              if p.smooth > 0 else detail)
-    # Nearer the limb than where the noise is still ~20x that of the middle, carry the picture
-    # out to the limb instead: only noise is left in those last few pixels.
-    rings = np.arange(int(p.margin_px), int(moon_r * 0.2))
-    ri = np.clip((moon_r - rr).astype(int), 0, rings[-1] + 1) if len(rings) else None
-    keep_from = p.margin_px
-    if ri is not None:
-        ratio = pix_noise / max(noise_body, 1e-30)
-        for d in rings:
-            m = good & (ri == d)
-            if m.sum() > 20 and np.median(ratio[m]) < 20.0:
-                keep_from = max(float(d), p.margin_px)
-                break
+    # Nearer the limb than where the noise is still ~10x that of the middle, fill the edge from
+    # just inside instead: only noise, and glare shaped by the bumpy real limb, is left in those
+    # last pixels. At least the last 2.5% of the radius (11 px at 400 mm on a full-frame camera).
+    keep_from = max(p.margin_px, 0.025 * moon_r)
+    for d in range(int(math.ceil(p.margin_px)), min(nring, int(moon_r * 0.2))):
+        if ring_ratio[d] > 0 and ring_ratio[d] < 10.0 and np.median(weight_ratio[good & (ri == d)]) < 10.0:
+            keep_from = max(float(d), keep_from)
+            break
     big = ndimage.gaussian_filter(detail, max(3.0, moon_r / 40))
     snr = float((np.percentile(big[good], 95) - np.percentile(big[good], 5)) / (noise / max(3.0, moon_r / 40) + 1e-30))
     if snr < 3:

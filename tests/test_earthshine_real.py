@@ -118,3 +118,14 @@ def test_edge_fill_has_no_teeth(disc):
     step = np.abs(out - shifted)[band & (np.abs(np.cos(phi)) < 0.3)]
     grain = np.abs(img - ndimage.shift(img, (0, 1), order=0))[body]
     assert np.percentile(step, 95) < 0.3 * np.percentile(grain, 95)
+
+
+def test_edge_fill_does_not_depend_on_the_weights(disc):
+    """The real stack weights can understate the noise by the limb (this run showed a dashed
+    edge where the preview, with other weights, did not): the fill depth must not rely on them."""
+    lum, weight, good, cx, cy, r, rr, phi = disc
+    flat = np.where(good, 1.0, 0.0).astype(np.float32)
+    _, _, _, keep_flat, _ = ES.process_disc(lum, flat, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
+    _, _, _, keep, _ = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
+    assert keep_flat >= 0.025 * r
+    assert abs(keep_flat - keep) <= 3
