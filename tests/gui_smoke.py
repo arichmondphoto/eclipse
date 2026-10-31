@@ -92,4 +92,13 @@ es.write_final()
 assert Path(es.final_path).name == "my picture.tif"
 assert Path(es.final_path).exists() and EventProject.load(path).parameters["final"]["strength"] == 1.5
 print("final image:", Path(es.final_path).name)
+# From file: a blend saved earlier under another name.
+os.environ["STUB_OPEN"] = et.outputs["blend"]
+es.base.setCurrentIndex(es.base.findData("file"))
+es._base_chosen()
+assert es._base_args() == ("blend", et.outputs["blend"])
+os.environ["STUB_SAVE"] = str(T / "out" / "from_file_final.tif")
+es.write_final()
+assert Path(es.final_path).name == "from_file_final.tif"
+assert EventProject.load(path).parameters["final"]["base_file"] == et.outputs["blend"]
 print("GUI SMOKE OK")

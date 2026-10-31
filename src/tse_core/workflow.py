@@ -497,9 +497,12 @@ def read_image(path: str, step: int = 1) -> np.ndarray:
 
 def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, mode: str = "screen",
                 preview_side: Optional[int] = None, name: Optional[str] = None,
-                say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None):
+                say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None,
+                base_file: Optional[str] = None):
     """The chosen enhanced layer with the earthshine blended into the lunar disc.
 
+    ``base_file`` uses any image file as the corona instead of an enhanced layer (it must be the
+    size of the HDR stack, for example a blend written earlier or one finished elsewhere).
     With ``preview_side`` returns a reduced image (no file); otherwise writes
     ``output_file`` (default ``<name>_final.tif`` next to the project) and returns its path.
     """
@@ -508,9 +511,14 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
     say = reporter(say, cancel)
     path = Path(project_path).resolve()
     project = EventProject.load(path)
-    base_path = resolve(path, project.parameters.get("enhance", {}).get(base_layer))
-    if not base_path:
-        raise WorkflowError(f"No '{base_layer}' layer yet: write the full-size layers on the Enhance tab first.")
+    if base_file:
+        base_path = resolve(path, base_file)
+        if not base_path:
+            raise WorkflowError(f"Image not found: {base_file}")
+    else:
+        base_path = resolve(path, project.parameters.get("enhance", {}).get(base_layer))
+        if not base_path:
+            raise WorkflowError(f"No '{base_layer}' layer yet: write the full-size layers on the Enhance tab first.")
     earth_path = resolve(path, project.parameters.get("earthshine", {}).get("earthshine"))
     if not earth_path:
         raise WorkflowError("No earthshine layer yet: click 'Stack earthshine' first.")
@@ -525,8 +533,10 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
     base = read_image(base_path, step)
     earth = read_image(earth_path, step)
     if base.shape != earth.shape:
-        raise WorkflowError("The earthshine layer and the enhanced layer differ in size: re-run the earthshine "
-                            "step after the latest stack.")
+        raise WorkflowError(f"{Path(base_path).name} is {base.shape[1] * step} x {base.shape[0] * step} px but the "
+                            f"earthshine layer is {earth.shape[1] * step} x {earth.shape[0] * step} px. Use an image "
+                            "the size of the HDR stack (not cropped or resized), or re-run the earthshine step after "
+                            "the latest stack.")
     out = composite(base, earth, strength, mode)
     if preview_side:
         return out
@@ -536,6 +546,7 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
     final = Path(output_file) if output_file else path.parent / f"{name or path.stem}_final.tif"
     final.parent.mkdir(parents=True, exist_ok=True)
     tifffile.imwrite(final, (out * 65535 + 0.5).astype(np.uint16), photometric="rgb")
-    project.parameters["final"] = {"file": str(final), "base": base_layer, "strength": strength, "mode": mode}
+    project.parameters["final"] = {"file": str(final), "base": base_layer, "base_file": base_file or "",
+                                   "strength": strength, "mode": mode}
     project.save(path)
     return str(final)

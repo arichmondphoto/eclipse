@@ -144,6 +144,7 @@ class QComboBox(QWidget):
         self.items = []
         self.i = -1
         self.currentIndexChanged = _Signal()
+        self.activated = _Signal()
 
     def addItem(self, text, data=None):
         self.items.append((text, data))

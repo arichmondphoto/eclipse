@@ -1169,9 +1169,16 @@ class EarthshineTab(StepTab):
         final = QGroupBox("Blend into the image (instead of Photoshop)")
         ff = QFormLayout(final)
         self.base = QComboBox()
-        for k in ("blend", "natural", "fnrgf_n", "fnrgf", "nrgf", "adaptive"):
-            self.base.addItem(LAYER_NAMES[k], k)
-        ff.addRow("Corona layer:", self.base)
+        self.base.addItem("Last-written blend", "blend")
+        for k in ("natural", "fnrgf_n", "fnrgf", "nrgf", "adaptive"):
+            self.base.addItem(f"Last-written {LAYER_NAMES[k]}", k)
+        self.base.addItem("From file…", "file")
+        self.base_file = ""
+        self.base.activated.connect(self._base_chosen)
+        ff.addRow("Corona image:", self.base)
+        self.base_label = QLabel("")
+        self.base_label.setWordWrap(True)
+        ff.addRow(self.base_label)
         self.strength = QDoubleSpinBox()
         self.strength.setRange(0.0, 3.0)
         self.strength.setSingleStep(0.1)
@@ -1206,8 +1213,10 @@ class EarthshineTab(StepTab):
         _tip(final, "Puts the earthshine into the lunar disc of one of the enhanced corona layers and writes the "
              "finished picture as a 16-bit TIFF (<project>_final.tif), so Photoshop is optional. Needs the "
              "full-size layers from the Enhance tab and the earthshine stack above.")
-        _tip(self.base, "Which enhanced corona layer to use. Blend (default) is the suggested mix; any single "
-             "layer works too. Change the blend itself on the Enhance tab and write the layers again.", ff)
+        _tip(self.base, "The corona picture the earthshine goes into.\n\nLast-written blend (default): the blend "
+             "most recently written on the Enhance tab; any single layer works too.\n\nFrom file…: pick any "
+             "image, for example a blend you saved earlier under another name, or one you finished elsewhere. "
+             "It must be the full size of the HDR stack (not cropped or resized), so the Moon lines up.", ff)
         _tip(self.strength, "How bright the earthshine is in the final picture: 1 = as stacked, 0 = a black "
              "Moon, above 1 brightens a faint Moon (and its noise).", ff)
         _tip(self.mode, "How the two are combined, as Photoshop's layer modes. The corona is black inside the "
@@ -1236,6 +1245,27 @@ class EarthshineTab(StepTab):
         _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken; "
              "they would blur the lunar surface.")
 
+    def _base_chosen(self, *_a) -> None:
+        if self.base.currentData() == "file":
+            start = self.base_file or str(self.main.frames_tab.project_dir())
+            fname, _ = QFileDialog.getOpenFileName(self, "Corona image to blend the earthshine into", start,
+                                                   "Images (*.tif *.tiff *.png)")
+            if fname:
+                self.base_file = fname
+            elif not self.base_file:
+                self.base.setCurrentIndex(0)  # nothing chosen: back to the last-written blend
+        self._show_base()
+        self._final_changed()
+
+    def _show_base(self) -> None:
+        self.base_label.setText(f"File: {Path(self.base_file).name}" if self.base.currentData() == "file"
+                                and self.base_file else "")
+
+    def _base_args(self):
+        if self.base.currentData() == "file":
+            return "blend", self.base_file or None
+        return self.base.currentData(), None
+
     def _final_changed(self, *_a) -> None:
         if self._final_shown:
             self.final_timer.start()
@@ -1243,9 +1273,10 @@ class EarthshineTab(StepTab):
     def preview_final(self) -> None:
         if self.worker is not None:
             return
-        base, k, mode = self.base.currentData(), self.strength.value(), self.mode.currentText()
+        (base, bfile), k, mode = self._base_args(), self.strength.value(), self.mode.currentText()
         self.start("Preview of the final image",
-                   lambda p, say, cancel: W.final_image(p, base, k, mode, preview_side=1400, say=say, cancel=cancel),
+                   lambda p, say, cancel: W.final_image(p, base, k, mode, preview_side=1400, say=say, cancel=cancel,
+                                                        base_file=bfile),
                    self._final_preview_done, reload=False)
 
     def _final_preview_done(self, img) -> None:
@@ -1253,7 +1284,7 @@ class EarthshineTab(StepTab):
         self.view.show_array(img)
 
     def write_final(self) -> None:
-        base, k, mode = self.base.currentData(), self.strength.value(), self.mode.currentText()
+        (base, bfile), k, mode = self._base_args(), self.strength.value(), self.mode.currentText()
         proj = self.main.ensure_saved()
         if proj is None:
             return
@@ -1264,7 +1295,8 @@ class EarthshineTab(StepTab):
         if not fname.lower().endswith((".tif", ".tiff")):
             fname += ".tif"
         self.start("Writing the final image",
-                   lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname),
+                   lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname,
+                                                        base_file=bfile),
                    self._final_done)
 
     def _final_done(self, path) -> None:
@@ -1277,10 +1309,13 @@ class EarthshineTab(StepTab):
         fin = project.parameters.get("final", {})
         self.final_path = W.resolve(path, fin.get("file"))
         self.open_final_btn.setEnabled(bool(self.final_path))
-        if fin.get("base"):
-            i = self.base.findData(fin["base"])
+        self.base_file = W.resolve(path, fin.get("base_file")) if fin.get("base_file") else ""
+        key = "file" if self.base_file else fin.get("base")
+        if key:
+            i = self.base.findData(key)
             if i >= 0:
                 self.base.setCurrentIndex(i)
+        self._show_base()
         if fin.get("mode"):
             self.mode.setCurrentText(fin["mode"])
         if fin.get("strength") is not None:

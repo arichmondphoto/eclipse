@@ -321,7 +321,8 @@ gentle gradient, is removed with a smooth surface (`--glare-order`, default
 To skip Photoshop, blend it in here: `tse final eclipse2024.json` (or the
 **Blend into the image** box on the Earthshine tab, with a preview) puts the
 earthshine into the lunar disc of the suggested blend (`--base` picks
-another layer), at `--strength` (1 = as stacked) in `--mode` screen
+another layer, `--base-file` any image the size of the stack, such as a
+blend saved earlier), at `--strength` (1 = as stacked) in `--mode` screen
 (default), lighten or add, and writes `<name>_final.tif`.
 
 The report gives the lunar detail over the noise; below about 3 the layer

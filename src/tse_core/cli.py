@@ -169,7 +169,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("final", help="blend the earthshine into an enhanced layer and write the finished image")
     p.add_argument("project")
     p.add_argument("--base", default="blend", choices=list(LAYERS) + ["blend"],
-                   help="enhanced layer to use as the corona (default: blend)")
+                   help="enhanced layer to use as the corona (default: blend, the last one written)")
+    p.add_argument("--base-file", help="use this image as the corona instead (the size of the HDR stack)")
     p.add_argument("--strength", type=float, default=1.0, help="earthshine brightness, 1 = as stacked (default 1)")
     p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"], help="blend mode (default screen)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
@@ -206,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         from .workflow import final_image
 
         out, code = _run(final_image, args.project, args.base, args.strength, args.mode, name=args.name,
-                         quiet=args.quiet)
+                         base_file=args.base_file, quiet=args.quiet)
         if not code:
             print(f"Final image written to {out}")
         return code

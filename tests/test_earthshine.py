@@ -198,3 +198,10 @@ def test_final_image_workflow(tmp_path):
     assert EventProject.load(tmp_path / "e.json").parameters["final"]["mode"] == "lighten"
     with pytest.raises(W.WorkflowError, match="'natural' layer"):
         W.final_image(tmp_path / "e.json", base_layer="natural")
+    # Any image of the right size can be the corona; a cropped one is refused with a clear message.
+    tifffile.imwrite(tmp_path / "other.tif", (np.full((40, 60, 3), 0.25) * 65535).astype(np.uint16), photometric="rgb")
+    out2 = W.final_image(tmp_path / "e.json", base_file=str(tmp_path / "other.tif"), output_file=str(tmp_path / "f2.tif"))
+    assert tifffile.imread(out2)[0, 0, 0] == pytest.approx(16384, abs=2)
+    tifffile.imwrite(tmp_path / "small.tif", np.zeros((20, 30, 3), np.uint16), photometric="rgb")
+    with pytest.raises(W.WorkflowError, match="size of the HDR stack"):
+        W.final_image(tmp_path / "e.json", base_file=str(tmp_path / "small.tif"))
