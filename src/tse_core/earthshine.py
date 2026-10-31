@@ -138,6 +138,65 @@ def glare_surface(img: np.ndarray, inside: np.ndarray, cx: float, cy: float, r: 
     return out.reshape(h, w).astype(np.float32)
 
 
+# Fall-off lengths in lunar radii, with a floor in pixels (lens blur does not shrink with a
+# smaller Moon); the fit reaches 3x the longest inside the limb.
+LIMB_DETAIL_SCALES = ((0.004, 0.7), (0.01, 1.5), (0.025, 3.0))
+LIMB_DETAIL_SPACING = 10.0  # px along the limb between nodes (36 to 144 nodes)
+
+
+def limb_glare_detail(res: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float,
+                      iters: int = 5) -> np.ndarray:
+    """What is left of the limb glare after :func:`glare_surface`, followed closely round the limb.
+
+    The light just inside the limb comes from whatever is just outside it in
+    each frame: inner corona, chromosphere and prominences, which change in
+    a few degrees and are uncovered differently as the Moon moves. A few
+    harmonics cannot follow that, so here the short fall-offs exp(-d/s) get
+    their own strength at nodes every few degrees round the limb (linear in
+    between), fitted robustly to the residual in a narrow band.
+    Lunar detail in that band is flattened on scales of more than a few degrees.
+    """
+    from scipy import sparse
+
+    h, w = res.shape
+    nodes = int(np.clip(round(2 * math.pi * r / LIMB_DETAIL_SPACING), 36, 144))
+    scales = [max(f * r, floor) for f, floor in LIMB_DETAIL_SCALES]
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - cx, yy - cy)
+    d = np.clip(r - rr, 0.0, None)
+    band = good & (d < 3.0 * max(scales))
+    out = np.zeros((h, w), np.float32)
+    if band.sum() < 20 * nodes:
+        return out
+    pos = (np.arctan2(yy[band] - cy, xx[band] - cx) + math.pi) / (2 * math.pi) * nodes
+    j0 = np.floor(pos).astype(int) % nodes
+    f = pos - np.floor(pos)
+    n = band.sum()
+    rows, cols, vals = [], [], []
+    for k, sc in enumerate(scales):
+        e = np.exp(-d[band] / sc)
+        rows += [np.arange(n)] * 2
+        cols += [k * nodes + j0, k * nodes + (j0 + 1) % nodes]
+        vals += [e * (1 - f), e * f]
+    m = nodes * len(scales)
+    A = sparse.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(n, m))
+    y = res[band].astype(np.float64)
+    wts = np.ones(n)
+    ata = (A.T @ A).toarray()
+    lam = 1e-3 * np.trace(ata) / m  # a little damping, for nodes with few good pixels
+    coef = np.zeros(m)
+    for _ in range(iters):
+        W = sparse.diags(wts)
+        M = (A.T @ W @ A).toarray() + lam * np.eye(m)
+        coef = np.linalg.solve(M, A.T @ (wts * y))
+        rs = y - A @ coef
+        sd = 1.4826 * np.median(np.abs(rs)) + 1e-30
+        t = rs / (4.685 * sd)
+        wts = np.where(np.abs(t) < 1, (1 - t * t) ** 2, 0.0)
+    out[band] = A @ coef
+    return out
+
+
 def extend_to_limb(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r_in: float, r_out: float) -> np.ndarray:
     """Carry the values just inside ``r_in`` straight out to ``r_out`` (along each radius).
 
@@ -231,6 +290,8 @@ def stack_earthshine(
 
     glare = glare_surface(lum, good, cx, cy, moon_r, p.glare_order, limb=p.limb_glare)
     detail = np.where(good, lum - glare, 0.0).astype(np.float32)
+    if p.limb_glare:
+        detail -= limb_glare_detail(detail, good, cx, cy, moon_r)
     # Noise from the stack weights (inverse variances up to one factor), measured on fine scales.
     resid = detail - ndimage.gaussian_filter(detail, 1.0)
     scale = 1.4826 * np.median(np.abs(resid[good] * np.sqrt(weight[good]))) / 0.96
@@ -260,7 +321,11 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
               "COMMENT": "Moon-aligned linear stack in units of the reference exposure"}
     lin_path = out / f"{name}_earthshine.fit"
     write_fits(lin_path, lum, header)
-    lo, hi = np.percentile(shown[good], [0.5, 99.5])
+    # Stretch on the body of the disc: the last few pixels by the limb are noisier
+    # (photon noise of the glare there) and would otherwise set the range.
+    yy, xx = np.mgrid[0:h, 0:w]
+    body = good & (np.hypot(xx - cx, yy - cy) < moon_r * 0.9)
+    lo, hi = np.percentile(shown[body if body.sum() > 100 else good], [0.5, 99.5])
     img = np.clip((shown - lo) / ((hi - lo) or 1.0), 0.0, 1.0) * p.brightness
     # Fill out to where the corona layers start (just outside the limb), then a short soft edge.
     edge = moon_r + p.limb_px
