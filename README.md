@@ -1,26 +1,48 @@
 # Solar Eclipse Toolkit
 
-Processing for DSLR photographs of total solar eclipses: alignment on the
-corona, linear HDR stacking and coronal enhancement, built to run as a
-script inside [Siril](https://siril.org) 1.4 or later.
+Processing for DSLR photographs of total solar eclipses, from the RAW
+files to finished pictures: alignment on the corona, linear HDR stacking,
+coronal enhancement, an earthshine layer for the Moon and a prominence
+layer. It runs as a script with its own window inside
+[Siril](https://siril.org) 1.4 or later, or from the command line as
+`totality`.
 
 The methods come from Druckmüller (2009, phase correlation alignment),
-Druckmüller, Rušin & Minarovjech (2006, Moon-aware HDR composition and
-adaptive filtering) and Druckmüllerová, Morgan & Habbal (2011, the Fourier
-normalizing-radial-graded filter). See the development plan for details.
+Druckmüller, Rušin & Minarovjech (2006, Moon-aware HDR composition),
+Druckmüllerová, Morgan & Habbal (2011, the Fourier normalizing-radial-graded
+filter and the Sun's centre), Morgan, Habbal & Woo (2006, NRGF) and Morgan &
+Druckmüller (2014, multi-scale Gaussian normalization).
 
 Nothing is tied to one eclipse, camera or bracket: every setting is read
-from each frame's metadata.
+from each frame's metadata, and eclipse geometry comes from NASA's Besselian
+elements for any eclipse from 1600 to 2400.
 
 ## Status
 
-| Phase | Scope | State |
+| Step | Scope | State |
 | --- | --- | --- |
-| 1 | RAW inventory, bracket detection, lensfun lookup, calibration planning, project files | **done** |
-| 2 | Geometry (lunar limb, Moon track, Sun centre) and phase correlation alignment | **done** (command line) |
-| 3 | Moon-aware linear HDR stacking | **done** (command line) |
-| 4 | NRGF, FNRGF, FNRGF-N, adaptive filter, natural layer, blend | **done** (command line) |
-| 5 | Full GUI and packaging | **done**: Frames, Align, Stack, Enhance, Earthshine and Prominences tabs |
+| 1 Frames | RAW inventory, bracket detection, lensfun or own-flats vignetting, calibration planning, project folders | done |
+| 2 Align | Lunar limb, phase correlation alignment, field rotation, the Sun's centre | done |
+| 3 Stack | Moon-aware linear HDR stacking with measured brightness matching | done |
+| 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N and adaptive layers; Soft Light / Overlay blend | done |
+| 5 Earthshine | Moon-aligned stack of the long exposures; blended into the picture | done (synthetic tests only so far) |
+| 6 Prominences | Found by colour at the limb; transparent layer put on top | done (checked on a reduced copy of real data) |
+
+Each step works in the Siril window and on the command line. Tested on the
+2024 eclipse (Nikon D850, 400 mm); the 2017 set is kept back as a blind test.
+Still to come: the blind test, and help for other cameras and operating
+systems before sharing the tool more widely.
+
+## Workflow
+
+1. **Frames:** make a project from the event folder (see *Project folders*).
+2. **Align:** enter the site; the frames are aligned and the Sun's centre found.
+3. **Stack:** the frames are merged into one linear 32-bit HDR image.
+4. **Enhance:** tune the layers in a live preview, then write them full size.
+5. **Earthshine:** stack the Moon and blend it into the picture.
+6. **Prominences:** pick out the prominences and put them on top.
+
+Then finish in Photoshop (or not: steps 5 and 6 write a finished picture).
 
 ## Supported files
 
@@ -42,9 +64,9 @@ before:
 From the repository folder:
 
 ```bash
-pip install -e ".[all]"      # exifread, numpy, rawpy, PyQt6
-totality doctor                   # shows which readers are available
-totality lensfun-update           # downloads the lensfun lens database once
+pip install -e ".[all]"       # numpy, scipy, exifread, tifffile, Pillow, rawpy, PyQt6, ...
+totality doctor               # shows which readers are available
+totality lensfun-update       # downloads the lensfun lens database once
 ```
 
 Downloads check certificates against your system's store (the same
@@ -67,8 +89,8 @@ totality elements-update --from ~/Downloads/eclipse_besselian_from_mysqldump2.cs
 1. In Siril, open **Preferences → Scripts** and add this repository's
    `siril` folder to the script paths.
 2. Run **Scripts → SolarEclipseToolkit**. On first run Siril installs
-   PyQt6, numpy, scipy, exifread, rawpy, tifffile, certifi and truststore
-   into its own Python environment.
+   PyQt6, numpy, scipy, exifread, rawpy, tifffile, Pillow, certifi and
+   truststore into its own Python environment.
 
 The script finds the core package in `../src`, so keep the folders together.
 
@@ -79,12 +101,16 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets, choose the lens profile, add calibration folders | Frame table (right-click to exclude a frame), bracket and calibration report |
 | 2 Align | Enter the site (latitude, longitude, elevation), the camera time zone and clock error if known; choose the rotation model | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep | The stacked preview and each frame's measured brightness |
-| 4 Enhance | Layers to write, blend strengths, flatten, saturation, white balance, FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
+| 4 Enhance | Layers to write; each layer's blend strength and Soft Light or Overlay; flatten, saturation, white balance, sky removal; FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
+| 5 Earthshine | Frames to use, glare removal, smoothing; then the corona image (last-written blend, natural layer or a file), strength and blend mode | The Moon close up, then a preview of the picture; **Write final image** |
+| 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
+Every setting has hover help explaining what it does and when to change it.
 Long steps run in the background: progress shows in the log under each tab
 and **Cancel** stops at the next step. **Open … in Siril** loads a result
-into Siril. The same steps run from the command line with `totality`, using the
-same project file.
+into Siril. **Project → New from folder…**, **Open…** and **Save** manage
+the project file. The same steps run from the command line with
+`totality`, using the same project file.
 
 ### Project folders
 
@@ -102,14 +128,31 @@ Eclipse 2024/
 on the command line, reads the light frames from `lights/` and the
 calibration frames from the other subfolders, saves the project file as
 `Eclipse 2024/Eclipse 2024.json`, and writes every result (alignment,
-stack, earthshine) into the folder. Opening that folder again reopens the
-project. On the Enhance and Earthshine tabs, **Write full-size layers**
-and **Write final image** ask where to save and under what name.
+stack) into the folder. Opening that folder again reopens the project.
+Wherever a picture is written (enhanced layers, earthshine and prominence
+layers, final images), the GUI asks where to save, under what name and in
+which format, starting in the project folder.
 
 ## Command line
 
 The command is `totality` (it was `tse` before 31 Oct 2026; run
 `pip install -e .` again after updating so the new name is installed).
+
+A whole event, from a project folder:
+
+```bash
+totality inventory "Eclipse 2024"                       # reads lights/, writes "Eclipse 2024/Eclipse 2024.json"
+P="Eclipse 2024/Eclipse 2024.json"
+totality align "$P" --lat 36.9422 --lon -90.3343 --elev 110
+totality stack "$P"
+totality enhance "$P" --blend natural=1,fnrgf_n=0.7,adaptive=0.1:overlay
+totality earthshine "$P"
+totality final "$P" -o "Eclipse 2024/with_moon.tif"
+totality prominences "$P"
+totality final-prominences "$P" -o "Eclipse 2024/finished.png"
+```
+
+`totality <command> --help` lists every option. More examples:
 
 ```bash
 totality inventory "D:/Eclipse 2024/RAW" --project eclipse2024.json --csv frames.csv
@@ -207,9 +250,14 @@ alignment transform (bicubic).
 
 **Brightness matching.** Shutter speeds are rarely exact. Each frame's
 brightness relative to the reference, `value = gain * radiance + offset`,
-is measured by robust straight-line fits between neighbouring exposures on
-pixels well exposed in both frames and clear of the Moon. Frames more than
-0.3 EV from their nominal exposure are reported.
+is measured against its neighbour in exposure on pixels well exposed in
+both and clear of the Moon: both frames are blurred identically and the
+gain is a weighted ratio of sums, so differences in noise or sharpness
+(seeing) between frames do not bias it, and errors do not build up along a
+long bracket. It is compared with the shutter's true time behind its
+rounded label (1/30 s is really 1/32 s); frames more than 0.3 EV off are
+reported. If two neighbours share too few usable pixels, the shutter speeds
+are used instead and the log says so.
 
 **Merging.** Each pixel is the inverse-variance weighted mean of the frames'
 radiance estimates. Weights fall to zero approaching saturation and inside
@@ -235,7 +283,7 @@ For a quicker run, `--square` outputs only a square 10 solar radii wide
 around the Sun (about a third of the pixels, so roughly three times faster
 and smaller); `--radii N` sets the half-width in solar radii.
 
-A full 45-megapixel frame needs about 3 GB of free memory at the peak.
+A full 45-megapixel frame needs about 3-5 GB of free memory at the peak.
 
 | File | Contents |
 | --- | --- |
@@ -250,8 +298,9 @@ A full 45-megapixel frame needs about 3 GB of free memory at the peak.
 totality enhance eclipse2024.json          # uses the HDR stack saved by 'totality stack'
 ```
 
-Writes one 16-bit RGB TIFF per layer, all the same size and lined up pixel
-for pixel, ready to stack as layers in Photoshop, plus a suggested blend:
+Writes one picture per layer (16-bit TIFF by default; `--format png|jpg`,
+`-o` folder, `--name` prefix), all the same size and lined up pixel for
+pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 
 | Layer | What it shows |
 | --- | --- |
@@ -274,9 +323,10 @@ filter's own normalization and a soft S-curve for the NRGF family). Run
 only gentle curves or levels on the results.
 
 In Photoshop: `natural` at the bottom in Normal mode, `fnrgf_n` above it in
-Soft Light (40-70 %), `adaptive` above that in Soft Light (20-40 %). The
-filter layers are centred on mid-grey, which Soft Light treats as "no
-change"; desaturate them so the colour comes from the natural layer.
+Soft Light (40-70 %), `adaptive` above that in Soft Light (20-40 %); Overlay
+is a stronger alternative at lower opacity. The filter layers are centred on
+mid-grey, which both modes treat as "no change"; desaturate them so the
+colour comes from the natural layer.
 
 Before filtering, the sky (twilight glow, its gradient across the frame,
 vignetting leftovers and black-level offsets) is modelled per colour channel
@@ -288,14 +338,16 @@ dark: it stops flattening where the corona sinks into the noise
 
 The Sun's centre and radius come from the stack header, so the circles are
 centred on the true Sun, not the Moon. Circles that leave a rectangular
-frame are completed from further in, so the frame edge does not show as an
-arc.
+frame are completed from further in, a thin border at the frame edge is
+left out, and dust shadows and stars beyond 2 solar radii are kept out of
+the circle statistics, so none of these show as arcs or rings.
 
 Colour: by default the inner corona (1.2-2.5 solar radii) is made neutral,
 since K-corona light is scattered sunlight; `--white camera` uses the
 camera's as-shot balance, `--saturation 0` gives monochrome. Colour is faded
-to grey where the signal is buried in noise. The Moon is black (an
-earthshine layer is planned).
+to grey where the signal is buried in noise or no brighter than the
+uncertainty of the removed sky. The Moon is black in these layers; the
+Earthshine step fills it.
 
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
@@ -317,7 +369,7 @@ gentle gradient, is removed with a smooth surface (`--glare-order`, default
 
 | File | Contents |
 | --- | --- |
-| `<name>_earthshine.tif` | 16-bit layer the size of the HDR stack: the lunar surface inside the disc, black outside, so it drops into the corona layers' black disc (Screen or Lighten mode) |
+| `<name>_earthshine.tif` | layer the size of the HDR stack: the lunar surface inside the disc, black outside, so it drops into the corona layers' black disc (Screen or Lighten mode); `--format png|jpg` for another type |
 | `<name>_earthshine_crop.tif` | the same, cropped to the Moon |
 | `<name>_earthshine.fit` | the Moon-aligned linear stack before glare removal |
 
@@ -326,7 +378,8 @@ To skip Photoshop, blend it in here: `totality final eclipse2024.json` (or the
 earthshine into the lunar disc of the last-written blend (`--base natural`
 for the natural layer, `--base-file` any image the size of the stack, such
 as a blend saved earlier), at `--strength` (1 = as stacked) in `--mode` screen
-(default), lighten or add, and writes `<name>_final.tif`.
+(default), lighten or add, and writes `<name>_final.tif` (or the file given
+with `-o`, in the format its extension names).
 
 The report gives the lunar detail over the noise; below about 3 the layer
 is mostly noise (short exposures, low ISO or a bright sky).
@@ -418,15 +471,21 @@ pytest
 
 Set `TSE_SAMPLE_RAWS` to a folder of sample RAW files to also test the
 metadata readers on real files. Development uses only the 2024 data; the
-2017 set is held back as a blind test of the finished tool.
+2017 set is held back as a blind test of the finished tool and must not be
+added to the tests.
 
+* Synthetic eclipses with known geometry, shutter errors, seeing, a moving
+  Moon, earthshine and prominences check each step against the truth.
+* `tests/test_real_data.py` runs the enhancement on real data: the 2024
+  stack from Lake Wappapello, binned 8 x 8
+  (`tests/data/eclipse2024_bin8.npz`, 3.6 MB). It keeps the problems
+  synthetic data missed (non-image edge columns, an uneven twilight sky with
+  a negative red level, corona reaching the frame edges, dust and stars) and
+  checks for rings, a bright sky and colour casts.
+* `tests/test_gui.py` runs every tab of the Siril window's logic end to end
+  with a small stand-in for PyQt6 (`tests/qtstub`), so it needs no display;
+  layout and rendering are only checked by running it in Siril.
 
-`tests/test_real_data.py` runs the enhancement on real data: the 2024 stack
-from Lake Wappapello, binned 8 x 8 (`tests/data/eclipse2024_bin8.npz`,
-3.6 MB). It keeps the problems synthetic data missed (non-image edge
-columns, an uneven twilight sky with a negative red level, corona reaching
-the frame edges, dust and stars) and checks for rings, a bright sky and
-colour casts. The 2017 set is reserved as a blind test and must not be added.
 ## Licence
 
 MIT, see `LICENSE`.
