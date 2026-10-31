@@ -59,8 +59,9 @@ def test_limb_glare_is_removed_round_the_limb(disc):
         before = _spread(plain, good, rr, phi, r, a, b)
         after = _spread(detail, good, rr, phi, r, a, b)
         assert after < before / 4, (a, b, before, after)
-    # 6-24 px (12-48 at full size) inside the limb: what is left round the limb is below the surface contrast.
-    assert _spread(detail, good, rr, phi, r, 6, 24) < 0.5 * surface
+    # 6-24 px (12-48 at full size) inside the limb: what varies round the limb (left-over glare,
+    # and real maria such as Crisium) stays below the surface contrast.
+    assert _spread(detail, good, rr, phi, r, 6, 24) < 0.75 * surface
     # The middle is not touched by the limb terms.
     mid = rr < r * 0.6
     assert abs(np.median(detail[mid])) < 0.2 * surface
@@ -129,3 +130,15 @@ def test_edge_fill_does_not_depend_on_the_weights(disc):
     _, _, _, keep, _ = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
     assert keep_flat >= 0.025 * r
     assert abs(keep_flat - keep) <= 3
+
+
+def test_detail_is_kept_near_the_limb(disc):
+    """Maria near the limb (Crisium at the right) must survive: the glare correction round the
+    limb widens quickly with depth, so 15-60 px in (30-120 at full size) it keeps the large-scale
+    lunar contrast. Narrow windows there erased it (about 0.65 of the middle's contrast)."""
+    lum, weight, good, cx, cy, r, rr, phi = disc
+    detail, *_ = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
+    big = ndimage.gaussian_filter(detail, 4)
+    band = good & (rr > r - 60) & (rr < r - 15)
+    body = good & (rr < r * 0.6)
+    assert big[band].std() > 0.9 * big[body].std()

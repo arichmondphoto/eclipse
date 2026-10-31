@@ -371,10 +371,12 @@ the chromosphere and prominences are only pixels away, and it changes
 within a few degrees round the limb. Terms that fall off with distance
 inside the limb take out its average shape. The rest is followed round the
 limb: the image is divided by the glare surface, resampled onto circles,
-and each circle is median-filtered round the limb with a window of a few
-degrees at the limb, widening further in (lunar features smaller than the
-window are kept; larger ones within ~0.25 radius of the limb are
-flattened). `--no-limb-glare` turns this off.
+and each circle is median-filtered round the limb. The window is about 1°
+at the limb and widens quickly further in (13° at 40 px, 50° at 90 px on
+a 436 px Moon), because the glare's pattern spreads out with depth. Lunar
+features smaller than the window are kept, so maria near the limb such as
+Crisium survive; only within ~20 px of the limb, where the glare is many
+times the earthshine, is most detail flattened. `--no-limb-glare` turns this off.
 
 The shown layer gets a little extra smoothing (up to `--edge-smooth`, 3 px)
 only where the noise is high: the last pixels by the limb, where the long

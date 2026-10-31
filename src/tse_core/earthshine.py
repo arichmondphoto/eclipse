@@ -143,7 +143,8 @@ def glare_surface(img: np.ndarray, inside: np.ndarray, cx: float, cy: float, r: 
 # Fall-off lengths in lunar radii, with a floor in pixels (lens blur does not shrink with a
 # smaller Moon); the fit reaches 3x the longest inside the limb.
 def limb_background(lum: np.ndarray, glare: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float,
-                    depth: float = 0.275, width0: float = 0.014, growth: float = 1.0) -> np.ndarray:
+                    depth: float = 0.275, width0: float = 0.014, growth: float = 1.0,
+                    quad: float = 15.0) -> np.ndarray:
     """What is left of the limb glare after :func:`glare_surface`, followed closely round the limb.
 
     Returns a factor (1 away from the limb) for the glare surface. The light just
@@ -152,8 +153,10 @@ def limb_background(lum: np.ndarray, glare: np.ndarray, good: np.ndarray, cx: fl
     are uncovered differently as the Moon moves. Here the ratio of the image to
     the glare surface (which varies far more slowly with depth than the glare
     itself) is resampled onto circles, and each circle is median-filtered round
-    the limb. The window is a few degrees at the limb and widens with depth
-    (``width0`` x radius + ``growth`` x depth, in px), because glare from
+    the limb. The window is a few degrees at the limb and widens quickly with depth
+    (``width0`` x radius + ``growth`` x depth + ``quad`` x depth^2 / radius, in px:
+    about 1 degree at the limb, 13 at 40 px in, 50 at 90 px in on a 436 px Moon),
+    because glare from
     farther away is spread over a wider angle; lunar features smaller than the
     window pass through, larger ones close to the limb are flattened. The
     correction fades out by ``depth`` x radius inside the limb.
@@ -179,7 +182,7 @@ def limb_background(lum: np.ndarray, glare: np.ndarray, good: np.ndarray, cx: fl
         if ok.sum() < 10:
             continue
         row = np.interp(idx, idx[ok], polar[i][ok], period=n)
-        win = int(width0_px + growth * dv) | 1
+        win = int(min(width0_px + growth * dv + quad * dv * dv / r, n / 2)) | 1
         win = max(win, 5)
         row = ndimage.median_filter(row, win, mode="wrap")
         bg[i] = ndimage.uniform_filter1d(row, max(3, win // 2) | 1, mode="wrap")
