@@ -11,7 +11,10 @@ Inside the disc the light is earthshine plus glare: corona light scattered
 in the lens and the atmosphere, a smooth brightness gradient, strongest
 towards the brightest inner corona. The glare is removed with a smooth
 surface fitted to the disc, leaving the lunar surface: dark maria on
-brighter highlands.
+brighter highlands. Close to the limb the glare climbs steeply (the inner
+corona is only a few pixels away), far faster than any gentle surface can
+follow, so the fit also has terms that fall off with distance inside the
+limb, varying round it as the inner corona does.
 
 Only the longer exposures carry earthshine; frames more than ``stops``
 below the longest are skipped, as they would add read noise only.
@@ -42,7 +45,9 @@ class EarthshineParams:
     glare_order: int = 2  # polynomial order of the glare (a gentle gradient); higher also eats large maria
     smooth: float = 1.0  # Gaussian smoothing of the shown layer, px (0 = none)
     brightness: float = 0.6  # brightest lunar surface in the layer, 0..1 (the corona stays brighter)
-    feather_px: float = 2.0  # soft edge of the disc in the layer
+    limb_glare: bool = True  # also model the steep glare just inside the limb
+    limb_px: float = 1.5  # the layer reaches this far past the limb, to meet the corona layers' black disc
+    feather_px: float = 1.0  # soft edge of the disc in the layer
     saturation_level: float = 0.95
     saturation_taper: float = 0.15
     noise_floor: float = 0.002
@@ -75,18 +80,49 @@ def moon_aligned(matrix, moon_xy: tuple[float, float], target_xy: tuple[float, f
     return m.tolist()
 
 
+# Fall-off lengths of the limb glare, in lunar radii, each with how fast it may vary round the
+# limb (cos/sin of up to that multiple of the angle). The short ones hug the limb and may vary
+# more; the long ones reach far into the disc, so they are kept simple to leave the maria alone.
+LIMB_TERMS = ((0.004, 2), (0.01, 2), (0.025, 2), (0.06, 1))
+
+
 def glare_surface(img: np.ndarray, inside: np.ndarray, cx: float, cy: float, r: float, order: int,
-                  iters: int = 6) -> np.ndarray:
-    """Robust 2-D polynomial fitted over the disc (the smooth glare); returned over the whole crop."""
+                  iters: int = 6, limb: bool = False, max_points: int = 300_000) -> np.ndarray:
+    """Robust fit of the glare over the disc; returned over the whole crop.
+
+    A 2-D polynomial of ``order`` (the gentle gradient across the disc), plus,
+    with ``limb``, terms exp(-d/s) times low harmonics of the position angle,
+    where d is the distance inside the limb: the steep rise of scattered light
+    towards the bright inner corona.
+    """
     h, w = img.shape
     yy, xx = np.mgrid[0:h, 0:w]
     u = (xx - cx) / r
     v = (yy - cy) / r
     terms = [(i, j) for i in range(order + 1) for j in range(order + 1 - i)]
-    A = np.stack([(u[inside] ** i) * (v[inside] ** j) for i, j in terms], axis=1)
-    y = img[inside].astype(np.float64)
+
+    def basis(sel):
+        cols = [(u[sel] ** i) * (v[sel] ** j) for i, j in terms]
+        if limb:
+            us, vs = u[sel], v[sel]
+            rho = np.hypot(us, vs)
+            d = np.clip(1.0 - rho, 0.0, None)
+            phi = np.arctan2(vs, us)
+            for s, nh in LIMB_TERMS:
+                e = np.exp(-d / s)
+                cols.append(e)
+                for k in range(1, nh + 1):
+                    cols += [e * np.cos(k * phi), e * np.sin(k * phi)]
+        return np.stack(cols, axis=1)
+
+    idx = np.flatnonzero(inside)
+    if idx.size > max_points:
+        idx = idx[:: int(math.ceil(idx.size / max_points))]
+    sel = np.unravel_index(idx, inside.shape)
+    A = basis(sel)
+    y = img[sel].astype(np.float64)
     wts = np.ones_like(y)
-    coef = np.zeros(len(terms))
+    coef = np.zeros(A.shape[1])
     for _ in range(iters):
         sw = np.sqrt(wts)
         coef, *_ = np.linalg.lstsq(A * sw[:, None], y * sw, rcond=None)
@@ -94,10 +130,39 @@ def glare_surface(img: np.ndarray, inside: np.ndarray, cx: float, cy: float, r: 
         s = 1.4826 * np.median(np.abs(res)) + 1e-30
         t = res / (4.685 * s)
         wts = np.where(np.abs(t) < 1, (1 - t * t) ** 2, 0.0)
-    out = np.zeros((h, w))
-    for c, (i, j) in zip(coef, terms):
-        out += c * (u**i) * (v**j)
-    return out.astype(np.float32)
+    out = np.empty(h * w)
+    for a in range(0, h, 256):  # in bands, to keep the design matrix small
+        band = np.zeros((h, w), bool)
+        band[a : a + 256] = True
+        out[a * w : min(h, a + 256) * w] = basis(band) @ coef
+    return out.reshape(h, w).astype(np.float32)
+
+
+def extend_to_limb(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r_in: float, r_out: float) -> np.ndarray:
+    """Carry the values just inside ``r_in`` straight out to ``r_out`` (along each radius).
+
+    The stack stays a few pixels inside the limb, where the frames' limbs and
+    the chromosphere would leak in; the corona layers only start just outside
+    it. Without this the gap between the two shows as a dark ring.
+    """
+    h, w = img.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - cx, yy - cy)
+    band = (rr >= r_in) & (rr <= r_out + 1.0)
+    out = np.where(good, img, 0.0).astype(np.float32)
+    if not band.any():
+        return out
+    # Sample a little inside the edge, from a copy smoothed with only the good pixels counted.
+    g = good.astype(np.float32)
+    num = ndimage.gaussian_filter(out, 1.0)
+    den = ndimage.gaussian_filter(g, 1.0)
+    filled = np.where(den > 0.05, num / np.maximum(den, 1e-6), 0.0)
+    ys, xs = np.nonzero(band)
+    f = (r_in - 1.5) / np.maximum(rr[ys, xs], 1e-6)
+    sx = cx + (xs - cx) * f
+    sy = cy + (ys - cy) * f
+    out[ys, xs] = ndimage.map_coordinates(filled, [sy, sx], order=1, mode="nearest")
+    return out
 
 
 def stack_earthshine(
@@ -164,13 +229,17 @@ def stack_earthshine(
     if good.sum() < 100:
         raise ValueError("no usable pixels inside the lunar disc")
 
-    glare = glare_surface(lum, good, cx, cy, moon_r, p.glare_order)
+    glare = glare_surface(lum, good, cx, cy, moon_r, p.glare_order, limb=p.limb_glare)
     detail = np.where(good, lum - glare, 0.0).astype(np.float32)
     # Noise from the stack weights (inverse variances up to one factor), measured on fine scales.
     resid = detail - ndimage.gaussian_filter(detail, 1.0)
     scale = 1.4826 * np.median(np.abs(resid[good] * np.sqrt(weight[good]))) / 0.96
     noise = float(np.median(scale / np.sqrt(weight[good])))
-    shown = ndimage.gaussian_filter(detail, p.smooth) if p.smooth > 0 else detail
+    shown = detail
+    if p.smooth > 0:  # smoothing that does not darken the edge (only good pixels are averaged)
+        num = ndimage.gaussian_filter(np.where(good, detail, 0.0), p.smooth)
+        den = ndimage.gaussian_filter(good.astype(np.float32), p.smooth)
+        shown = np.where(good, num / np.maximum(den, 1e-6), 0.0).astype(np.float32)
     big = ndimage.gaussian_filter(detail, max(3.0, moon_r / 40))
     snr = float((np.percentile(big[good], 95) - np.percentile(big[good], 5)) / (noise / max(3.0, moon_r / 40) + 1e-30))
     if snr < 3:
@@ -193,10 +262,13 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     write_fits(lin_path, lum, header)
     lo, hi = np.percentile(shown[good], [0.5, 99.5])
     img = np.clip((shown - lo) / ((hi - lo) or 1.0), 0.0, 1.0) * p.brightness
+    # Fill out to where the corona layers start (just outside the limb), then a short soft edge.
+    edge = moon_r + p.limb_px
+    img = extend_to_limb(img, good, cx, cy, moon_r - p.margin_px, edge)
     yy, xx = np.mgrid[0:h, 0:w]
     rr = np.hypot(xx - cx, yy - cy)
-    edge = moon_r - p.margin_px
-    alpha = np.clip((edge - rr) / max(p.feather_px, 0.5), 0.0, 1.0)
+    fe = max(p.feather_px, 0.5)
+    alpha = np.clip((edge + fe / 2 - rr) / fe, 0.0, 1.0)
     img = (img * alpha).astype(np.float32)
     crop_tif = write_image(with_format(out / f"{name}_earthshine_crop.tif", fmt), img)
     # The layer on the HDR stack's canvas: black outside the disc, so it drops into the corona layers.

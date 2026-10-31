@@ -365,7 +365,14 @@ corona alignment and adds a shift that puts its Moon where the Moon is in
 the HDR stack's Moon frame. Only exposures within `--stops` (default 6) of
 the longest are used. The glare from the inner corona inside the disc, a
 gentle gradient, is removed with a smooth surface (`--glare-order`, default
-2; higher orders start removing large maria too).
+2; higher orders start removing large maria too). Close to the limb the glare
+climbs steeply, because the bright inner corona is only pixels away. Extra
+terms that fall off with distance inside the limb, and vary round it as the
+inner corona does, take that out too. Without them the earthshine shows a
+bright rim and a dark middle (`--no-limb-glare` turns them off). The stack
+stops 3 px inside the limb, where the frames' own limbs would leak in. The
+layer carries the values from there out to 1.5 px past the limb, which is
+where the corona layers' black disc ends, so no dark ring shows between them.
 
 | File | Contents |
 | --- | --- |

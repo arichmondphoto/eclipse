@@ -156,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("project", help="project file (run 'totality stack' on it first)")
     p.add_argument("--stops", type=float, default=6.0,
                    help="use frames within this many stops of the longest exposure (default 6)")
+    p.add_argument("--no-limb-glare", action="store_true",
+                   help="do not model the steep glare just inside the limb (shows as a bright rim)")
     p.add_argument("--glare-order", type=int, default=2,
                    help="smoothness of the glare removed from the disc: polynomial order (default 2)")
     p.add_argument("--smooth", type=float, default=1.0, help="smoothing of the layer in pixels (default 1, 0 = none)")
@@ -601,7 +603,7 @@ def cmd_earthshine(args) -> int:
     from .workflow import earthshine
 
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
-                              brightness=args.brightness)
+                              brightness=args.brightness, limb_glare=not args.no_limb_glare)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,
                         output=args.output, name=args.name, profile_dir=args.profile_dir,
                         lensfun_db=args.lensfun_db, fmt=args.format, quiet=args.quiet)

@@ -1149,6 +1149,9 @@ class EarthshineTab(StepTab):
         self.glare.setRange(1, 6)
         self.glare.setValue(2)
         f.addRow("Glare smoothness:", self.glare)
+        self.limb_glare = QCheckBox("Remove the bright glare along the limb")
+        self.limb_glare.setChecked(True)
+        f.addRow(self.limb_glare)
         self.smooth = QDoubleSpinBox()
         self.smooth.setRange(0.0, 5.0)
         self.smooth.setSingleStep(0.5)
@@ -1240,6 +1243,10 @@ class EarthshineTab(StepTab):
              "corona layers in Screen or Lighten mode, or paste it into the black disc.")
         _tip(self.stops, "Only the longer exposures show earthshine; shorter ones add noise only. Frames more than "
              "this many stops below the longest exposure are skipped. Default 6.", f)
+        _tip(self.limb_glare, "Close to the edge of the Moon, light scattered from the bright inner corona rises "
+             "steeply, far faster than the glare surface above can follow. Left in, it shows as a bright ring "
+             "inside the limb and leaves the middle of the Moon dark. Leave this on unless you want to see that "
+             "raw glare.")
         _tip(self.glare, "How flexible the glare surface removed from the disc is (polynomial order). Glare from "
              "the corona is a gentle gradient, so 2 (default) is usually right. Higher removes uneven glare but "
              "also starts removing large maria; 1 removes a straight gradient only.", f)
@@ -1336,7 +1343,8 @@ class EarthshineTab(StepTab):
         from tse_core.earthshine import EarthshineParams
 
         params = EarthshineParams(stops=self.stops.value(), glare_order=self.glare.value(),
-                                  smooth=self.smooth.value(), brightness=self.brightness.value())
+                                  smooth=self.smooth.value(), brightness=self.brightness.value(),
+                                  limb_glare=self.limb_glare.isChecked())
         inc = self.include_rejected.isChecked()
         proj = self.main.ensure_saved()
         if proj is None:

@@ -24,7 +24,7 @@ def _surface(seed=3):
     return tex  # sampled at (dy, dx) + 64
 
 
-def _scene(moon_offsets, exposures, frame_shifts, earth=4e-4, seed=0):
+def _scene(moon_offsets, exposures, frame_shifts, earth=4e-4, seed=0, limb_glare=3e-3):
     scene = SyntheticScene(size=SIZE, sun_radius=RS, seed=5)
     tex = _surface()
     yy, xx = np.mgrid[0:SIZE, 0:SIZE].astype(float)
@@ -37,7 +37,10 @@ def _scene(moon_offsets, exposures, frame_shifts, earth=4e-4, seed=0):
         disc = np.clip(MOON_R - r + 0.5, 0, 1)
         surf = ndimage.map_coordinates(tex, [yy - my + 64, xx - mx + 64], order=1, mode="nearest")
         glare = 3e-3 * (1 + 0.4 * (xx - sun[0]) / RS + 0.2 * (yy - sun[1]) / RS)  # fixed to the Sun, smooth
-        moonlight = earth * (1 + 0.3 * surf) + glare
+        # Scattered light from the inner corona just beyond the limb: steep, stronger to one side.
+        phi = np.arctan2(yy - my, xx - mx)
+        limb = limb_glare * np.exp(-np.clip(MOON_R - r, 0, None) / 2.5) * (1 + 0.5 * np.cos(phi - 0.7))
+        moonlight = earth * (1 + 0.3 * surf) + glare + limb
         img = (corona * (1 - disc) + moonlight * disc) * t
         rng = np.random.default_rng(seed + i)
         img = rng.poisson(np.clip(img, 0, None) * 3e4) / 3e4 + rng.normal(0, 2e-4, img.shape)
@@ -85,7 +88,8 @@ def test_moon_aligned_stack_recovers_surface(run, tmp_path):
     assert layer[5, 5].max() == 0
     assert layer[int(ref.moon_y), int(ref.moon_x)].max() > 0
     yy, xx = np.mgrid[0:SIZE, 0:SIZE]
-    outside = np.hypot(xx - ref.moon_x, yy - ref.moon_y) > MOON_R
+    p = EarthshineParams()
+    outside = np.hypot(xx - ref.moon_x, yy - ref.moon_y) > MOON_R + p.limb_px + p.feather_px / 2
     assert layer[outside].max() == 0
 
 
@@ -205,3 +209,55 @@ def test_final_image_workflow(tmp_path):
     tifffile.imwrite(tmp_path / "small.tif", np.zeros((20, 30, 3), np.uint16), photometric="rgb")
     with pytest.raises(W.WorkflowError, match="size of the HDR stack"):
         W.final_image(tmp_path / "e.json", base_file=str(tmp_path / "small.tif"))
+
+
+def test_limb_glare_removed_and_layer_meets_the_corona(run, tmp_path):
+    """The steep glare just inside the limb is taken out (no bright rim), and the layer
+    reaches the corona layers' black disc (moon_r + 1.5 px) with no dark ring between."""
+    import tifffile
+
+    from tse_core.earthshine import composite
+
+    mos, infos, tex, matches, ref = run
+    p = EarthshineParams()
+    res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
+                                        (0, 0, SIZE, SIZE), p, out_dir=tmp_path, name="t")
+    X0, Y0, w, h = res.crop
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - (ref.moon_x - X0), yy - (ref.moon_y - Y0))
+    sm = ndimage.gaussian_filter(detail, 2.0)
+    edge = (rr > MOON_R - 7) & (rr < MOON_R - p.margin_px - 1)
+    middle = rr < MOON_R * 0.6
+    assert abs(np.median(sm[edge]) - np.median(sm[middle])) < 3e-5
+    _, _, plain = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
+                                   (0, 0, SIZE, SIZE), EarthshineParams(limb_glare=False))
+    sp = ndimage.gaussian_filter(plain, 2.0)
+    assert np.median(sp[edge]) - np.median(sp[middle]) > 6e-5  # the test does contain a rim to remove
+    # The layer is filled right out to the corona's edge and soft only beyond it.
+    layer = tifffile.imread(res.outputs["earthshine"]).mean(axis=2) / 65535
+    yy, xx = np.mgrid[0:SIZE, 0:SIZE]
+    rf = np.hypot(xx - ref.moon_x, yy - ref.moon_y)
+    disc = rf < MOON_R * 0.9
+    ring = (rf > MOON_R - 4) & (rf < MOON_R + 1.0)
+    assert np.median(layer[ring]) > 0.5 * np.median(layer[disc])
+    assert layer[rf > MOON_R + p.limb_px + p.feather_px].max() == 0
+    # Into a corona layer that is black out to moon_r + 1.5: no dark ring at the limb.
+    corona = np.where(rf > MOON_R + 1.5, 0.8, 0.0)[..., None].repeat(3, axis=2)
+    out = composite(corona, np.repeat(layer[..., None], 3, axis=2), 1.0, "screen").mean(axis=2)
+    for k in np.arange(MOON_R - 6, MOON_R + 3, 0.5):
+        band = (rf >= k) & (rf < k + 0.5)
+        assert np.median(out[band]) > 0.4 * np.median(out[disc]), k
+
+
+def test_extend_to_limb_carries_values_outward():
+    from tse_core.earthshine import extend_to_limb
+
+    n = 60
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - 30, yy - 30)
+    img = (0.5 + 0.2 * np.cos(np.arctan2(yy - 30, xx - 30))).astype(np.float32)
+    good = rr < 20
+    out = extend_to_limb(np.where(good, img, 0), good, 30, 30, 20, 24)
+    band = (rr > 20.5) & (rr < 24)
+    assert np.abs(out[band] - img[band]).max() < 0.03
+    assert out[rr > 25.5].max() == 0
