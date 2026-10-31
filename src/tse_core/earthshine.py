@@ -48,6 +48,8 @@ class EarthshineParams:
     limb_darkening: float = 0.6  # how much darker the limb is than the middle (0 = even, 1 = black at the limb)
     edge_smooth: float = 3.0  # most smoothing where the noise is high near the limb, px
     limb_glare: bool = True  # also model the steep glare just inside the limb
+    limb_shape: bool = True  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
+    colour_limb: bool = True  # near the limb use the blue channel, which has less red chromosphere glare
     limb_px: float = 1.5  # the layer reaches this far past the limb, to meet the corona layers' black disc
     feather_px: float = 1.0  # soft edge of the disc in the layer
     saturation_level: float = 0.95
@@ -299,8 +301,109 @@ def extend_to_limb(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r_in
     return out
 
 
+LIMB_FALLOFF = ((0.0035, 0.7), (0.009, 1.5), (0.023, 2.5), (0.057, 4.0))  # lunar radii, px floor
+
+
+def limb_falloff(res: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, d0: float = 3.0,
+                 bin_px: float = 20.0, smooth_bins: float = 2.0) -> np.ndarray:
+    """Glare that fades inward from the limb, fitted round the limb in short arcs.
+
+    Glare from just outside the limb can only get fainter going inward; a mare near the
+    limb is a dip and highlands a bump, which no such fall-off can make. So in each arc
+    (``bin_px`` along the limb) the profile with depth is fitted with a sum of decaying
+    exponentials whose strengths all have the same sign (non-negative least squares,
+    both signs tried), and only that is taken away. Strengths are smoothed between arcs.
+    """
+    from scipy import optimize
+
+    h, w = res.shape
+    reach = min(5.0 * max(max(f * r, floor) for f, floor in LIMB_FALLOFF), 0.3 * r)
+    scales = [sc for sc in (max(f * r, floor) for f, floor in LIMB_FALLOFF) if sc <= reach / 3] or [reach / 3]
+    n = max(64, int(round(2 * math.pi * r)))
+    step = 0.5
+    ds = np.arange(d0, reach + step, step)
+    t = np.arange(n) / n * 2 * math.pi - math.pi
+    rad = r - ds[:, None]
+    ys = cy + rad * np.sin(t)[None, :]
+    xs = cx + rad * np.cos(t)[None, :]
+    cover = ndimage.map_coordinates(good.astype(np.float32), [ys, xs], order=1)
+    polar = ndimage.map_coordinates(np.where(good, res, 0.0), [ys, xs], order=1) / np.maximum(cover, 1e-6)
+    polar[cover < 0.5] = np.nan
+    nb = max(24, int(round(n / bin_px)))
+    edges = np.linspace(0, n, nb + 1).astype(int)
+    E = np.stack([np.exp(-(ds - d0) / sc) for sc in scales], axis=1)
+    amps = np.zeros((nb, len(scales)))
+    for b in range(nb):
+        blk = polar[:, edges[b] : edges[b + 1]]
+        rows = np.isfinite(blk).any(axis=1)
+        if rows.sum() < 10:
+            continue
+        prof = np.nanmedian(blk[rows], axis=1)
+        sc = float(np.max(np.abs(prof))) + 1e-30
+        best = None
+        for sign in (1.0, -1.0):
+            try:
+                x, rn = optimize.nnls(E[rows], sign * prof / sc, maxiter=2000)
+            except RuntimeError:
+                continue
+            if best is None or rn < best[1]:
+                best = (sign * x * sc, rn)
+        if best is not None:
+            amps[b] = best[0]
+    if smooth_bins > 0:
+        amps = ndimage.gaussian_filter1d(amps, smooth_bins, axis=0, mode="wrap")
+    yy, xx = np.mgrid[0:h, 0:w]
+    dist = r - np.hypot(xx - cx, yy - cy)
+    sel = good & (dist < reach)
+    out = np.zeros((h, w), np.float32)
+    if not sel.any():
+        return out
+    pos = (np.arctan2(yy[sel] - cy, xx[sel] - cx) + math.pi) / (2 * math.pi) * nb - 0.5
+    dd = np.clip(dist[sel] - d0, 0.0, None)
+    for k, sc in enumerate(scales):
+        a = ndimage.map_coordinates(amps[:, k], [pos], order=1, mode="grid-wrap")
+        out[sel] += (a * np.exp(-dd / sc)).astype(np.float32)
+    return out
+
+
+def remove_glare(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams"):
+    """The lunar surface left after taking away the glare: returns (detail, glare)."""
+    glare = glare_surface(img, good, cx, cy, r, p.glare_order, limb=p.limb_glare)
+    if p.limb_glare:
+        if p.limb_shape:
+            glare = glare + limb_falloff(np.where(good, img - glare, 0.0).astype(np.float32), good, cx, cy, r,
+                                         d0=p.margin_px)
+        glare = glare * limb_background(img, glare, good, cx, cy, r)
+    return np.where(good, img - glare, 0.0).astype(np.float32), glare
+
+
+def colour_blend_limb(detail: np.ndarray, detail_c: np.ndarray, good: np.ndarray, rr: np.ndarray, r: float,
+                      inner: float = 0.1, outer: float = 0.25):
+    """Use ``detail_c`` (one colour channel) near the limb, scaled to match ``detail``.
+
+    Full weight within ``inner`` x radius of the limb, fading out by ``outer`` x radius.
+    The scale comes from the large-scale lunar pattern in the middle of the disc, which is
+    the same in every channel. Returns (blended, scale, correlation); the blend is skipped
+    (returns ``detail``) when the channels do not agree well.
+    """
+    body = good & (rr < r * 0.8)
+    a = ndimage.gaussian_filter(detail, 6.0)[body]
+    b = ndimage.gaussian_filter(detail_c, 6.0)[body]
+    a = a - a.mean()
+    b = b - b.mean()
+    corr = float(np.sum(a * b) / (np.sqrt(np.sum(a * a) * np.sum(b * b)) + 1e-30))
+    k = float(np.sum(a * b) / (np.sum(a * a) + 1e-30))
+    if not (corr > 0.6 and k > 0):
+        return detail, k, corr
+    depth = (r - rr) / r
+    t = np.clip((outer - depth) / (outer - inner), 0.0, 1.0)
+    t = 0.5 - 0.5 * np.cos(math.pi * t)
+    out = detail * (1 - t) + (detail_c / k) * t
+    return np.where(good, out, 0.0).astype(np.float32), k, corr
+
+
 def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: float, cy: float, moon_r: float,
-                 p: EarthshineParams):
+                 p: EarthshineParams, limb_channel: Optional[np.ndarray] = None):
     """From the Moon-aligned stack to the picture: glare removed, smoothed by how certain it is.
 
     Returns (detail, shown, snr, keep_from, notes): ``keep_from`` is the depth inside the
@@ -310,11 +413,13 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
     h, w = lum.shape
     yy, xx = np.mgrid[0:h, 0:w]
     rr = np.hypot(xx - cx, yy - cy)
-    glare = glare_surface(lum, good, cx, cy, moon_r, p.glare_order, limb=p.limb_glare)
-    detail = np.where(good, lum - glare, 0.0).astype(np.float32)
-    if p.limb_glare:
-        glare = glare * limb_background(lum, glare, good, cx, cy, moon_r)
-        detail = np.where(good, lum - glare, 0.0).astype(np.float32)
+    detail, glare = remove_glare(lum, good, cx, cy, moon_r, p)
+    if limb_channel is not None and p.colour_limb:
+        detail_c, _ = remove_glare(limb_channel, good, cx, cy, moon_r, p)
+        detail, k, corr = colour_blend_limb(detail, detail_c, good, rr, moon_r)
+        if not (corr > 0.6 and k > 0):
+            notes.append(f"the blue channel does not match the others well (correlation {corr:.2f}); "
+                         "used the average of all channels near the limb")
     # Noise from the stack weights (inverse variances up to one factor), measured on fine scales.
     gm = good.astype(np.float32)
     local = ndimage.gaussian_filter(detail, 1.0) / np.maximum(ndimage.gaussian_filter(gm, 1.0), 1e-6)
@@ -394,6 +499,7 @@ def stack_earthshine(
     inside = rr < moon_r - p.margin_px
 
     total = np.zeros((2 * half, 2 * half), np.float64)
+    total_c = np.zeros((3, 2 * half, 2 * half), np.float64)
     weight = np.zeros_like(total)
     shifts = {}
     for f in use:
@@ -404,33 +510,37 @@ def stack_earthshine(
         bx, by, bw, bh = source_box(mat, crop)
         fr = region(mos, bx, by, bw, bh, calibs.get(f.index), image_crop, hot_pixels=p.hot_pixels)
         del mos
-        v = warp_region(fr.rgb.mean(axis=2), mat, crop, (fr.x0, fr.y0), order=3)
+        vc = [warp_region(fr.rgb[..., c], mat, crop, (fr.x0, fr.y0), order=3) for c in range(3)]
+        v = (vc[0] + vc[1] + vc[2]) / 3.0
         vmax = warp_region(fr.rgb.max(axis=2), mat, crop, (fr.x0, fr.y0), order=1)
         sat = warp_region(fr.saturated.astype(np.float32), mat, crop, (fr.x0, fr.y0), order=1, cval=1.0)
         taper = np.clip((p.saturation_level - np.nan_to_num(vmax, nan=1.0)) / p.saturation_taper, 0.0, 1.0)
         w = (m.gain**2) / (np.clip(np.nan_to_num(v, nan=0.0), 0, None) + p.noise_floor) * taper * (sat < 0.01)
         w = np.where(np.isfinite(v) & inside, w, 0.0)
         total += np.nan_to_num((v - m.offset) / m.gain) * w
+        for c in range(3):
+            total_c[c] += np.nan_to_num((vc[c] - m.offset) / m.gain) * w
         weight += w
         say(f"earthshine: {f.file_name} (gain {m.gain:.3g}, Moon shifted {math.hypot(*shifts[f.index]):.1f} px)")
     lum = np.where(weight > 0, total / np.maximum(weight, 1e-30), 0.0).astype(np.float32)
+    rgb = np.where(weight > 0, total_c / np.maximum(weight, 1e-30), 0.0).astype(np.float32)
     good = inside & (weight > 0)
     notes = []
     if good.sum() < 100:
         raise ValueError("no usable pixels inside the lunar disc")
 
-    detail, shown, snr, keep_from, more = process_disc(lum, weight, good, cx, cy, moon_r, p)
+    detail, shown, snr, keep_from, more = process_disc(lum, weight, good, cx, cy, moon_r, p, limb_channel=rgb[2])
     notes += more
 
     outputs = {}
     if out_dir is not None:
         outputs = _write(lum, detail, shown, good, weight, crop, canvas, (cx, cy), moon_r, p, out_dir, name, fmt,
-                         keep_from)
+                         keep_from, rgb)
     return EarthshineResult([f.index for f in use], shifts, crop, snr, outputs, notes), lum, detail
 
 
 def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, out_dir, name, fmt="tif",
-           keep_from: Optional[float] = None) -> dict:
+           keep_from: Optional[float] = None, rgb: Optional[np.ndarray] = None) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     X0, Y0, w, h = crop
@@ -440,6 +550,8 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     lin_path = out / f"{name}_earthshine.fit"
     write_fits(lin_path, lum, header)
     write_fits(out / f"{name}_earthshine_weight.fit", weight.astype(np.float32), header)
+    if rgb is not None:
+        write_fits(out / f"{name}_earthshine_rgb.fit", rgb, header)
     # Stretch on the body of the disc: the last few pixels by the limb are noisier
     # (photon noise of the glare there) and would otherwise set the range.
     yy, xx = np.mgrid[0:h, 0:w]

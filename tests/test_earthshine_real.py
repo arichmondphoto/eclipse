@@ -60,8 +60,8 @@ def test_limb_glare_is_removed_round_the_limb(disc):
         after = _spread(detail, good, rr, phi, r, a, b)
         assert after < before / 4, (a, b, before, after)
     # 6-24 px (12-48 at full size) inside the limb: what varies round the limb (left-over glare,
-    # and real maria such as Crisium) stays below the surface contrast.
-    assert _spread(detail, good, rr, phi, r, 6, 24) < 0.75 * surface
+    # and now real maria such as Crisium and Marginis, which are kept) stays near the surface contrast.
+    assert _spread(detail, good, rr, phi, r, 6, 24) < 1.25 * surface
     # The middle is not touched by the limb terms.
     mid = rr < r * 0.6
     assert abs(np.median(detail[mid])) < 0.2 * surface
@@ -101,7 +101,7 @@ def test_shown_layer_is_calm_at_the_limb(disc):
     secs = np.array([np.median(shown[rim & (phi >= t) & (phi < t + np.radians(5))])
                      for t in np.radians(np.arange(-180, 180, 5))])
     lo, hi = np.percentile(shown[body], [5, 95])
-    assert ((secs < lo) | (secs > hi)).mean() < 0.05
+    assert ((secs < lo) | (secs > hi)).mean() < 0.1  # a few: maria kept by the limb (Crisium)
 
 
 def test_edge_fill_has_no_teeth(disc):

@@ -1152,6 +1152,12 @@ class EarthshineTab(StepTab):
         self.limb_glare = QCheckBox("Remove the bright glare along the limb")
         self.limb_glare.setChecked(True)
         f.addRow(self.limb_glare)
+        self.limb_shape = QCheckBox("Keep maria by the limb (glare only fades inward)")
+        self.limb_shape.setChecked(True)
+        f.addRow(self.limb_shape)
+        self.colour_limb = QCheckBox("Use the blue channel near the limb")
+        self.colour_limb.setChecked(True)
+        f.addRow(self.colour_limb)
         self.smooth = QDoubleSpinBox()
         self.smooth.setRange(0.0, 5.0)
         self.smooth.setSingleStep(0.5)
@@ -1258,6 +1264,13 @@ class EarthshineTab(StepTab):
              "steeply, far faster than the glare surface above can follow. Left in, it shows as a bright ring "
              "inside the limb and leaves the middle of the Moon dark. Leave this on unless you want to see that "
              "raw glare.")
+        _tip(self.limb_shape, "Glare from just outside the Moon can only get fainter going inward, while a sea "
+             "(mare) near the edge is a dark dip and highlands a bright bump. With this on, only light that "
+             "fades inward is taken away around the edge, so seas near the limb such as Crisium survive.")
+        _tip(self.colour_limb, "Much of the glare that changes quickly around the edge comes from the pink "
+             "chromosphere and prominences, which are deep red. The blue channel has far less of it, so near "
+             "the limb the picture comes from blue (matched to the others), blending into all channels further "
+             "in. Turned off automatically if blue does not match the other channels.")
         _tip(self.glare, "How flexible the glare surface removed from the disc is (polynomial order). Glare from "
              "the corona is a gentle gradient, so 2 (default) is usually right. Higher removes uneven glare but "
              "also starts removing large maria; 1 removes a straight gradient only.", f)
@@ -1363,7 +1376,8 @@ class EarthshineTab(StepTab):
         params = EarthshineParams(stops=self.stops.value(), glare_order=self.glare.value(),
                                   smooth=self.smooth.value(), brightness=self.brightness.value(),
                                   limb_glare=self.limb_glare.isChecked(), limb_darkening=self.limb_dark.value(),
-                                  edge_smooth=self.edge_smooth.value())
+                                  edge_smooth=self.edge_smooth.value(), limb_shape=self.limb_shape.isChecked(),
+                                  colour_limb=self.colour_limb.isChecked())
         inc = self.include_rejected.isChecked()
         proj = self.main.ensure_saved()
         if proj is None:

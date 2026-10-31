@@ -376,7 +376,16 @@ at the limb and widens quickly further in (13° at 40 px, 50° at 90 px on
 a 436 px Moon), because the glare's pattern spreads out with depth. Lunar
 features smaller than the window are kept, so maria near the limb such as
 Crisium survive; only within ~20 px of the limb, where the glare is many
-times the earthshine, is most detail flattened. `--no-limb-glare` turns this off.
+times the earthshine, is most detail flattened. Before that, in short arcs round the limb, light that fades inward
+(a sum of decaying exponentials with strengths of one sign) is fitted and
+taken away: glare can only fade inward, while a mare near the limb is a dip
+and highlands a bump, which such a fit cannot take (`--no-limb-shape` turns
+it off). Near the limb the picture comes from the blue channel, scaled to
+match the others and blended into all channels from 10% to 25% of the
+radius in: much of the glare that changes quickly round the limb is red
+light from the chromosphere and prominences (`--no-colour-limb`; skipped
+when blue does not match the other channels). `<name>_earthshine_rgb.fit`
+holds the stack per channel. `--no-limb-glare` turns this off.
 
 The shown layer gets a little extra smoothing (up to `--edge-smooth`, 3 px)
 only where the noise is high: the last pixels by the limb, where the long

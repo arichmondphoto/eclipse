@@ -158,6 +158,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="use frames within this many stops of the longest exposure (default 6)")
     p.add_argument("--no-limb-glare", action="store_true",
                    help="do not model the steep glare just inside the limb (shows as a bright rim)")
+    p.add_argument("--no-limb-shape", action="store_true",
+                   help="do not fit the limb glare as light fading inward (that fit keeps maria by the limb)")
+    p.add_argument("--no-colour-limb", action="store_true",
+                   help="do not use the blue channel near the limb (it has less red chromosphere glare)")
     p.add_argument("--glare-order", type=int, default=2,
                    help="smoothness of the glare removed from the disc: polynomial order (default 2)")
     p.add_argument("--smooth", type=float, default=1.0, help="smoothing of the layer in pixels (default 1, 0 = none)")
@@ -608,7 +612,8 @@ def cmd_earthshine(args) -> int:
 
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
                               brightness=args.brightness, limb_glare=not args.no_limb_glare,
-                              limb_darkening=args.limb_darkening, edge_smooth=args.edge_smooth)
+                              limb_darkening=args.limb_darkening, edge_smooth=args.edge_smooth,
+                              limb_shape=not args.no_limb_shape, colour_limb=not args.no_colour_limb)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,
                         output=args.output, name=args.name, profile_dir=args.profile_dir,
                         lensfun_db=args.lensfun_db, fmt=args.format, quiet=args.quiet)

@@ -300,3 +300,53 @@ def test_limb_darkening_in_the_layer(run, tmp_path):
     middle = np.median(layer[rf < 0.3])
     edge = np.median(layer[(rf > 0.95) & (rf < 1.0)])
     assert 0.3 < edge / middle < 0.6  # about 40-50% of the middle near the limb
+
+
+def test_colour_blend_uses_the_blue_channel_by_the_limb():
+    """Red chromosphere glare by the limb that the blue channel does not have is replaced by the
+    blue channel's picture there (scaled to match); the middle keeps the all-channel picture."""
+    from tse_core.earthshine import colour_blend_limb
+
+    n, r = 200, 90.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - 100, yy - 100)
+    good = rr < r - 2
+    surface = ndimage.gaussian_filter(np.random.default_rng(1).normal(0, 1, (n, n)), 6)
+    surface /= surface.std()
+    phi = np.arctan2(yy - 100, xx - 100)
+    red_glare = 3.0 * np.exp(-(r - rr) / 4) * (1 + np.cos(5 * phi))
+    detail = np.where(good, surface + red_glare / 3, 0).astype(np.float32)
+    blue = np.where(good, 0.7 * surface, 0).astype(np.float32)
+    out, k, corr = colour_blend_limb(detail, blue, good, rr, r)
+    assert k == pytest.approx(0.7, rel=0.1) and corr > 0.9
+    rim = good & (rr > r - 8)
+    assert np.abs(out - surface)[rim].mean() < 0.2 * np.abs(detail - surface)[rim].mean()
+    mid = rr < 0.5 * r
+    assert np.allclose(out[mid], detail[mid])
+    # Channels that do not agree: left alone.
+    out2, k2, corr2 = colour_blend_limb(detail, np.where(good, np.random.default_rng(2).normal(0, 1, (n, n)), 0)
+                                        .astype(np.float32), good, rr, r)
+    assert corr2 < 0.6 and out2 is detail
+
+
+def test_limb_falloff_keeps_a_mare_by_the_limb():
+    """A fading-inward glare is taken out; a dark mare band near the limb (a dip, which no
+    fall-off can make) is left."""
+    from tse_core.earthshine import limb_falloff
+
+    n, r = 400, 180.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - 200, yy - 200)
+    phi = np.arctan2(yy - 200, xx - 200)
+    good = rr < r - 3
+    d = r - rr
+    glare = 0.5 * np.exp(-d / 3) * (1 + 0.8 * np.cos(3 * phi)) + 0.1 * np.exp(-d / 10)
+    mare = -0.05 * np.exp(-(((d - 20) / 5) ** 2)) * (np.cos(phi) > 0.5)  # dark band 20 px in, on one side
+    img = np.where(good, glare + mare, 0).astype(np.float32)
+    fit = limb_falloff(img, good, 200, 200, r)
+    left = img - fit
+    band = good & (d > 16) & (d < 24)
+    on, off = band & (np.cos(phi) > 0.7), band & (np.cos(phi) < 0.3)
+    assert np.median(left[on]) - np.median(left[off]) < -0.03  # the mare is still there
+    rim = good & (d < 10) & (np.cos(phi) < 0.3)
+    assert np.abs(left[rim]).mean() < 0.15 * glare[rim].mean()  # most glare taken away
