@@ -140,61 +140,82 @@ def glare_surface(img: np.ndarray, inside: np.ndarray, cx: float, cy: float, r: 
 
 # Fall-off lengths in lunar radii, with a floor in pixels (lens blur does not shrink with a
 # smaller Moon); the fit reaches 3x the longest inside the limb.
-LIMB_DETAIL_SCALES = ((0.004, 0.7), (0.01, 1.5), (0.025, 3.0))
-LIMB_DETAIL_SPACING = 10.0  # px along the limb between nodes (36 to 144 nodes)
-
-
-def limb_glare_detail(res: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float,
-                      iters: int = 5) -> np.ndarray:
+def limb_background(lum: np.ndarray, glare: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float,
+                    depth: float = 0.275, width0: float = 0.014, growth: float = 1.0) -> np.ndarray:
     """What is left of the limb glare after :func:`glare_surface`, followed closely round the limb.
 
-    The light just inside the limb comes from whatever is just outside it in
-    each frame: inner corona, chromosphere and prominences, which change in
-    a few degrees and are uncovered differently as the Moon moves. A few
-    harmonics cannot follow that, so here the short fall-offs exp(-d/s) get
-    their own strength at nodes every few degrees round the limb (linear in
-    between), fitted robustly to the residual in a narrow band.
-    Lunar detail in that band is flattened on scales of more than a few degrees.
+    Returns a factor (1 away from the limb) for the glare surface. The light just
+    inside the limb comes from whatever is just outside it in each frame: inner
+    corona, chromosphere and prominences, which change within a few degrees and
+    are uncovered differently as the Moon moves. Here the ratio of the image to
+    the glare surface (which varies far more slowly with depth than the glare
+    itself) is resampled onto circles, and each circle is median-filtered round
+    the limb. The window is a few degrees at the limb and widens with depth
+    (``width0`` x radius + ``growth`` x depth, in px), because glare from
+    farther away is spread over a wider angle; lunar features smaller than the
+    window pass through, larger ones close to the limb are flattened. The
+    correction fades out by ``depth`` x radius inside the limb.
     """
-    from scipy import sparse
-
-    h, w = res.shape
-    nodes = int(np.clip(round(2 * math.pi * r / LIMB_DETAIL_SPACING), 36, 144))
-    scales = [max(f * r, floor) for f, floor in LIMB_DETAIL_SCALES]
+    h, w = lum.shape
+    reach = max(depth * r, 8.0)
+    n = max(64, int(round(2 * math.pi * r)))
+    step = 0.5
+    d_in = np.arange(0.0, reach + step, step)
+    t = np.arange(n) / n * 2 * math.pi - math.pi
+    rad = r - d_in[:, None]
+    ys = cy + rad * np.sin(t)[None, :]
+    xs = cx + rad * np.cos(t)[None, :]
+    q = np.where(good, lum / np.where(np.abs(glare) > 1e-12, glare, 1e-12), 0.0)
+    g = good.astype(np.float32)
+    cover = ndimage.map_coordinates(g, [ys, xs], order=1)
+    polar = ndimage.map_coordinates(q, [ys, xs], order=1) / np.maximum(cover, 1e-6)
+    bg = np.ones_like(polar)
+    idx = np.arange(n)
+    width0_px = width0 * r
+    for i, dv in enumerate(d_in):
+        ok = cover[i] > 0.5
+        if ok.sum() < 10:
+            continue
+        row = np.interp(idx, idx[ok], polar[i][ok], period=n)
+        win = int(width0_px + growth * dv) | 1
+        win = max(win, 5)
+        row = ndimage.median_filter(row, win, mode="wrap")
+        bg[i] = ndimage.uniform_filter1d(row, max(3, win // 2) | 1, mode="wrap")
     yy, xx = np.mgrid[0:h, 0:w]
-    rr = np.hypot(xx - cx, yy - cy)
-    d = np.clip(r - rr, 0.0, None)
-    band = good & (d < 3.0 * max(scales))
-    out = np.zeros((h, w), np.float32)
-    if band.sum() < 20 * nodes:
+    dist = r - np.hypot(xx - cx, yy - cy)
+    sel = good & (dist < reach)
+    out = np.ones((h, w), np.float32)
+    if not sel.any():
         return out
-    pos = (np.arctan2(yy[band] - cy, xx[band] - cx) + math.pi) / (2 * math.pi) * nodes
-    j0 = np.floor(pos).astype(int) % nodes
-    f = pos - np.floor(pos)
-    n = band.sum()
-    rows, cols, vals = [], [], []
-    for k, sc in enumerate(scales):
-        e = np.exp(-d[band] / sc)
-        rows += [np.arange(n)] * 2
-        cols += [k * nodes + j0, k * nodes + (j0 + 1) % nodes]
-        vals += [e * (1 - f), e * f]
-    m = nodes * len(scales)
-    A = sparse.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(n, m))
-    y = res[band].astype(np.float64)
-    wts = np.ones(n)
-    ata = (A.T @ A).toarray()
-    lam = 1e-3 * np.trace(ata) / m  # a little damping, for nodes with few good pixels
-    coef = np.zeros(m)
-    for _ in range(iters):
-        W = sparse.diags(wts)
-        M = (A.T @ W @ A).toarray() + lam * np.eye(m)
-        coef = np.linalg.solve(M, A.T @ (wts * y))
-        rs = y - A @ coef
-        sd = 1.4826 * np.median(np.abs(rs)) + 1e-30
-        t = rs / (4.685 * sd)
-        wts = np.where(np.abs(t) < 1, (1 - t * t) ** 2, 0.0)
-    out[band] = A @ coef
+    fi = np.clip(dist[sel] / step, 0, len(d_in) - 1)
+    fj = (np.arctan2(yy[sel] - cy, xx[sel] - cx) + math.pi) / (2 * math.pi) * n
+    v = ndimage.map_coordinates(bg, [fi, fj], order=1, mode="grid-wrap")
+    fade = np.clip((reach - dist[sel]) / (0.4 * reach), 0.0, 1.0)
+    fade = 0.5 - 0.5 * np.cos(math.pi * fade)
+    out[sel] = 1.0 + (v - 1.0) * fade
     return out
+
+
+def adaptive_smooth(img: np.ndarray, good: np.ndarray, factor: np.ndarray, base: float, cap: float = 12.0) -> np.ndarray:
+    """Gaussian smoothing of ``base`` px, widened to ``base`` x ``factor`` (up to ``cap``) pixel by pixel.
+
+    Only good pixels are averaged, so the edge is not darkened.
+    """
+    base = max(base, 0.3)
+    target = np.clip(base * factor, base, cap)
+    levels = [base] + [s for s in (2.0, 3.0, 4.5, 7.0, 10.0, cap) if s > base * 1.2]
+    g = good.astype(np.float32)
+    src = np.where(good, img, 0.0).astype(np.float32)
+    stack = []
+    for s in levels:
+        stack.append(ndimage.gaussian_filter(src, s) / np.maximum(ndimage.gaussian_filter(g, s), 1e-6))
+    stack = np.stack(stack)
+    pos = np.interp(np.log(target), np.log(levels), np.arange(len(levels)))
+    i0 = np.floor(pos).astype(int)
+    i1 = np.minimum(i0 + 1, len(levels) - 1)
+    f = (pos - i0).astype(np.float32)
+    out = np.take_along_axis(stack, i0[None], 0)[0] * (1 - f) + np.take_along_axis(stack, i1[None], 0)[0] * f
+    return np.where(good, out, 0.0).astype(np.float32)
 
 
 def extend_to_limb(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r_in: float, r_out: float) -> np.ndarray:
@@ -222,6 +243,62 @@ def extend_to_limb(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r_in
     sy = cy + (ys - cy) * f
     out[ys, xs] = ndimage.map_coordinates(filled, [sy, sx], order=1, mode="nearest")
     return out
+
+
+def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: float, cy: float, moon_r: float,
+                 p: EarthshineParams):
+    """From the Moon-aligned stack to the picture: glare removed, smoothed by how certain it is.
+
+    Returns (detail, shown, snr, keep_from, notes): ``keep_from`` is the depth inside the
+    limb (px) from which the picture is kept; nearer the limb it is carried out from there.
+    """
+    notes = []
+    h, w = lum.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - cx, yy - cy)
+    glare = glare_surface(lum, good, cx, cy, moon_r, p.glare_order, limb=p.limb_glare)
+    detail = np.where(good, lum - glare, 0.0).astype(np.float32)
+    if p.limb_glare:
+        glare = glare * limb_background(lum, glare, good, cx, cy, moon_r)
+        detail = np.where(good, lum - glare, 0.0).astype(np.float32)
+    # Noise from the stack weights (inverse variances up to one factor), measured on fine scales.
+    resid = detail - ndimage.gaussian_filter(detail, 1.0)
+    scale = 1.4826 * np.median(np.abs(resid[good] * np.sqrt(weight[good]))) / 0.96
+    pix_noise = np.where(good, scale / np.sqrt(np.maximum(weight, 1e-30)), 0.0)
+    noise = float(np.median(pix_noise[good]))
+    body = good & (rr < moon_r * 0.5)
+    noise_body = float(np.median(pix_noise[body])) if body.sum() > 100 else noise
+    # Smooth more where the picture is less certain: where the noise is higher (near the limb the
+    # long exposures are saturated) and where much glare was taken away (by a bright prominence).
+    floor = float(np.median(glare[body])) if body.sum() > 100 else float(np.median(glare[good]))
+    excess = ndimage.gaussian_filter(np.clip((glare - floor) / max(abs(floor), 1e-12), 0, None), 4.0)
+    factor = np.maximum(pix_noise / max(noise_body, 1e-30), (1.0 + excess) ** 1.5)
+    shown = adaptive_smooth(detail, good, factor, p.smooth) if p.smooth > 0 else detail
+    # Nearer the limb than where the noise is still ~10x that of the middle (more than the widest
+    # smoothing can calm), carry the picture out to the limb instead: only noise is left there.
+    rings = np.arange(int(p.margin_px), int(moon_r * 0.2))
+    ri = np.clip((moon_r - rr).astype(int), 0, rings[-1] + 1) if len(rings) else None
+    keep_from = p.margin_px
+    if ri is not None:
+        ratio = pix_noise / max(noise_body, 1e-30)
+        for d in rings:
+            m = good & (ri == d)
+            if m.sum() > 20 and np.median(ratio[m]) < 10.0:
+                keep_from = max(float(d), p.margin_px)
+                break
+    # Over the last few percent of the radius what is left of the glare is about as large as the
+    # lunar detail, so the contrast there is eased down (to 30%) towards the limb.
+    if p.limb_glare:
+        mid = float(np.median(shown[good & (rr < moon_r * 0.9)]))
+        c = np.clip((moon_r - rr - keep_from) / (0.06 * moon_r), 0.0, 1.0)
+        c = 0.3 + 0.7 * (0.5 - 0.5 * np.cos(math.pi * c))
+        shown = np.where(good, mid + (shown - mid) * c, 0.0).astype(np.float32)
+    big = ndimage.gaussian_filter(detail, max(3.0, moon_r / 40))
+    snr = float((np.percentile(big[good], 95) - np.percentile(big[good], 5)) / (noise / max(3.0, moon_r / 40) + 1e-30))
+    if snr < 3:
+        notes.append("very little lunar detail above the noise; the earthshine layer will look mostly like noise")
+
+    return detail, shown, snr, keep_from, notes
 
 
 def stack_earthshine(
@@ -288,31 +365,18 @@ def stack_earthshine(
     if good.sum() < 100:
         raise ValueError("no usable pixels inside the lunar disc")
 
-    glare = glare_surface(lum, good, cx, cy, moon_r, p.glare_order, limb=p.limb_glare)
-    detail = np.where(good, lum - glare, 0.0).astype(np.float32)
-    if p.limb_glare:
-        detail -= limb_glare_detail(detail, good, cx, cy, moon_r)
-    # Noise from the stack weights (inverse variances up to one factor), measured on fine scales.
-    resid = detail - ndimage.gaussian_filter(detail, 1.0)
-    scale = 1.4826 * np.median(np.abs(resid[good] * np.sqrt(weight[good]))) / 0.96
-    noise = float(np.median(scale / np.sqrt(weight[good])))
-    shown = detail
-    if p.smooth > 0:  # smoothing that does not darken the edge (only good pixels are averaged)
-        num = ndimage.gaussian_filter(np.where(good, detail, 0.0), p.smooth)
-        den = ndimage.gaussian_filter(good.astype(np.float32), p.smooth)
-        shown = np.where(good, num / np.maximum(den, 1e-6), 0.0).astype(np.float32)
-    big = ndimage.gaussian_filter(detail, max(3.0, moon_r / 40))
-    snr = float((np.percentile(big[good], 95) - np.percentile(big[good], 5)) / (noise / max(3.0, moon_r / 40) + 1e-30))
-    if snr < 3:
-        notes.append("very little lunar detail above the noise; the earthshine layer will look mostly like noise")
+    detail, shown, snr, keep_from, more = process_disc(lum, weight, good, cx, cy, moon_r, p)
+    notes += more
 
     outputs = {}
     if out_dir is not None:
-        outputs = _write(lum, detail, shown, good, weight, crop, canvas, (cx, cy), moon_r, p, out_dir, name, fmt)
+        outputs = _write(lum, detail, shown, good, weight, crop, canvas, (cx, cy), moon_r, p, out_dir, name, fmt,
+                         keep_from)
     return EarthshineResult([f.index for f in use], shifts, crop, snr, outputs, notes), lum, detail
 
 
-def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, out_dir, name, fmt="tif") -> dict:
+def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, out_dir, name, fmt="tif",
+           keep_from: Optional[float] = None) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     X0, Y0, w, h = crop
@@ -321,6 +385,7 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
               "COMMENT": "Moon-aligned linear stack in units of the reference exposure"}
     lin_path = out / f"{name}_earthshine.fit"
     write_fits(lin_path, lum, header)
+    write_fits(out / f"{name}_earthshine_weight.fit", weight.astype(np.float32), header)
     # Stretch on the body of the disc: the last few pixels by the limb are noisier
     # (photon noise of the glare there) and would otherwise set the range.
     yy, xx = np.mgrid[0:h, 0:w]
@@ -329,7 +394,9 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     img = np.clip((shown - lo) / ((hi - lo) or 1.0), 0.0, 1.0) * p.brightness
     # Fill out to where the corona layers start (just outside the limb), then a short soft edge.
     edge = moon_r + p.limb_px
-    img = extend_to_limb(img, good, cx, cy, moon_r - p.margin_px, edge)
+    r_in = moon_r - (p.margin_px if keep_from is None else keep_from)
+    shown_good = good & (np.hypot(xx - cx, yy - cy) < r_in)
+    img = extend_to_limb(img, shown_good, cx, cy, r_in, edge)
     yy, xx = np.mgrid[0:h, 0:w]
     rr = np.hypot(xx - cx, yy - cy)
     fe = max(p.feather_px, 0.5)

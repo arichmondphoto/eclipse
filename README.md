@@ -366,13 +366,25 @@ the HDR stack's Moon frame. Only exposures within `--stops` (default 6) of
 the longest are used. The glare from the inner corona inside the disc, a
 gentle gradient, is removed with a smooth surface (`--glare-order`, default
 2; higher orders start removing large maria too). Close to the limb the glare
-climbs steeply, because the bright inner corona is only pixels away. Extra
-terms that fall off with distance inside the limb, and vary round it as the
-inner corona does, take that out too. Without them the earthshine shows a
-bright rim and a dark middle (`--no-limb-glare` turns them off). The stack
-stops 3 px inside the limb, where the frames' own limbs would leak in. The
-layer carries the values from there out to 1.5 px past the limb, which is
-where the corona layers' black disc ends, so no dark ring shows between them.
+climbs steeply (10-20x the earthshine) because the bright inner corona,
+the chromosphere and prominences are only pixels away, and it changes
+within a few degrees round the limb. Terms that fall off with distance
+inside the limb take out its average shape. The rest is followed round the
+limb: the image is divided by the glare surface, resampled onto circles,
+and each circle is median-filtered round the limb with a window of a few
+degrees at the limb, widening further in (lunar features smaller than the
+window are kept; larger ones within ~0.25 radius of the limb are
+flattened). `--no-limb-glare` turns this off.
+
+The shown layer is smoothed more where it is less certain. That is where
+the noise is higher (the last pixels by the limb, where the long exposures
+are saturated) and where a lot of glare was taken away (around a bright
+prominence). The contrast is eased down over the last ~6% of the radius.
+Where the noise is still ~10x that of the middle, the picture is carried
+straight out to 1.5 px past the limb. That is where the corona layers'
+black disc ends, so no dark ring shows between them. The stretch is set
+from the body of the disc. `<name>_earthshine_weight.fit` holds the stack
+weights next to the linear stack.
 
 | File | Contents |
 | --- | --- |
