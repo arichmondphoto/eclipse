@@ -174,7 +174,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--brightness", type=float, default=0.6,
                    help="brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona)")
     p.add_argument("--limb-darkening", type=float, default=0.6,
-                   help="how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit)")
+                   help="vignette: how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit)")
+    p.add_argument("--vignette-shape", type=float, default=1.5,
+                   help="how the darkening falls from the centre: 1 = straight line, 1.5 (default) = gentle in the "
+                        "middle, 3 = the middle stays bright longer")
     p.add_argument("--edge-smooth", type=float, default=3.0,
                    help="most smoothing of the noisier pixels near the limb, px (default 3)")
     p.add_argument("--include-rejected", action="store_true")
@@ -618,7 +621,8 @@ def cmd_earthshine(args) -> int:
 
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
                               brightness=args.brightness, limb_glare=not args.no_limb_glare,
-                              limb_darkening=args.limb_darkening, edge_smooth=args.edge_smooth,
+                              limb_darkening=args.limb_darkening, vignette_shape=args.vignette_shape,
+                              edge_smooth=args.edge_smooth,
                               limb_shape=not args.no_limb_shape, channel=args.channel,
                               albedo_map=args.albedo_map, albedo_strength=args.albedo_strength)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,

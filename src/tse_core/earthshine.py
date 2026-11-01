@@ -46,6 +46,7 @@ class EarthshineParams:
     smooth: float = 1.0  # Gaussian smoothing of the shown layer, px (0 = none)
     brightness: float = 0.6  # brightest lunar surface in the layer, 0..1 (the corona stays brighter)
     limb_darkening: float = 0.6  # how much darker the limb is than the middle (0 = even, 1 = black at the limb)
+    vignette_shape: float = 1.5  # how the darkening falls from the centre (1 = straight line, higher = later)
     edge_smooth: float = 3.0  # most smoothing where the noise is high near the limb, px
     limb_glare: bool = True  # also model the steep glare just inside the limb
     limb_shape: bool = True  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
@@ -206,19 +207,21 @@ def limb_background(lum: np.ndarray, glare: np.ndarray, good: np.ndarray, cx: fl
     return out
 
 
-def limb_profile(rho: np.ndarray, darkening: float) -> np.ndarray:
-    """Brightness across the disc: 1 in the middle, ``1 - darkening`` at the limb.
+def limb_profile(rho: np.ndarray, darkening: float, shape: float = 1.5) -> np.ndarray:
+    """Brightness across the disc, like a vignette: 1 in the middle, ``1 - darkening`` at the limb.
 
-    The glare removal takes away the disc's overall brightness along with the
-    glare, leaving it evenly lit. A sphere lit from almost straight ahead
-    (the Earth is nearly behind us) looks brightest in the middle and darker
-    towards the limb, where the surface is seen obliquely; this puts that back
-    (sqrt(1 - rho^2), the cosine of the viewing angle). It also keeps the
-    noisier last pixels by the limb dim instead of smoothing them away.
+    It falls gradually all the way from the centre: 1 - darkening x rho^shape (rho = distance
+    from the centre in lunar radii). ``shape`` 1.5 starts gently in the middle and darkens
+    steadily outwards (half way out it is already 21% down at darkening 0.6); higher values
+    keep the middle brighter for longer, values near 1 make a straight-line fall.
+
+    The glare removal takes away the disc's overall brightness along with the glare,
+    leaving it evenly lit; this gives back a brighter middle and keeps the noisier last
+    pixels by the limb dim instead of smoothing them away.
     """
-    mu = np.sqrt(np.clip(1.0 - np.asarray(rho, np.float64) ** 2, 0.0, 1.0))
+    r = np.clip(np.asarray(rho, np.float64), 0.0, 1.0)
     d = float(np.clip(darkening, 0.0, 1.0))
-    return ((1.0 - d) + d * mu).astype(np.float32)
+    return (1.0 - d * r ** max(float(shape), 0.5)).astype(np.float32)
 
 
 def adaptive_smooth(img: np.ndarray, good: np.ndarray, factor: np.ndarray, base: float, cap: float = 12.0) -> np.ndarray:
@@ -657,7 +660,8 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     shown_good = good & (np.hypot(xx - cx, yy - cy) < r_in)
     img = extend_to_limb(img, shown_good, cx, cy, r_in, edge)
     # Brighter in the middle, darker towards the limb (also over the carried-out edge).
-    img = img * limb_profile(np.minimum(np.hypot(xx - cx, yy - cy) / moon_r, 1.0), p.limb_darkening)
+    img = img * limb_profile(np.minimum(np.hypot(xx - cx, yy - cy) / moon_r, 1.0), p.limb_darkening,
+                             p.vignette_shape)
     yy, xx = np.mgrid[0:h, 0:w]
     rr = np.hypot(xx - cx, yy - cy)
     fe = max(p.feather_px, 0.5)

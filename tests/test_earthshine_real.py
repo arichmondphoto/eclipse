@@ -69,8 +69,12 @@ def test_limb_glare_is_removed_round_the_limb(disc):
 
 def test_limb_profile():
     rho = np.array([0.0, 0.5, 1.0])
-    assert ES.limb_profile(rho, 0.6) == pytest.approx([1.0, 0.4 + 0.6 * np.sqrt(0.75), 0.4])
+    assert ES.limb_profile(rho, 0.6) == pytest.approx([1.0, 1 - 0.6 * 0.5**1.5, 0.4])
     assert ES.limb_profile(rho, 0.0) == pytest.approx([1, 1, 1])
+    # A gradient from the centre, like a vignette: darker at every step outwards.
+    prof = ES.limb_profile(np.linspace(0, 1, 11), 0.6)
+    assert np.all(np.diff(prof) < 0) and prof[5] < 0.85
+    assert ES.limb_profile(np.array([0.5]), 0.6, shape=1.0)[0] == pytest.approx(0.7)
 
 
 def test_spikes_are_not_smoothed(disc):

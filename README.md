@@ -418,9 +418,11 @@ the last 2.5% of the radius (~11 px), the edge is filled out to 1.5 px past the 
 with the brightness just inside, taken round the limb in ~16 px steps
 (a median, so single noisy pixels do not show as teeth) and blended in. That is where the corona layers' black disc ends, so no dark
 ring shows between them. Removing the glare also removes the disc's overall
-shading, so it is put back: brightest in the middle and darker towards the
-limb, like a ball lit from the front (`--limb-darkening`, default 0.6 = the
-limb at 40% of the middle; 0 = evenly lit). The stretch is set from the
+shading, so it is put back as a vignette: full brightness in the middle,
+darkening gradually all the way to the limb (`--limb-darkening`, default
+0.6 = the limb at 40% of the middle; 0 = evenly lit; `--vignette-shape`,
+default 1.5: 1 = a straight-line fall from the centre, higher keeps the
+middle bright longer). The stretch is set from the
 body of the disc. `<name>_earthshine_weight.fit` holds the stack weights
 next to the linear stack.
 
