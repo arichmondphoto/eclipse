@@ -566,11 +566,12 @@ def test_moon_and_corona_stretched_together_have_no_seam(tmp_path):
     ring = (rr > r - 1) & (rr < r + 2.5)
     assert (ref.mean(axis=2) - lum)[ring].max() < 0.08
     # The prominence: red on the Moon side as on the corona side.
-    def redness(m):
-        return np.median(img[m][:, 0] / np.maximum(img[m][:, 1], 1e-3))
+    def redness(im, m):
+        return np.median(im[m][:, 0] / np.maximum(im[m][:, 1], 1e-3))
     at = np.abs(phi) < 0.03
-    inside, outside = at & (rr > r - 2) & (rr < r), at & (rr > r + 2) & (rr < r + 4)
-    assert redness(inside) > 1.05 and abs(redness(inside) - redness(outside)) < 0.25 * redness(outside)
+    for m in (at & (rr > r - 2) & (rr < r), at & (rr > r + 2) & (rr < r + 4)):  # Moon side, corona side
+        assert redness(img, m) > 1.05
+        assert abs(redness(img, m) - redness(ref, m)) < 0.1 * redness(ref, m)  # as if drawn as one image
     # The lunar surface is in the middle.
     assert np.median(lum[rr < 0.5 * r]) > 0.1
     prev = W.final_with_moon(proj, "blend", 1.0, enhance_params=params, preview_side=160)
