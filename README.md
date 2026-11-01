@@ -1,4 +1,4 @@
-# Solar Eclipse Toolkit
+# Totality - A Solar Eclipse Toolkit
 
 Processing for DSLR photographs of total solar eclipses, from the RAW
 files to finished pictures: alignment on the corona, linear HDR stacking,
@@ -13,8 +13,7 @@ Druckmüllerová, Morgan & Habbal (2011, the Fourier normalizing-radial-graded
 filter and the Sun's centre), Morgan, Habbal & Woo (2006, NRGF) and Morgan &
 Druckmüller (2014, multi-scale Gaussian normalization).
 
-Nothing is tied to one eclipse, camera or bracket: every setting is read
-from each frame's metadata, and eclipse geometry comes from NASA's Besselian
+Works on any total solar eclipse. Eclipse geometry comes from NASA's Besselian
 elements for any eclipse from 1600 to 2400.
 
 ## Status
