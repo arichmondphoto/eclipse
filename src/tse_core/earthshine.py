@@ -1208,7 +1208,7 @@ def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: fl
     h, w = trust.shape
     na = max(int(2 * math.pi * r), 360)
     step = 0.5
-    radii = np.arange(r - inner, r + outer + 1.0 + 1e-9, step)
+    radii = np.arange(r - inner, r + outer + 4.0 + 1e-9, step)
     ang = np.arange(na) * 2 * math.pi / na
     py = cy + radii[:, None] * np.sin(ang)[None]
     px = cx + radii[:, None] * np.cos(ang)[None]
@@ -1217,20 +1217,27 @@ def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: fl
     T = np.where(inside, T, 0.0)
     L = np.stack([ndimage.map_coordinates(np.log(np.maximum(img[..., c], floor)), [py, px], order=1,
                                           mode="nearest") for c in range(3)], axis=-1)
-    j_out = int(np.searchsorted(radii, r + outer))
-    j_lim = int(np.searchsorted(radii, r - 1.0))  # last sample fully inside the limb
+    j_edge = int(np.searchsorted(radii, r + outer))  # first sample of the trusted corona
+    j_out = int(np.searchsorted(radii, r + outer + 1.0))  # anchor clear of the pixels inside it
+    j_lim = int(np.searchsorted(radii, r - 0.5))  # last sample inside the limb
     if j_out >= len(radii) - 1 or j_lim < 1:
         return None
     out_val = ndimage.gaussian_filter1d(0.5 * (L[j_out] + L[j_out + 1]), 1.0, axis=0, mode="wrap")
+    # The corona keeps brightening towards the limb: continued inwards from ``outer`` px out with
+    # its own slope there (log brightness per px, measured over the next 2 px, at most 0.2).
+    j_o2 = min(int(np.searchsorted(radii, r + outer + 3.0)), len(radii) - 1)
+    slope = (out_val - ndimage.gaussian_filter1d(L[j_o2], 1.0, axis=0, mode="wrap")) / max(radii[j_o2] - radii[j_out], 1.0)
+    slope = np.clip(ndimage.gaussian_filter1d(slope, 2.0, axis=0, mode="wrap"), 0.0, 0.2)
     # The drop across the limb, from directions where the earthshine stack is good to the edge.
     good_dir = (T[j_lim - 1: j_lim + 1] >= 0.95).all(axis=0) & inside[j_out]
+    corona_at = out_val + slope * (radii[j_out] - radii[j_edge])  # the corona continued to ``outer`` px
     if good_dir.sum() < 10:
         return None
-    drop = np.where(good_dir[:, None], 0.5 * (L[j_lim - 1] + L[j_lim]) - out_val, 0.0)
+    drop = np.where(good_dir[:, None], 0.5 * (L[j_lim - 1] + L[j_lim]) - corona_at, 0.0)
     sig = max(4.0, 0.03 * na)
     den = ndimage.gaussian_filter1d(good_dir.astype(np.float64), sig, mode="wrap")
     drop = ndimage.gaussian_filter1d(drop, sig, axis=0, mode="wrap") / np.maximum(den, 1e-6)[:, None]
-    limb_val = out_val + drop
+    limb_val = corona_at + drop
     # Outermost trusted sample inside, scanning in from the limb.
     ok = T[: j_lim + 1] >= 0.95
     rev = ok[::-1]
@@ -1240,8 +1247,10 @@ def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: fl
     in_val = ndimage.gaussian_filter1d(L[j_in, np.arange(na)], 1.0, axis=0, mode="wrap")
     jj = np.arange(len(radii))[:, None]
     u = np.clip((jj - j_in[None]) / np.maximum(j_lim - j_in, 1)[None], 0.0, 1.0)[..., None]
-    F = np.where((jj <= j_lim)[..., None], in_val[None] * (1 - u) + limb_val[None] * u, out_val[None])
-    span = (has[None] & (jj > j_in[None]) & (jj < j_out))[..., None]
+    corona = out_val[None] + slope[None] * np.clip(radii[j_out] - radii, 0.0, None)[:, None, None]
+    F = np.where((jj <= j_lim)[..., None], in_val[None] * (1 - u) + limb_val[None] * u, corona)
+    # Outside the limb (to ``outer`` px) always the continued corona; inside only where needed.
+    span = ((has[None] & (jj > j_in[None]) & (jj < j_out)) | ((jj > j_lim) & (jj <= j_out)))[..., None]
     F = np.where(span, F, L)
     # Where the trusted pixels end at different depths in neighbouring directions, the
     # interpolation starts at different points: smoothing round the limb hides the steps.
@@ -1371,8 +1380,17 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
     # Round a bright prominence: the light between the last well-exposed earthshine pixels and
     # the corona 3 px out, interpolated along each radius (in log brightness: glare fades
     # steeply and smoothly), not spread sideways from neighbours (which made blotches).
-    tc = np.where(had, 1.0, trust[sy, sx]).astype(np.float32)
-    target = band & ~had & (tc < 1.0)
+    # Between the limb and 3 px out neither stack is used as it is: the earthshine stack's
+    # corona is smeared (aligned on the Moon) and the HDR's holds few frames (the Moon covered
+    # it part of the time). Mixing them there (fading one out, the other in) left a darker line
+    # just outside the limb; the corona is continued inwards instead, to meet the earthshine.
+    # The earthshine stack still holds the limb's own edge (blurred by the optics) for a pixel
+    # or so outside it, so it hands over to the continued corona between 0.5 and 2.5 px out.
+    outside = band & (rs >= mr)
+    tout = np.clip((mr + 2.5 - rs) / 2.0, 0.0, 1.0)
+    tc = np.where(had, 1.0, trust[sy, sx] * np.where(outside, tout * tout * (3 - 2 * tout), 1.0))
+    tc = tc.astype(np.float32)
+    target = band & ~had & ((tc < 1.0) | outside)
     if target.any():
         es_c = np.moveaxis(es_rgb, 0, -1)[sy, sx]
         floor = max(float(np.median(es_c[(rs < 0.8 * mr) & es_ok[sy, sx]])) * 0.05, 1e-12) \
@@ -1380,7 +1398,7 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
         rad = _radial_fill(sub, tc, cx - sx.start, cy - sy.start, mr, floor)
         if rad is not None:
             k = np.where(target, tc, 1.0)[..., None]
-            sub[:] = np.where(target[..., None], k * sub + (1 - k) * rad, sub)
+            sub[:] = np.where(target[..., None], k * es_c + (1 - k) * rad, sub)
             wnew = np.where(target, np.maximum(wnew, 0.0), wnew)
     wsub[:] = np.where((a > 0) | hole, np.maximum(wnew, 1e-12), wsub)
     mask = np.zeros((h, w), bool)

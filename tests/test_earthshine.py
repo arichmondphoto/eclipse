@@ -569,6 +569,10 @@ def test_moon_and_corona_stretched_together_have_no_seam(tmp_path):
     band = (rr > r - 4) & (rr < r + 5)
     diff = np.abs(img - ref).mean(axis=2)
     assert np.percentile(diff[band], 99) < 0.03, np.percentile(diff[band], 99)  # the join does not show
+    # No line just outside the limb (where the two stacks hand over): each 1 px ring matches.
+    for a0 in (0, 1, 2):
+        m = (rr > r + a0) & (rr < r + a0 + 1)
+        assert abs(float(img[m].mean() - ref[m].mean())) < 0.01, (a0, img[m].mean(), ref[m].mean())
     # No dark specks where the stack had holes by the limb.
     ring = (rr > r - 1) & (rr < r + 2.5)
     assert (ref.mean(axis=2) - lum)[ring].max() < 0.08
@@ -705,3 +709,34 @@ def test_light_by_a_bright_prominence_is_smooth_round_the_limb(tmp_path):
 
     for d in (-1.5, -3.0):
         assert rough(H, d) < 0.05, (d, rough(H, d), rough(ref, d))
+
+
+def test_no_step_where_the_stacks_hand_over_outside_the_limb(tmp_path):
+    """Outside the limb the earthshine stack's corona is not the HDR stack's (aligned on the Moon,
+    so smeared; long frames saturated). Using it out to 3 px and then switching to the HDR stack
+    made a step, seen as a line round the limb. Now the corona is continued in from 3 px out."""
+    from tse_core.earthshine import merge_moon
+    from tse_core.fits import read_fits
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    hdr, head = read_fits(tmp_path / "e_hdr.fit")
+    wt, _ = read_fits(tmp_path / "e_weight.fit")
+    ew, _ = read_fits(tmp_path / "e_earthshine_weight.fit")
+    es, eh = read_fits(tmp_path / "e_earthshine_rgb.fit")
+    truth = np.moveaxis(hdr, 0, -1).copy()
+    crop = (slice(30, 270), slice(40, 280))
+    es = es.copy()
+    es[:, rr[crop] > r] *= 0.75  # the earthshine stack's corona: darker than the HDR's
+    H = np.moveaxis(hdr, 0, -1).astype(np.float32).copy()
+    merge_moon(H, wt.astype(np.float32).copy(), head, es.astype(np.float32), ew.astype(np.float32), (40, 30),
+               (float(eh["MOONX"]), float(eh["MOONY"])))
+    away = np.abs(phi) > 0.3
+
+    def ratio(a):
+        m = (rr > r + a) & (rr < r + a + 0.5) & away
+        return float(np.median(H[m].mean(axis=1) / truth[m].mean(axis=1)))
+
+    steps = [abs(ratio(a + 0.5) - ratio(a)) for a in np.arange(1.0, 4.0, 0.5)]
+    assert max(steps) < 0.1, steps
+    print(steps)  # a gradual hand-over; the old switch at 3 px: one 25% step
+    assert ratio(2.5) > 0.9

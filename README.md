@@ -470,8 +470,12 @@ next to the linear stack.
 **The final image: Moon and corona stretched together.** `totality final
 eclipse2024.json` (or **Final image** on the Earthshine tab, with a preview)
 puts the Moon-aligned earthshine stack, linear and in the same units, into
-the HDR stack inside the lunar disc (registered on the limb, crossing over in
-the 2 px just outside it, where both hold the same light). By a bright
+the HDR stack inside the lunar disc (registered on the limb). Just outside
+the limb neither stack is used as it is: the earthshine stack's corona is
+smeared (it is aligned on the Moon) and the HDR stack's holds few frames
+there, so the earthshine stack's own limb edge hands over between 0.5 and
+2.5 px out to the HDR's corona continued inwards from 3 px out (switching
+from one stack to the other at 3 px showed as a line round the limb). By a bright
 prominence the long earthshine frames saturate, so towards it ever fewer
 frames are usable and the last are near full well: there (under 40% of the
 usual frames, fully below 10%) the light is interpolated along each radius in
