@@ -575,3 +575,21 @@ def test_moon_and_corona_stretched_together_have_no_seam(tmp_path):
     assert np.median(lum[rr < 0.5 * r]) > 0.1
     prev = W.final_with_moon(proj, "blend", 1.0, enhance_params=params, preview_side=160)
     assert prev.shape[0] == 160
+
+
+def test_surface_steps_back_where_the_moon_is_bright(tmp_path):
+    """A bright prominence spilling over the limb keeps its colour: the lunar surface added on
+    top does not wash it out to white."""
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams
+    from tse_core.fits import read_fits, write_fits
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    md, _ = read_fits(tmp_path / "e_moon_surface.fit")
+    md[:3] = np.where(md[3] > 0, 0.6, 0.0)  # a bright, even surface right up to the limb
+    write_fits(tmp_path / "e_moon_surface.fit", md)
+    img = W.final_with_moon(proj, "blend", 1.0, enhance_params=EnhanceParams(layers=(), blend={"natural": 1.0}),
+                            preview_side=10_000)
+    at = (np.abs(phi) < 0.03) & (rr > r - 2) & (rr < r)
+    red = np.median(img[at][:, 0] / np.maximum(img[at][:, 1], 1e-3))
+    assert red > 1.05  # still red, not washed to white

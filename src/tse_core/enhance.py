@@ -805,6 +805,12 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             sy = slice(ys.start - moon.y0, ys.stop - moon.y0)
             sx = slice(xs.start - moon.x0, xs.stop - moon.x0)
             add = moon.surface[sy, sx] * (moon.visibility[sy, sx, None] if moon.visibility is not None else 1.0)
+            # Where the Moon's own stretched light is already bright (the limb, a prominence spilling
+            # over it), the surface steps back: it could not be seen there, and adding it would wash
+            # the prominence out to white.
+            own = img[ys, xs].mean(axis=2)
+            t = np.clip((0.7 - own) / 0.4, 0.0, 1.0)
+            add = add * (t * t * (3 - 2 * t))[..., None]
             img[ys, xs] = 1.0 - (1.0 - img[ys, xs]) * (1.0 - np.clip(add, 0.0, 1.0))
         return img.astype(np.float32)
 
