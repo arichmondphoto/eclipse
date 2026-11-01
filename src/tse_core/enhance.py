@@ -156,6 +156,19 @@ def stretch(x: np.ndarray, valid: np.ndarray, lo: float = 0.5, hi: float = 99.8)
 # ---------------------------------------------------------------------------
 
 
+def noise_constant(lum: np.ndarray, weight: np.ndarray, valid: np.ndarray) -> Optional[float]:
+    """``c`` in noise = c / sqrt(weight), from the pixel-to-pixel scatter of the faintest half of
+    ``valid`` (where structure contributes least). None when there are too few pixels."""
+    wpos = np.where(valid & (weight > 0), weight, np.nan)
+    resid = lum - ndimage.gaussian_filter(lum, 1.0)
+    scaled = np.abs(resid) * np.sqrt(wpos)
+    ok = np.isfinite(scaled)
+    if ok.sum() < 100:
+        return None
+    faint = ok & (lum < np.nanpercentile(np.where(ok, lum, np.nan), 50))
+    return 1.4826 * float(np.median(scaled[faint if faint.sum() > 100 else ok])) / 0.96
+
+
 def noise_map(lum: np.ndarray, weight: np.ndarray, valid: np.ndarray) -> np.ndarray:
     """Per-pixel noise of the stacked luminance.
 
@@ -163,15 +176,9 @@ def noise_map(lum: np.ndarray, weight: np.ndarray, valid: np.ndarray) -> np.ndar
     noise is ``c / sqrt(weight)``; ``c`` is measured from the pixel-to-pixel
     scatter in the faint outer corona, where structure is smooth.
     """
-    wpos = np.where(valid & (weight > 0), weight, np.nan)
-    resid = lum - ndimage.gaussian_filter(lum, 1.0)
-    scaled = np.abs(resid) * np.sqrt(wpos)
-    ok = np.isfinite(scaled)
-    if ok.sum() < 100:
+    c = noise_constant(lum, weight, valid)
+    if c is None:
         return np.zeros_like(lum)
-    # Use the faintest half, where coronal structure contributes least to the scatter.
-    faint = ok & (lum < np.nanpercentile(np.where(ok, lum, np.nan), 50))
-    c = 1.4826 * float(np.median(scaled[faint if faint.sum() > 100 else ok])) / 0.96
     with np.errstate(divide="ignore", invalid="ignore"):
         n = c / np.sqrt(np.where(weight > 0, weight, np.nan))
     return np.nan_to_num(n, nan=0.0, posinf=0.0).astype(np.float32)

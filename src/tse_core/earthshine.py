@@ -1119,6 +1119,23 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
     t = np.clip((mr + 2.0 - rr) / 2.0, 0.0, 1.0)
     wm = np.where(es_ok, t * t * (3 - 2 * t), 0.0).astype(np.float32)
     sub = hdr[ys, xs]
+    wsub = weight[ys, xs]
+    # The two stacks' weights are in different units. Both are inverse variances up to a factor
+    # (noise = c / sqrt(weight)); each c is measured from its own pixel scatter, so the Moon's
+    # pixels get weights that tell the stretch their real noise. (With the stack's one-frame
+    # weights, or none, the colour of everything inside the limb was faded to grey as "noise".)
+    from .enhance import noise_constant
+
+    rs = rr[sy, sx]
+    c_hdr = noise_constant(sub.mean(axis=2), wsub, (wsub > 0) & (rs >= mr + 3.0) & (rs < mr + 0.5 * mr))
+    c_es = noise_constant(es_rgb.mean(axis=0), ew, es_ok & (rr < mr - 5.0))
+    if c_hdr and c_es:
+        w_es = ew * (c_hdr / c_es) ** 2
+        say(f"Moon: earthshine noise matched to the stack's (weights x {(c_hdr / c_es) ** 2:.3g})")
+    else:  # too few pixels to measure: as reliable as the corona just outside the limb
+        near = (wsub > 0) & (rs >= mr + 3.0) & (rs < mr + 10.0)
+        ref = float(np.median(wsub[near])) if near.any() else 1.0
+        w_es = np.where(ew > 0, ref, 0.0)
     # The HDR stack's own pixels inside the Moon (out to 3 px past the limb) come from one
     # frame, saturated by a bright prominence: not used. Its corona further out is.
     had = (weight[ys, xs] > 0) & np.isfinite(sub).all(axis=2) & (rr[sy, sx] >= mr + 3.0)
@@ -1128,8 +1145,16 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
         + np.moveaxis(es_rgb, 0, -1)[sy, sx] * wm[sy, sx, None]
     # Pixels that neither stack has reliably (every frame saturated there, or covered):
     # filled from their neighbours, widening until they are all filled.
-    have = had | (wm[sy, sx] > 0.5)
-    band = rr[sy, sx] < mr + 3.0
+    # Weight of the mix (inverse variance of (1-wm) * hdr + wm * es).
+    a = wm[sy, sx]
+    wh = np.where(had, wsub, 0.0)
+    we = np.where(es_ok, w_es, 0.0)[sy, sx]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        var = np.where(a < 1, (1 - a) ** 2 / wh, 0.0) + np.where(a > 0, a**2 / we, 0.0)
+        wmix = np.nan_to_num(1.0 / var, nan=0.0, posinf=0.0)
+    have = had | (a > 0.5)
+    wnew = np.where(have, wmix, 0.0).astype(np.float32)
+    band = rs < mr + 3.0
     hole = band & ~have
     n_hole = int(hole.sum())
     if n_hole:
@@ -1142,12 +1167,14 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
                 for c in range(3):
                     num = ndimage.gaussian_filter(np.where(have, sub[..., c], 0.0), sig)
                     sub[..., c] = np.where(ok, num / np.maximum(den, 1e-6), sub[..., c])
+                # As certain as the light it came from (an average of it).
+                wn = ndimage.gaussian_filter(np.where(have, wnew, 0.0), sig)
+                wnew = np.where(ok, wn / np.maximum(den, 1e-6), wnew)
                 left &= ~ok
             if not left.any():
                 break
         say(f"Moon: {n_hole} pixels by the limb that neither stack has reliably filled from around")
-    wsub = weight[ys, xs]
-    wsub[:] = np.where((wm[sy, sx] > 0) | hole, np.maximum(wsub, 1e-6), wsub)
+    wsub[:] = np.where((a > 0) | hole, np.maximum(wnew, 1e-12), wsub)
     mask = np.zeros((h, w), bool)
     inside = rr < mr + margin_px + 1.0  # overlaps the corona's own region: no gap between them
     mask[ys, xs] = inside[sy, sx]

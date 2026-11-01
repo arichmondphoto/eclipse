@@ -501,7 +501,11 @@ def _moon_project(tmp_path, holes=True):
     hdr = rgb.copy()
     rng = np.random.default_rng(4)
     hdr[:, d > 0] *= 1 + 0.5 * rng.normal(0, 1, (d > 0).sum())  # one noisy frame inside the disc
-    weight = np.ones((n, n), np.float32)
+    hdr[:, d <= 0] += 2e-4 * rng.normal(0, 1, (3, (d <= 0).sum()))  # many frames on the corona
+    rgb = rgb + 3e-5 * rng.normal(0, 1, rgb.shape).astype(np.float32)  # the earthshine stack's noise
+    # Real weights: many frames on the corona, one on the Moon; the earthshine stack's weights
+    # are in units of their own.
+    weight = np.where(d > 0, 0.02, 1.0).astype(np.float32)
     if holes:
         hole = (np.abs(d - 0.5) < 1) & (np.sin(9 * phi) > 0.6)  # saturated in every frame, by the limb
         hdr[:, hole] = 0
@@ -512,7 +516,7 @@ def _moon_project(tmp_path, holes=True):
     # Earthshine crop at (40, 30): the Moon-aligned stack (clean), its weights and the surface.
     X0, Y0, m = 40, 30, 240
     crop = (slice(Y0, Y0 + m), slice(X0, X0 + m))
-    es_w = np.where(rr < r + 8, 1.0, 0.0)[crop].astype(np.float32)
+    es_w = np.where(rr < r + 8, 5e4, 0.0)[crop].astype(np.float32)
     write_fits(tmp_path / "e_earthshine_rgb.fit", rgb[(slice(None),) + crop],
                {"MOONX": c - X0, "MOONY": c - Y0, "MOONR": r, "CROPX0": X0, "CROPY0": Y0})
     write_fits(tmp_path / "e_earthshine_weight.fit", es_w)
@@ -613,7 +617,7 @@ def test_saturated_prominence_core_is_not_white(tmp_path):
     ew, _ = read_fits(tmp_path / "e_earthshine_weight.fit")
     core_c = core[30:270, 40:280]
     es[:, core_c] = 4.0  # the few frames left are near full well: grey
-    ew = np.where(core_c, 0.01, ew).astype(np.float32)
+    ew = np.where(core_c, 0.01 * ew.max(), ew).astype(np.float32)
     write_fits(tmp_path / "e_earthshine_rgb.fit", es, eh)
     write_fits(tmp_path / "e_earthshine_weight.fit", ew)
     img = W.final_with_moon(proj, "blend", 1.0, enhance_params=EnhanceParams(layers=(), blend={"natural": 1.0}),
