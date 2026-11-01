@@ -49,7 +49,7 @@ class EarthshineParams:
     edge_smooth: float = 3.0  # most smoothing where the noise is high near the limb, px
     limb_glare: bool = True  # also model the steep glare just inside the limb
     limb_shape: bool = True  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
-    colour_limb: bool = True  # near the limb use the blue channel, which has less red chromosphere glare
+    channel: str = "auto"  # colour channels to use: auto, all, green, green+blue, blue
     albedo_map: str = ""  # lunar albedo map (equirectangular, 0 deg longitude centred) to guide the glare removal
     albedo_strength: float = 0.5  # how much the map guides it, 0..1 (only used with a map)
     albedo_min_match: float = 0.6  # the map is not used if it matches the middle of the disc less well than this
@@ -388,24 +388,31 @@ def remove_glare(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: flo
 
 
 def remove_glare_guided(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams",
-                        prior: np.ndarray, iters: int = 2):
+                        prior: np.ndarray, iters: int = 2, sigma: float = 0.02, taper: tuple = (0.05, 0.12)):
     """:func:`remove_glare` with an albedo-map prior, corrected towards the data first.
 
     Wherever the data can tell (what is left after the glare estimate is not glare-shaped),
     the prior is pulled towards the data, a blurred step at a time; so a feature the map has
     but your Moon does not is mostly rejected, and the map only fills in what the data cannot
-    separate from glare. On simulations a false mare 25 px inside the limb comes through at
-    about 15-20% of its strength in the map (times ``albedo_strength``), and not at all
-    40 px or more inside.
+    separate from glare. The correction fades in from ``taper`` (fractions of the radius
+    inside the limb): in the outer few % the residual is mostly glare, and feeding it back
+    made a string of beads along the limb on real data. On simulations a false mare at 17%
+    of the radius inside the limb comes through at about 17% of its strength in the map
+    (times ``albedo_strength``), and not at all at 30% inside.
     """
-    pr = prior.astype(np.float32).copy()
-    sig = max(1.0, 0.02 * r)
+    pr = prior.astype(np.float32).copy()  # correction kept off the outer few % (see the taper below)
+    sig = max(1.0, sigma * r)
+    h, w = img.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    depth = (r - np.hypot(xx - cx, yy - cy)) / r
+    wt = np.ones((h, w), np.float32) if taper[1] <= taper[0] else \
+        np.clip((depth - taper[0]) / (taper[1] - taper[0]), 0.0, 1.0).astype(np.float32)
     for _ in range(iters):
         _, glare = remove_glare(img, good, cx, cy, r, p, pr)
         resid = np.where(good, img - pr - glare, 0.0).astype(np.float32)
         num = ndimage.gaussian_filter(resid, sig)
         den = ndimage.gaussian_filter(good.astype(np.float32), sig)
-        pr = np.where(good, pr + num / np.maximum(den, 1e-6), 0.0).astype(np.float32)
+        pr = np.where(good, pr + wt * num / np.maximum(den, 1e-6), 0.0).astype(np.float32)
     return remove_glare(img, good, cx, cy, r, p, pr)
 
 
@@ -423,34 +430,54 @@ def albedo_prior(amap: np.ndarray, detail: np.ndarray, good: np.ndarray, cx: flo
     return (p.albedo_strength * tmpl).astype(np.float32), o, o.describe()
 
 
-def colour_blend_limb(detail: np.ndarray, detail_c: np.ndarray, good: np.ndarray, rr: np.ndarray, r: float,
-                      inner: float = 0.1, outer: float = 0.25):
-    """Use ``detail_c`` (one colour channel) near the limb, scaled to match ``detail``.
+CHANNELS = {"all": (1.0, 1.0, 1.0), "green": (0.0, 1.0, 0.0), "green+blue": (0.0, 1.0, 1.0),
+            "blue": (0.0, 0.0, 1.0)}
 
-    Full weight within ``inner`` x radius of the limb, fading out by ``outer`` x radius.
-    The scale comes from the large-scale lunar pattern in the middle of the disc, which is
-    the same in every channel. Returns (blended, scale, correlation); the blend is skipped
-    (returns ``detail``) when the channels do not agree well.
+
+def channel_image(rgb: np.ndarray, name: str) -> np.ndarray:
+    w = CHANNELS[name]
+    return (sum(wi * rgb[i] for i, wi in enumerate(w) if wi) / sum(w)).astype(np.float32)
+
+
+def choose_channel(rgb: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams"):
+    """The colour channels to make the earthshine from, judged on this stack.
+
+    The glare that changes quickly round the limb is largely red (hydrogen light from the
+    chromosphere and prominences), and on a colour camera the green channel has twice the
+    pixels, so green (or green + blue) usually beats the average of all three. Each candidate
+    is scored by how strong the glare pattern 3-6% of the radius inside the limb (12-24 px at 400 mm)
+    is against the lunar contrast in the middle; within 5% of the best, the least noisy wins.
+    Returns (name, scores) with scores[name] = (glare, noise), both relative to the lunar contrast.
     """
-    body = good & (rr < r * 0.8)
-    a = ndimage.gaussian_filter(detail, 6.0)[body]
-    b = ndimage.gaussian_filter(detail_c, 6.0)[body]
-    a = a - a.mean()
-    b = b - b.mean()
-    corr = float(np.sum(a * b) / (np.sqrt(np.sum(a * a) * np.sum(b * b)) + 1e-30))
-    k = float(np.sum(a * b) / (np.sum(a * a) + 1e-30))
-    if not (corr > 0.6 and k > 0):
-        return detail, k, corr
-    depth = (r - rr) / r
-    t = np.clip((outer - depth) / (outer - inner), 0.0, 1.0)
-    t = 0.5 - 0.5 * np.cos(math.pi * t)
-    out = detail * (1 - t) + (detail_c / k) * t
-    return np.where(good, out, 0.0).astype(np.float32), k, corr
+    h, w = good.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - cx, yy - cy)
+    phi = np.arctan2(yy - cy, xx - cx)
+    d_in = r - rr
+    band = good & (d_in > max(0.03 * r, p.margin_px + 1)) & (d_in < max(0.06 * r, p.margin_px + 7))
+    body = good & (rr < r * 0.5)
+    quick = EarthshineParams(glare_order=p.glare_order, limb_shape=False, margin_px=p.margin_px)
+    scores = {}
+    for name in ("all", "green", "green+blue"):
+        img = channel_image(rgb, name)
+        plain = np.where(good, img - glare_surface(img, good, cx, cy, r, p.glare_order, limb=True), 0.0)
+        det, _ = remove_glare(img, good, cx, cy, r, quick)
+        big = ndimage.gaussian_filter(det, max(2.0, 0.014 * r))
+        surface = float(np.percentile(big[body], 95) - np.percentile(big[body], 5)) + 1e-30
+        secs = [np.median(plain[band & (phi >= t) & (phi < t + np.radians(5))])
+                for t in np.radians(np.arange(-180, 180, 5)) if (band & (phi >= t) & (phi < t + np.radians(5))).any()]
+        noise = float(np.std((det - ndimage.gaussian_filter(det, 1.0))[body]))
+        glare = float(np.std(secs)) / surface if len(secs) > 3 else float("inf")
+        scores[name] = (glare, noise / surface)
+    best = min(v[0] for v in scores.values())
+    if not np.isfinite(best):
+        return "all", scores
+    name = min((k for k, v in scores.items() if v[0] <= 1.05 * best), key=lambda k: scores[k][1])
+    return name, scores
 
 
 def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: float, cy: float, moon_r: float,
-                 p: EarthshineParams, limb_channel: Optional[np.ndarray] = None,
-                 albedo: Optional[np.ndarray] = None):
+                 p: EarthshineParams, albedo: Optional[np.ndarray] = None):
     """From the Moon-aligned stack to the picture: glare removed, smoothed by how certain it is.
 
     Returns (detail, shown, snr, keep_from, notes): ``keep_from`` is the depth inside the
@@ -469,16 +496,6 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
             detail, glare = remove_glare_guided(lum, good, cx, cy, moon_r, p, prior)
         else:
             orientation = None
-    if limb_channel is not None and p.colour_limb:
-        detail_c, _ = remove_glare(limb_channel, good, cx, cy, moon_r, p)
-        if orientation is not None:
-            prior_c, _, _ = albedo_prior(albedo, detail_c, good, cx, cy, moon_r, p, orientation)
-            if prior_c is not None:
-                detail_c, _ = remove_glare_guided(limb_channel, good, cx, cy, moon_r, p, prior_c)
-        detail, k, corr = colour_blend_limb(detail, detail_c, good, rr, moon_r)
-        if not (corr > 0.6 and k > 0):
-            notes.append(f"the blue channel does not match the others well (correlation {corr:.2f}); "
-                         "used the average of all channels near the limb")
     # Noise from the stack weights (inverse variances up to one factor), measured on fine scales.
     gm = good.astype(np.float32)
     local = ndimage.gaussian_filter(detail, 1.0) / np.maximum(ndimage.gaussian_filter(gm, 1.0), 1e-6)
@@ -596,8 +613,16 @@ def stack_earthshine(
             albedo = load_map(p.albedo_map)
         except (OSError, ValueError) as exc:
             notes.append(f"albedo map not used: {exc}")
-    detail, shown, snr, keep_from, more = process_disc(lum, weight, good, cx, cy, moon_r, p, limb_channel=rgb[2],
-                                                       albedo=albedo)
+    chan = p.channel
+    if chan == "auto":
+        chan, scores = choose_channel(rgb, good, cx, cy, moon_r, p)
+        say("earthshine channels: " + ", ".join(f"{k} glare {v[0]:.1f} noise {v[1]:.2f}" for k, v in scores.items())
+            + f" -> {chan}")
+    if chan not in CHANNELS:
+        raise ValueError(f"unknown channel {p.channel!r}; choose from auto, {', '.join(CHANNELS)}")
+    notes.append(f"made from the {chan} channel{'s' if chan in ('all', 'green+blue') else ''}")
+    img = lum if chan == "all" else channel_image(rgb, chan)
+    detail, shown, snr, keep_from, more = process_disc(img, weight, good, cx, cy, moon_r, p, albedo=albedo)
     notes += more
 
     outputs = {}

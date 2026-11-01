@@ -160,8 +160,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="do not model the steep glare just inside the limb (shows as a bright rim)")
     p.add_argument("--no-limb-shape", action="store_true",
                    help="do not fit the limb glare as light fading inward (that fit keeps maria by the limb)")
-    p.add_argument("--no-colour-limb", action="store_true",
-                   help="do not use the blue channel near the limb (it has less red chromosphere glare)")
+    p.add_argument("--channel", default="auto", choices=["auto", "all", "green", "green+blue", "blue"],
+                   help="colour channels to make the earthshine from (default auto: chosen on the stack; the red "
+                        "channel carries most of the chromosphere glare)")
     p.add_argument("--albedo-map", default="",
                    help="lunar albedo map (2:1, 0 deg longitude centred, e.g. lroc_color_2k.jpg from NASA's CGI Moon "
                         "Kit) to guide the glare removal near the limb")
@@ -618,7 +619,7 @@ def cmd_earthshine(args) -> int:
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
                               brightness=args.brightness, limb_glare=not args.no_limb_glare,
                               limb_darkening=args.limb_darkening, edge_smooth=args.edge_smooth,
-                              limb_shape=not args.no_limb_shape, colour_limb=not args.no_colour_limb,
+                              limb_shape=not args.no_limb_shape, channel=args.channel,
                               albedo_map=args.albedo_map, albedo_strength=args.albedo_strength)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,
                         output=args.output, name=args.name, profile_dir=args.profile_dir,

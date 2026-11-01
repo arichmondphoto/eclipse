@@ -302,31 +302,26 @@ def test_limb_darkening_in_the_layer(run, tmp_path):
     assert 0.3 < edge / middle < 0.6  # about 40-50% of the middle near the limb
 
 
-def test_colour_blend_uses_the_blue_channel_by_the_limb():
-    """Red chromosphere glare by the limb that the blue channel does not have is replaced by the
-    blue channel's picture there (scaled to match); the middle keeps the all-channel picture."""
-    from tse_core.earthshine import colour_blend_limb
+def test_channel_choice_avoids_red_glare():
+    """Glare that is mostly red (chromosphere) by the limb: the automatic choice leaves red out."""
+    from tse_core.earthshine import EarthshineParams, choose_channel
 
-    n, r = 200, 90.0
+    n, r = 260, 110.0
     yy, xx = np.mgrid[0:n, 0:n]
-    rr = np.hypot(xx - 100, yy - 100)
-    good = rr < r - 2
+    rr = np.hypot(xx - 130, yy - 130)
+    phi = np.arctan2(yy - 130, xx - 130)
+    good = rr < r - 3
     surface = ndimage.gaussian_filter(np.random.default_rng(1).normal(0, 1, (n, n)), 6)
-    surface /= surface.std()
-    phi = np.arctan2(yy - 100, xx - 100)
-    red_glare = 3.0 * np.exp(-(r - rr) / 4) * (1 + np.cos(5 * phi))
-    detail = np.where(good, surface + red_glare / 3, 0).astype(np.float32)
-    blue = np.where(good, 0.7 * surface, 0).astype(np.float32)
-    out, k, corr = colour_blend_limb(detail, blue, good, rr, r)
-    assert k == pytest.approx(0.7, rel=0.1) and corr > 0.9
-    rim = good & (rr > r - 8)
-    assert np.abs(out - surface)[rim].mean() < 0.2 * np.abs(detail - surface)[rim].mean()
-    mid = rr < 0.5 * r
-    assert np.allclose(out[mid], detail[mid])
-    # Channels that do not agree: left alone.
-    out2, k2, corr2 = colour_blend_limb(detail, np.where(good, np.random.default_rng(2).normal(0, 1, (n, n)), 0)
-                                        .astype(np.float32), good, rr, r)
-    assert corr2 < 0.6 and out2 is detail
+    surface = 1e-3 * (1 + 0.1 * surface / surface.std())
+    d = np.clip(r - rr, 0, None)
+    pattern = 1 + 0.8 * np.cos(9 * phi) + 0.5 * np.sin(23 * phi)
+    red_glare = 2e-3 * np.exp(-d / 4) * pattern + 1e-3 * np.exp(-d / 12) * pattern
+    rng = np.random.default_rng(2)
+    rgb = np.stack([surface + red_glare + 0.2 * red_glare.mean(), surface, surface]) + rng.normal(0, 2e-6, (3, n, n))
+    rgb = np.where(good, rgb, 0).astype(np.float32)
+    name, scores = choose_channel(rgb, good, 130, 130, r, EarthshineParams())
+    assert name in ("green", "green+blue"), scores
+    assert scores["all"][0] > 2 * scores[name][0]
 
 
 def test_limb_falloff_keeps_a_mare_by_the_limb():

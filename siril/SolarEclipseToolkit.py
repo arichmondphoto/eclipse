@@ -1155,9 +1155,11 @@ class EarthshineTab(StepTab):
         self.limb_shape = QCheckBox("Keep maria by the limb (glare only fades inward)")
         self.limb_shape.setChecked(True)
         f.addRow(self.limb_shape)
-        self.colour_limb = QCheckBox("Use the blue channel near the limb")
-        self.colour_limb.setChecked(True)
-        f.addRow(self.colour_limb)
+        self.channel = QComboBox()
+        for label, key in (("Automatic", "auto"), ("Green", "green"), ("Green + blue", "green+blue"),
+                           ("All (average)", "all"), ("Blue", "blue")):
+            self.channel.addItem(label, key)
+        f.addRow("Colour channels:", self.channel)
         self.smooth = QDoubleSpinBox()
         self.smooth.setRange(0.0, 5.0)
         self.smooth.setSingleStep(0.5)
@@ -1289,10 +1291,11 @@ class EarthshineTab(StepTab):
         _tip(self.limb_shape, "Glare from just outside the Moon can only get fainter going inward, while a sea "
              "(mare) near the edge is a dark dip and highlands a bright bump. With this on, only light that "
              "fades inward is taken away around the edge, so seas near the limb such as Crisium survive.")
-        _tip(self.colour_limb, "Much of the glare that changes quickly around the edge comes from the pink "
-             "chromosphere and prominences, which are deep red. The blue channel has far less of it, so near "
-             "the limb the picture comes from blue (matched to the others), blending into all channels further "
-             "in. Turned off automatically if blue does not match the other channels.")
+        _tip(self.channel, "Which colour channels the earthshine is made from. Much of the glare that changes "
+             "quickly around the edge is deep red light from the pink chromosphere and prominences, and a colour "
+             "camera has twice as many green pixels, so green usually gives a cleaner Moon than the average of all "
+             "three. Automatic tries all, green and green + blue on your stack and picks the cleanest; the log "
+             "shows the scores.", f)
         _tip(self.glare, "How flexible the glare surface removed from the disc is (polynomial order). Glare from "
              "the corona is a gentle gradient, so 2 (default) is usually right. Higher removes uneven glare but "
              "also starts removing large maria; 1 removes a straight gradient only.", f)
@@ -1410,7 +1413,7 @@ class EarthshineTab(StepTab):
                                   smooth=self.smooth.value(), brightness=self.brightness.value(),
                                   limb_glare=self.limb_glare.isChecked(), limb_darkening=self.limb_dark.value(),
                                   edge_smooth=self.edge_smooth.value(), limb_shape=self.limb_shape.isChecked(),
-                                  colour_limb=self.colour_limb.isChecked(),
+                                  channel=self.channel.currentData(),
                                   albedo_map=self.albedo_path.text().strip(),
                                   albedo_strength=self.albedo_strength.value())
         inc = self.include_rejected.isChecked()

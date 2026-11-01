@@ -380,12 +380,15 @@ times the earthshine, is most detail flattened. Before that, in short arcs round
 (a sum of decaying exponentials with strengths of one sign) is fitted and
 taken away: glare can only fade inward, while a mare near the limb is a dip
 and highlands a bump, which such a fit cannot take (`--no-limb-shape` turns
-it off). Near the limb the picture comes from the blue channel, scaled to
-match the others and blended into all channels from 10% to 25% of the
-radius in: much of the glare that changes quickly round the limb is red
-light from the chromosphere and prominences (`--no-colour-limb`; skipped
-when blue does not match the other channels). `<name>_earthshine_rgb.fit`
-holds the stack per channel. `--no-limb-glare` turns all of the limb glare
+it off). The earthshine is made from the colour channels that suit the
+stack best (`--channel auto`): much of the glare that changes quickly round
+the limb is red light from the chromosphere and prominences, and a colour
+camera has twice as many green pixels, so all of green, green + blue and the
+average of all three are tried and the one with the weakest glare pattern
+3-6% of the radius inside the limb (and, among close ones, the least noise)
+is used. On the 2024 D850 stack green won: glare pattern 7.1 against 9.3
+for the average, noise 0.15 against 0.19 (both relative to the lunar
+contrast). `<name>_earthshine_rgb.fit` holds the stack per channel. `--no-limb-glare` turns all of the limb glare
 handling off.
 
 **Albedo map (optional).** `--albedo-map lroc_color_2k.jpg` (or **Albedo
@@ -400,7 +403,9 @@ used. It is blurred, scaled to your data and only subtracted while the glare
 is *estimated*; the glare estimate is then subtracted from your data, so
 nothing from the map is added to the picture. Where your data can tell the
 surface from glare, the map is first pulled towards your data, so a feature
-the map has and your Moon does not is mostly rejected. On simulations a
+the map has and your Moon does not is mostly rejected (not in the outer 5%
+of the radius, where that correction fed the glare back as a string of beads
+along the limb). On simulations a
 false mare 25 px inside the limb came through at about 15–20% of
 `--albedo-strength` (default 0.5), and not at all 45 px or more inside.
 

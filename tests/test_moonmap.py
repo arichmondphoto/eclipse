@@ -47,7 +47,7 @@ def sim():
     glare = 1e-3 * (12 * a * np.exp(-d / (0.02 * R)) + 3 * a * np.exp(-d / (0.1 * R)) + 0.3 * (1 + 0.3 * (xx - cx) / R))
     good = rr < R - 3
     img = np.where(good, surf + glare + rng.normal(0, 2e-5, (N, N)), 0).astype(np.float32)
-    p = ES.EarthshineParams(colour_limb=False, albedo_strength=1.0)
+    p = ES.EarthshineParams(albedo_strength=1.0)
     det0, _ = ES.remove_glare(img, good, cx, cy, R, p)
     return amap, img, good, cx, cy, rr, surf, p, det0
 
@@ -88,7 +88,7 @@ def test_map_recovers_maria_by_the_limb(sim):
     det, _ = ES.remove_glare_guided(img, good, cx, cy, R, p, prior)
     assert _near_limb_match(det, surf, good, rr) > base + 0.3
     # Half strength gives part of the gain.
-    half = ES.EarthshineParams(colour_limb=False, albedo_strength=0.5)
+    half = ES.EarthshineParams(albedo_strength=0.5)
     prior_h, *_ = ES.albedo_prior(amap, det0, good, cx, cy, R, half, TRUTH)
     det_h, _ = ES.remove_glare_guided(img, good, cx, cy, R, half, prior_h)
     assert base < _near_limb_match(det_h, surf, good, rr) < _near_limb_match(det, surf, good, rr)
@@ -147,10 +147,10 @@ def test_load_map_checks_shape(tmp_path):
 def test_process_disc_uses_the_map(sim):
     amap, img, good, cx, cy, rr, surf, p, det0 = sim
     weight = np.where(good, 1.0, 0.0).astype(np.float32)
-    q = ES.EarthshineParams(colour_limb=False, albedo_strength=1.0)
+    q = ES.EarthshineParams(albedo_strength=1.0)
     det, shown, snr, keep, notes = ES.process_disc(img, weight, good, cx, cy, R, q, albedo=amap)
     assert any(n.startswith("albedo map: rotation") for n in notes), notes
     assert _near_limb_match(det, surf, good, rr) > _near_limb_match(det0, surf, good, rr) + 0.3
-    off = ES.EarthshineParams(colour_limb=False, albedo_strength=0.0)
+    off = ES.EarthshineParams(albedo_strength=0.0)
     det_off, *_ = ES.process_disc(img, weight, good, cx, cy, R, off, albedo=amap)
     assert np.allclose(det_off, det0, atol=1e-7)
