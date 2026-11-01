@@ -745,17 +745,34 @@ def test_no_step_where_the_stacks_hand_over_outside_the_limb(tmp_path):
 
 def test_hdr_reliable_zone_is_measured_from_the_weights():
     """Where the HDR stack's corona is used from follows its weights (the Moon covering frames),
-    not a fixed number of pixels: 3 px at one scale, 8 px at a longer focal length."""
+    not a fixed number of pixels: 3 px at one scale, 8 px at a longer focal length, while the
+    weight keeps rising outwards (fewer long frames saturated as the corona fades)."""
     n, r = 600, 250.0
     yy, xx = np.mgrid[0:n, 0:n]
     rr = np.hypot(xx - n / 2, yy - n / 2)
     rng = np.random.default_rng(2)
+    d = rr - r
     for width in (3.0, 8.0):
-        d = rr - r
-        # Coverage: weight rising over ``width`` px; beyond it a gentle fall towards the limb
-        # from saturated long frames (not a sharp drop).
-        w = np.clip(d / width, 0, 1) ** 2 * (1 - 0.3 * np.exp(-np.clip(d, 0, None) / 30))
+        cover = np.clip((d + 0.5) / width, 0.02, 1) ** 2
+        w = cover * np.exp(np.clip(d, 0, None) / 25.0)  # x10 over ~60 px, as on the 2024 stack
         w = np.where(d > 0, w * rng.uniform(0.9, 1.1, w.shape), 0.0).astype(np.float32)
         edge = ES.hdr_reliable_from(w, rr, r)
         assert width - 1.5 <= edge <= width + 1.0, (width, edge)
     assert ES.hdr_reliable_from(np.ones((n, n), np.float32), rr, r) == 2.0
+
+
+def test_hdr_reliable_zone_on_the_2024_weights():
+    """The ring medians of the 2024 D850 HDR weights, 0-59 px outside the limb: the Moon's
+    coverage ends at about 3 px; the steady rise beyond (saturation) once gave 39 px."""
+    prof = [2.12, 9.24, 19.5, 27.1, 28.3, 29.1, 31.7, 30.4, 32.2, 32.3, 33.2, 33.8, 35, 37.7, 39.7, 41.8,
+            44.2, 46.2, 49.1, 50.8, 52.2, 53.6, 55, 57.5, 60.3, 63.5, 66.7, 69.9, 72.8, 76.2, 79.5, 81.9,
+            83.6, 85.6, 91.2, 99.5, 105, 113, 120, 127, 134, 142, 150, 154, 158, 160, 166, 176, 186, 196,
+            206, 218, 228, 240, 252, 262, 274, 278, 284, 289]
+    r = 435.9
+    n = 1100
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - n / 2, yy - n / 2)
+    d = rr - r
+    w = np.interp(d, np.arange(len(prof)) + 0.5, prof, left=0.0, right=prof[-1])
+    w = np.where(d > 0, w, 0.0).astype(np.float32)
+    assert 2.5 <= ES.hdr_reliable_from(w, rr, r) <= 4.0

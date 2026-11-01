@@ -1272,27 +1272,32 @@ def hdr_reliable_from(weight: np.ndarray, rr: np.ndarray, r: float, default: flo
     """How far outside the limb (px) the HDR stack's corona is reliable, from its own weights.
 
     Each frame gives no weight where its Moon (plus the stacking margin) covers the corona, and
-    the Moon moves during totality, so just outside the limb fewer frames go in: a sharp drop in
-    weight towards the limb, a few px wide at short focal lengths, more at long ones. Found as
-    the outermost 1 px ring whose median weight is under 80% of the most in the next few rings out
-    (the gentler fall from saturated long frames by the bright inner corona is not that sharp).
-    At least 2 px (the limb's own blur), at most 10% of the radius; ``default`` if it cannot tell.
+    the Moon moves during totality, so just outside the limb fewer frames go in: the weight
+    climbs steeply over the first few px. Further out it keeps rising, more gently, as the corona
+    fades and fewer long frames saturate (on the 2024 D850 stack 4-9% per px, x10 over 60 px).
+    Found as the outermost 1 px ring where the weight rises (in log) by over 0.1 per px and over
+    3x the rise a few rings further out. At least 2 px (the limb's own blur), at most 3% of the
+    radius; ``default`` if it cannot tell.
     """
-    reach = int(max(20, 0.1 * r))
-    k = int(max(5, round(0.01 * r)))
+    reach = int(max(15, 0.03 * r))
+    k = int(max(5, round(0.02 * r)))
     d = rr - r
-    m = (d >= 0) & (d < reach + k + 1) & np.isfinite(weight)
+    m = (d >= 0) & (d < reach + k + 3) & np.isfinite(weight)
     if m.sum() < 50 * (reach + k):
         return float(default)
     di = d[m].astype(int)
-    prof = np.asarray(ndimage.median(weight[m], di, index=np.arange(reach + k + 1)), np.float64)
+    prof = np.asarray(ndimage.median(weight[m], di, index=np.arange(reach + k + 3)), np.float64)
     prof = np.nan_to_num(prof, nan=0.0)
+    if (prof[reach:] <= 0).any():
+        return float(default)
+    lp = np.log(np.maximum(prof, 1e-30 * prof.max()))
+    slope = np.diff(lp)
     edge = 0
     for i in range(reach):
-        ref = float(np.max(prof[i + 1: i + 1 + k]))
-        if ref > 0 and prof[i] < 0.8 * ref:
+        trend = float(np.median(slope[i + 2: i + 2 + k]))
+        if slope[i] > max(0.1, 3.0 * trend):
             edge = i + 1
-    return float(np.clip(edge, 2.0, 0.1 * r))
+    return float(np.clip(edge, 2.0, 0.03 * r))
 
 
 def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.ndarray, es_weight: np.ndarray,

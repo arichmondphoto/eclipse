@@ -477,8 +477,11 @@ there, so the earthshine stack's own limb edge hands over to the HDR's
 corona continued inwards from where the HDR stack is reliable (switching
 from one stack to the other showed as a line round the limb). That distance
 is measured from the HDR stack's weights, not fixed: the outermost ring
-where the weight is still rising sharply towards the corona (the Moon
-covering frames as it moves), at least 2 px, at most 10% of the radius;
+where the weight still climbs steeply away from the limb (the Moon
+covering frames as it moves: a rise of over 0.1 in log per px and over 3x
+the rise a few rings further out, where the weight keeps rising more
+gently as fewer long frames saturate), at least 2 px, at most 3% of the
+radius (on the 2024 stack: 3 px);
 the log names it ("the HDR stack's corona is used from N px outside the
 limb"). It is wider at long focal lengths or small pixels. The fill inside
 the limb reaches 7% of the radius. By a bright
