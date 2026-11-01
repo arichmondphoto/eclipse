@@ -1192,6 +1192,9 @@ class EarthshineTab(StepTab):
         self.limb_glare = QCheckBox("Remove the bright glare along the limb")
         self.limb_glare.setChecked(True)
         f.addRow(self.limb_glare)
+        self.source_glare = QCheckBox("Remove the glare fanning out from a bright prominence")
+        self.source_glare.setChecked(True)
+        f.addRow(self.source_glare)
         self.limb_shape = QCheckBox("Keep maria by the limb (glare only fades inward)")
         self.limb_shape.setChecked(True)
         f.addRow(self.limb_shape)
@@ -1324,6 +1327,10 @@ class EarthshineTab(StepTab):
              "steeply, far faster than the glare surface above can follow. Left in, it shows as a bright ring "
              "inside the limb and leaves the middle of the Moon dark. Leave this on unless you want to see that "
              "raw glare.")
+        _tip(self.source_glare, "A bright prominence throws a fan of glare, with diffraction spikes, onto the "
+             "Moon. It is fitted from the prominence itself (a pattern of directions times a fall-off with "
+             "distance), which the lunar surface does not follow, and taken away. Off, the fan was covered with a "
+             "smooth patch instead.")
         _tip(self.albedo_path, "Optional: a map of the Moon's surface brightness, in the usual 2:1 world-map "
              "layout with 0 degrees longitude in the middle (for example lroc_color_2k.jpg from NASA's CGI Moon "
              "Kit, svs.gsfc.nasa.gov/4720). It helps tell maria near the limb from glare. It is turned to match your "
@@ -1476,7 +1483,8 @@ class EarthshineTab(StepTab):
 
         params = EarthshineParams(stops=self.stops.value(), glare_order=self.glare.value(),
                                   smooth=self.smooth.value(), brightness=self.brightness.value(),
-                                  limb_glare=self.limb_glare.isChecked(), limb_darkening=self.limb_dark.value(),
+                                  limb_glare=self.limb_glare.isChecked(),
+                                  source_glare=self.source_glare.isChecked(), limb_darkening=self.limb_dark.value(),
                                   vignette_shape=self.vignette_shape.value(),
                                   keep_glare=self.keep_glare.value(), limb_soften=self.limb_soften.value(),
                                   edge_grain=self.edge_grain.isChecked(), colour=self.colour.isChecked(),

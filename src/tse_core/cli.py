@@ -158,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="use frames within this many stops of the longest exposure (default 6)")
     p.add_argument("--no-limb-glare", action="store_true",
                    help="do not model the steep glare just inside the limb (shows as a bright rim)")
+    p.add_argument("--no-prominence-glare", action="store_true",
+                   help="do not fit and remove the fan of glare (and spikes) round a bright prominence")
     p.add_argument("--no-limb-shape", action="store_true",
                    help="do not fit the limb glare as light fading inward (that fit keeps maria by the limb)")
     p.add_argument("--channel", default="auto", choices=["auto", "all", "green", "green+blue", "blue"],
@@ -638,6 +640,7 @@ def cmd_earthshine(args) -> int:
 
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
                               brightness=args.brightness, limb_glare=not args.no_limb_glare,
+                              source_glare=not args.no_prominence_glare,
                               limb_darkening=args.limb_darkening, vignette_shape=args.vignette_shape,
                               keep_glare=args.keep_glare, limb_soften=args.limb_soften,
                               edge_grain=not args.no_edge_grain, colour=not args.no_colour,

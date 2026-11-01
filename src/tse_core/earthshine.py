@@ -50,6 +50,7 @@ class EarthshineParams:
     edge_smooth: float = 3.0  # most smoothing where the noise is high near the limb, px
     limb_glare: bool = True  # also model the steep glare just inside the limb
     limb_shape: bool = True  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
+    source_glare: bool = True  # glare round a bright prominence (a fan with diffraction spikes), fitted from the prominence
     channel: str = "auto"  # colour channels to use: auto, all, green, green+blue, blue
     albedo_map: str = ""  # lunar albedo map (equirectangular, 0 deg longitude centred) to guide the glare removal
     albedo_strength: float = 0.5  # how much the map guides it, 0..1 (only used with a map)
@@ -211,6 +212,123 @@ def limb_background(lum: np.ndarray, glare: np.ndarray, good: np.ndarray, cx: fl
     fade = 0.5 - 0.5 * np.cos(math.pi * fade)
     out[sel] = 1.0 + (v - 1.0) * fade
     return out
+
+
+def _decreasing(y: np.ndarray, w: np.ndarray) -> np.ndarray:
+    """Weighted least-squares fit of a non-increasing sequence (pool adjacent violators)."""
+    vals, wts, lens = [], [], []
+    for yi, wi in zip(y.tolist(), np.maximum(w, 1e-30).tolist()):
+        vals.append(yi), wts.append(wi), lens.append(1)
+        while len(vals) > 1 and vals[-2] < vals[-1]:
+            v2, w2, l2 = vals.pop(), wts.pop(), lens.pop()
+            vals[-1] = (vals[-1] * wts[-1] + v2 * w2) / (wts[-1] + w2)
+            wts[-1] += w2
+            lens[-1] += l2
+    return np.repeat(vals, lens).astype(np.float64)
+
+
+def _source_glare(detail: np.ndarray, use: np.ndarray, sx: float, sy: float, inward: float, reach: float,
+                  dth: float = 0.5, dl: float = 0.04, iters: int = 30) -> np.ndarray:
+    """Glare round one bright source on the limb, as seen from the source itself.
+
+    In polar coordinates about the source (distance rho, direction theta) its glare, diffraction
+    spikes included, is a fan: an angular pattern a(theta) times a fall-off f(rho) shared by
+    every direction. The lunar surface does not follow that pattern, so a robust rank-1 fit of
+    the residual in (log rho, theta) takes the fan and leaves the maria. Returns the fan.
+    """
+    h, w = detail.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    rho = np.hypot(xx - sx, yy - sy)
+    th = np.degrees(np.arctan2(yy - sy, xx - sx))
+    dev = (th - inward + 180.0) % 360.0 - 180.0  # direction relative to straight into the disc
+    near = (rho > 2.0) & (rho < reach) & (np.abs(dev) < 90.0)
+    li = (np.log(np.maximum(rho, 2.0) / 2.0) / dl).astype(int)
+    ti = ((dev + 90.0) / dth).astype(int)
+    nl, nt = int(math.log(reach / 2.0) / dl) + 1, int(180.0 / dth) + 1
+    li, ti = np.clip(li, 0, nl - 1), np.clip(ti, 0, nt - 1)
+    m = use & near
+    lab = li * nt + ti
+    cnt = np.bincount(lab[m], minlength=nl * nt).reshape(nl, nt).astype(np.float64)
+    tot = np.bincount(lab[m], weights=detail[m].astype(np.float64), minlength=nl * nt).reshape(nl, nt)
+    g = tot / np.maximum(cnt, 1.0)
+    # Each bin counts the same (bins far out hold many more pixels, and more of the surface).
+    base = (cnt > 0).astype(np.float64)
+    wgt = base.copy()
+    f = np.sqrt(np.maximum((wgt * g * g).sum(axis=1), 1e-30))
+    a = np.zeros(nt)
+    for _ in range(iters):
+        a = (wgt * f[:, None] * g).sum(axis=0) / np.maximum((wgt * f[:, None] ** 2).sum(axis=0), 1e-30)
+        a = ndimage.uniform_filter1d(a, 3, mode="nearest")
+        fw = (wgt * a[None] ** 2).sum(axis=1)
+        f = (wgt * a[None] * g).sum(axis=1) / np.maximum(fw, 1e-30)
+        # Glare only fades with distance from its source: a mare crossing the fan cannot put a
+        # dip into the fall-off (which every direction shares).
+        if f[: max(3, nl // 10)].mean() < 0:
+            f, a = -f, -a
+        f = _decreasing(np.maximum(f, 0.0), fw)
+        res = g - np.outer(f, a)
+        sc = 1.4826 * float(np.median(np.abs(res[cnt > 0]))) + 1e-30
+        wgt = base / (1.0 + (res / (3.0 * sc)) ** 2)  # maria and noise count less
+    # Read back between bin centres (the fall-off is steep near the source).
+    lf = np.log(np.maximum(rho, 2.0) / 2.0) / dl - 0.5
+    tf = (dev + 90.0) / dth - 0.5
+    model = np.interp(lf, np.arange(nl), f) * np.interp(tf, np.arange(nt), a)
+    fade = np.clip((reach - rho) / (0.3 * reach), 0.0, 1.0) * np.clip((90.0 - np.abs(dev)) / 3.0, 0.0, 1.0)
+    return np.where(near, model * fade, 0.0).astype(np.float32)
+
+
+def source_glare(detail: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, margin: float,
+                 reach: float = 0.35, max_sources: int = 4, strength: float = 3.0, passes: int = 1):
+    """Glare from bright prominences, which the limb terms (smooth round the limb) cannot follow.
+
+    A source is where the residual just inside the limb stands well above the range of the
+    lunar surface (``strength`` x its 1-99 % spread, both smoothed by 3 px). Each is fitted by
+    :func:`_source_glare`, brightest first. Returns (glare, list of source angles in degrees).
+    """
+    h, w = detail.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - cx, yy - cy)
+    phi = np.degrees(np.arctan2(yy - cy, xx - cx))
+    use = good & (rr < r - max(margin, 0.025 * r))
+    body = good & (rr < 0.8 * r)
+    total = np.zeros((h, w), np.float32)
+    found = []
+    if body.sum() < 100 or use.sum() < 100:
+        return total, found
+    den = np.maximum(ndimage.gaussian_filter(use.astype(np.float32), 3.0), 1e-6)
+    band = use & (rr > r - max(margin, 0.025 * r) - 0.07 * r)
+    nb = 720
+    ib = (((phi + 180.0) / 360.0) * nb).astype(int) % nb
+    res = detail.astype(np.float32)
+    for _ in range(max_sources):
+        sm = ndimage.gaussian_filter(np.where(use, res, 0.0), 3.0) / den
+        p1, p99 = np.percentile(sm[body], [1, 99])
+        prof = np.asarray(ndimage.maximum(np.where(band, sm, -np.inf), np.where(band, ib, -1), index=np.arange(nb)))
+        for a0 in found:  # one fit per source
+            prof[np.abs(((np.arange(nb) + 0.5) / nb * 360.0 - 180.0 - a0 + 180.0) % 360.0 - 180.0) < 6.0] = -np.inf
+        k = int(np.argmax(prof))
+        if not np.isfinite(prof[k]) or prof[k] < p99 + strength * (p99 - p1):
+            break
+        peak = (k + 0.5) / nb * 360.0 - 180.0
+        # The brightest side of the fan is not where the source is: try nearby places on the
+        # limb (and just outside it) and keep the one whose fan leaves the least behind.
+        best = None
+        for ang in peak + np.arange(-2.0, 2.01, 0.5):
+            for out in (0.0, 0.01 * r):
+                sx, sy = cx + (r + out) * math.cos(math.radians(ang)), cy + (r + out) * math.sin(math.radians(ang))
+                left, g = res, np.zeros_like(total)
+                for _ in range(passes):  # each pass a further rank-1 term (spikes fade unlike the halo)
+                    gi = _source_glare(left, use, sx, sy, ang + 180.0, reach * r)
+                    left, g = left - gi, g + gi
+                zone = use & (np.hypot(xx - sx, yy - sy) < 0.12 * r)
+                cost = float(np.mean(np.abs(left[zone]))) if zone.any() else np.inf
+                if best is None or cost < best[0]:
+                    best = (cost, float(ang), g)
+        _, ang, g = best
+        res = res - g
+        total += g
+        found.append(ang)
+    return total, found
 
 
 def limb_profile(rho: np.ndarray, darkening: float, shape: float = 1.5) -> np.ndarray:
@@ -505,6 +623,13 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
             detail, glare = remove_glare_guided(lum, good, cx, cy, moon_r, p, prior)
         else:
             orientation = None
+    if p.limb_glare and p.source_glare:
+        extra, angles = source_glare(detail, good, cx, cy, moon_r, p.margin_px)
+        if angles:
+            detail = np.where(good, detail - extra, 0.0).astype(np.float32)
+            glare = glare + extra
+            notes.append("glare round a bright prominence taken away at " +
+                         ", ".join(f"{(a + 360) % 360:.0f}" for a in angles) + " deg")
     # Noise from the stack weights (inverse variances up to one factor), measured on fine scales.
     gm = good.astype(np.float32)
     local = ndimage.gaussian_filter(detail, 1.0) / np.maximum(ndimage.gaussian_filter(gm, 1.0), 1e-6)

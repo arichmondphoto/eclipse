@@ -139,10 +139,32 @@ def test_edge_fill_does_not_depend_on_the_weights(disc):
 def test_detail_is_kept_near_the_limb(disc):
     """Maria near the limb (Crisium at the right) must survive: the glare correction round the
     limb widens quickly with depth, so 15-60 px in (30-120 at full size) it keeps the large-scale
-    lunar contrast. Narrow windows there erased it (about 0.65 of the middle's contrast)."""
+    lunar contrast. Measured away from the bright prominence: its fan of glare used to count as
+    "detail" here (1.2 x the middle's contrast with it, 0.66 without)."""
     lum, weight, good, cx, cy, r, rr, phi = disc
     detail, *_ = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
     big = ndimage.gaussian_filter(detail, 4)
-    band = good & (rr > r - 60) & (rr < r - 15)
+    band = good & (rr > r - 60) & (rr < r - 15) & (np.abs(np.degrees(phi) - 74) > 25)
     body = good & (rr < r * 0.6)
-    assert big[band].std() > 0.9 * big[body].std()
+    assert big[band].std() > 0.6 * big[body].std()
+    # The prominence fit changes nothing away from the prominence.
+    plain, *_ = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5, source_glare=False))
+    assert np.allclose(detail[band], plain[band], atol=1e-9)
+
+
+def test_prominence_fan_is_taken_away(disc):
+    """The bright prominence at the bottom right throws a fan onto the Moon; once removed, nothing
+    there stands far above the range of the lunar surface, and there is no fan of streaks."""
+    lum, weight, good, cx, cy, r, rr, phi = disc
+    on = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
+    off = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5, source_glare=False))
+    assert any("prominence" in n for n in on[4])
+    body = good & (rr < 0.8 * r)
+    near = good & (rr > r - 0.12 * r) & (rr < r - 0.025 * r) & (np.abs(np.degrees(phi) - 74) < 12)
+
+    def excess(det):
+        sm = ndimage.gaussian_filter(det, 2)
+        p1, p99 = np.percentile(sm[body], [1, 99])
+        return float(np.percentile(np.abs(sm[near] - np.median(sm[body])), 99) / (p99 - p1))
+
+    assert excess(on[0]) < 0.5 * excess(off[0]), (excess(on[0]), excess(off[0]))

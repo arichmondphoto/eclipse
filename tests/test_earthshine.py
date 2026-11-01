@@ -1,11 +1,14 @@
 """Earthshine: a Moon-aligned stack recovers the lunar surface that a corona-aligned one blurs."""
 
+import math
 from pathlib import Path
+
 
 import numpy as np
 import pytest
 from scipy import ndimage
 
+from tse_core import earthshine as ES
 from tse_core.earthshine import EarthshineParams, glare_surface, moon_aligned, stack_earthshine
 from tse_core.stack import FrameInfo, Match
 from tse_core.synthetic import SyntheticScene
@@ -625,3 +628,38 @@ def test_saturated_prominence_core_is_not_white(tmp_path):
     m = core & (rr < r)
     red = np.median(img[m][:, 0] / np.maximum(img[m][:, 1], 1e-3))
     assert red > 1.1, red
+
+
+def test_prominence_fan_is_removed_and_maria_kept():
+    """A bright prominence on the limb throws a fan of glare with diffraction spikes onto the
+    Moon. It is found, fitted from the prominence and taken away; a mare inside the fan stays."""
+    n, r = 400, 170.0
+    cx = cy = n / 2 - 0.3
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - cx, yy - cy)
+    good = rr < r - 3
+    ang = math.radians(60.0)
+    sx, sy = cx + r * math.cos(ang), cy + r * math.sin(ang)
+    rho = np.maximum(np.hypot(xx - sx, yy - sy), 2.0)
+    th = np.arctan2(yy - sy, xx - sx)
+    spikes = 1 + 0.8 * np.cos(6 * th) ** 8  # six diffraction spikes
+    fan = 4e-3 * spikes * (rho / 4) ** -1.2 * np.exp(-rho / 30)  # fades within ~0.3 radius
+    mare_c = (cx + 135 * math.cos(ang), cy + 135 * math.sin(ang))  # 35 px in, inside the fan
+    mare = -6e-5 * np.exp(-((xx - mare_c[0]) ** 2 + (yy - mare_c[1]) ** 2) / (2 * 12.0**2))
+    rng = np.random.default_rng(5)
+    detail = np.where(good, fan + mare + 2e-5 * rng.normal(0, 1, (n, n)), 0).astype(np.float32)
+    g, angles = ES.source_glare(detail, good, cx, cy, r, 3.0)
+    assert len(angles) == 1 and abs(angles[0] - 60.0) < 2.5, angles
+    left = detail - g
+    zone = good & (rho > 12) & (rho < 40)
+    before = np.std(ndimage.gaussian_filter(np.where(good, fan, 0), 2)[zone])
+    after = np.std(ndimage.gaussian_filter(left - mare, 2)[zone])
+    assert after < 0.15 * before, (after, before)
+    # The mare survives (its depth at the centre, against its surroundings 30-40 px away).
+    dm = np.hypot(xx - mare_c[0], yy - mare_c[1])
+    depth = left[dm < 4].mean() - left[(dm > 30) & (dm < 40) & good].mean()
+    assert depth < -0.8 * 6e-5 * (1 - math.exp(-35**2 / 288)), depth  # at least 80% of it
+    # No source: nothing found, nothing taken away.
+    quiet = np.where(good, mare + 2e-5 * rng.normal(0, 1, (n, n)), 0).astype(np.float32)
+    g0, a0 = ES.source_glare(quiet, good, cx, cy, r, 3.0)
+    assert a0 == [] and not g0.any()

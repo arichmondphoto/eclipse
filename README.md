@@ -391,6 +391,18 @@ for the average, noise 0.15 against 0.19 (both relative to the lunar
 contrast). `<name>_earthshine_rgb.fit` holds the stack per channel. `--no-limb-glare` turns all of the limb glare
 handling off.
 
+**Glare round a bright prominence.** A bright prominence throws a fan of
+glare onto the Moon, with diffraction spikes, centred on the prominence
+rather than on the Moon, so the limb terms (smooth round the limb) leave a
+bright fan with dark streaks beside it. Where the residual just inside the
+limb stands well above the range of the lunar surface, the fan is fitted in
+polar coordinates about the prominence: a pattern of directions times a
+fall-off with distance (two such terms, fitted robustly), which the maria do
+not follow. The prominence's place on the limb is searched within 2 degrees
+for the fit that leaves least behind. On the 2024 stack this removed the fan
+at 74 degrees; before, it was covered by a smooth lighter patch.
+`--no-prominence-glare` (or the checkbox on the tab) turns it off.
+
 **Albedo map (optional).** `--albedo-map lroc_color_2k.jpg` (or **Albedo
 map** on the Earthshine tab) uses a map of the Moon's surface brightness to
 help tell maria near the limb from glare. Any 2:1 equirectangular map with
