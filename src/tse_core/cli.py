@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("folder", help="the folder of light frames, or a project folder holding lights/ (and "
                                   "optionally darks/, flats/, bias/); with a project folder the project file "
                                   "and every result go in it")
-    p.add_argument("--recursive", action="store_true")
+    p.add_argument("--recursive", action="store_true", help="also read sub-folders")
     p.add_argument("--csv", help="write the frame table to this CSV file")
     p.add_argument("--project", help="create or update this project file (.json)")
     p.add_argument("--lens", help="force this lensfun lens profile")
@@ -52,22 +52,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lens", help="lens name to store, if the files do not say")
     p.add_argument("--focal", type=float, help="focal length to store, if the files do not say")
     p.add_argument("--aperture", type=float, help="aperture to store, if the files do not say")
-    p.add_argument("--lensfun-db")
+    p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
 
     p = sub.add_parser("lens", help="find a lensfun profile and show its vignetting")
-    p.add_argument("name", nargs="?", default="")
-    p.add_argument("--focal", type=float, required=True)
-    p.add_argument("--aperture", type=float, required=True)
+    p.add_argument("name", nargs="?", default="", help="lens name or part of it (empty: list the lenses lensfun knows)")
+    p.add_argument("--focal", type=float, required=True, help="focal length, mm")
+    p.add_argument("--aperture", type=float, required=True, help="f-number")
     p.add_argument("--crop", type=float, default=1.0, help="camera crop factor (1.0 = full frame)")
-    p.add_argument("--lensfun-db")
+    p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
 
     p = sub.add_parser("lensfun-update", help="download the lensfun database from GitHub")
-    p.add_argument("--dest")
+    p.add_argument("--dest", help="folder to put the database in (default: the toolkit's own data folder)")
     p.add_argument("--from", dest="source", help="install from a downloaded lensfun .zip or a folder instead")
 
     p = sub.add_parser("frame", help="show everything read from one RAW file (for troubleshooting)")
-    p.add_argument("file")
-    p.add_argument("--lensfun-db")
+    p.add_argument("file", help="one RAW file")
+    p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
 
     p = sub.add_parser("eclipse", help="eclipse circumstances (contacts, duration) for a site")
     p.add_argument("--date", required=True, help="eclipse date, e.g. 2024-04-08")
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--elements", help="JSON file with Besselian elements for other eclipses")
 
     p = sub.add_parser("frames", help="list a project's frames, or exclude / include some")
-    p.add_argument("project")
+    p.add_argument("project", help="the project file (.json)")
     p.add_argument("--exclude", nargs="+", metavar="FILE", help="leave these frames out (file names)")
     p.add_argument("--include", nargs="+", metavar="FILE", help="use these frames again")
 
@@ -104,8 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--rho", type=float, help="tangential filter length in superpixels (default: from the Sun's size)")
     p.add_argument("--output", "-o", help="alignment results file (default: next to the project)")
     p.add_argument("--profile-dir", help="folder of saved own-flats profiles")
-    p.add_argument("--lensfun-db")
-    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
+    p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     p = sub.add_parser("stack", help="merge the aligned frames into one linear HDR image")
     p.add_argument("project", help="project file (run 'totality align' on it first)")
@@ -123,8 +123,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="also stack frames the Sun-centre fit flagged as off the Moon's track")
     p.add_argument("--no-hot-pixels", action="store_true", help="skip the hot-pixel correction")
     p.add_argument("--profile-dir", help="folder of saved own-flats profiles")
-    p.add_argument("--lensfun-db")
-    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
+    p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     p = sub.add_parser("enhance", help="reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend")
     p.add_argument("project", help="project file (run 'totality stack' on it first)")
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="picture type: 16-bit TIFF (default), 16-bit PNG or 8-bit JPG; all 300 dpi")
     p.add_argument("--keep-sky", "--keep-background-colour", dest="keep_background_colour", action="store_true",
                    help="do not model and remove the sky background (level, colour and gradient)")
-    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     p = sub.add_parser("earthshine", help="Moon-aligned stack of the long exposures: a layer for the black lunar disc")
     p.add_argument("project", help="project file (run 'totality stack' on it first)")
@@ -191,17 +191,17 @@ def main(argv: list[str] | None = None) -> int:
                         "middle, 3 = the middle stays bright longer")
     p.add_argument("--edge-smooth", type=float, default=3.0,
                    help="most smoothing of the noisier pixels near the limb, px (default 3)")
-    p.add_argument("--include-rejected", action="store_true")
+    p.add_argument("--include-rejected", action="store_true", help="also use frames marked as rejected")
     p.add_argument("--output", "-o", help="output folder (default: next to the project)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--format", choices=["tif", "png", "jpg"], default="tif",
                    help="picture type: 16-bit TIFF (default), 16-bit PNG or 8-bit JPG; all 300 dpi")
-    p.add_argument("--profile-dir")
-    p.add_argument("--lensfun-db")
-    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--profile-dir", help="folder of saved own-flats profiles (default: your profile library)")
+    p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
+    p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     p = sub.add_parser("final", help="the finished image: Moon and corona stretched together from the stacks")
-    p.add_argument("project")
+    p.add_argument("project", help="the project file (.json)")
     p.add_argument("--paste", action="store_true",
                    help="the older way: paste the earthshine layer into an enhanced layer with a blend mode "
                         "(needed with --base-file)")
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"], help="blend mode (default screen)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <name>_final.tif")
-    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     p = sub.add_parser("prominences", help="find the prominences and write them as a layer (transparent elsewhere)")
     p.add_argument("project", help="project file (run 'totality stack' on it first)")
@@ -226,13 +226,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-chromosphere", action="store_true", help="leave out the thin pink rim along the limb")
     p.add_argument("--chromosphere-arcsec", type=float, default=12.0,
                    help="height of the rim left out by --no-chromosphere, arcsec (default 12)")
-    p.add_argument("--brightness", type=float, default=1.0)
-    p.add_argument("--saturation", type=float, default=1.2)
+    p.add_argument("--brightness", type=float, default=1.0, help="brightness of the layer (1 = as measured)")
+    p.add_argument("--saturation", type=float, default=1.2, help="colour saturation of the layer (1 = as measured)")
     p.add_argument("--output", "-o", help="layer file (.tif, .png or .jpg); default <project>_prominences.tif")
-    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     p = sub.add_parser("final-prominences", help="put the prominence layer on top of the final image")
-    p.add_argument("project")
+    p.add_argument("project", help="the project file (.json)")
     p.add_argument("--base", default="final", choices=["final", "blend", "natural"],
                    help="final: the image from 'totality final' (default); blend or natural: the last-written layer")
     p.add_argument("--base-file", help="put them on this image instead (the size of the HDR stack)")
@@ -240,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mode", default="normal", choices=["normal", "screen", "lighten"],
                    help="normal (default) keeps their colour over the bright inner corona")
     p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <project>_final_prominences.tif")
-    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     sub.add_parser("doctor", help="show which optional readers are available")
 

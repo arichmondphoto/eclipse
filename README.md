@@ -25,7 +25,7 @@ elements for any eclipse from 1600 to 2400.
 | 2 Align | Lunar limb, phase correlation alignment, field rotation, the Sun's centre | done |
 | 3 Stack | Moon-aware linear HDR stacking with measured brightness matching | done |
 | 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N and adaptive layers; Soft Light / Overlay blend | done |
-| 5 Earthshine | Moon-aligned stack of the long exposures; blended into the picture | done (synthetic tests only so far) |
+| 5 Earthshine | Moon-aligned stack of the long exposures; glare removed; the Moon put into the HDR stack and stretched with the corona | done (checked on the 2024 data) |
 | 6 Prominences | Found by colour at the limb; transparent layer put on top | done (checked on a reduced copy of real data) |
 
 Each step works in the Siril window and on the command line. Tested on the
@@ -39,7 +39,8 @@ systems before sharing the tool more widely.
 2. **Align:** enter the site; the frames are aligned and the Sun's centre found.
 3. **Stack:** the frames are merged into one linear 32-bit HDR image.
 4. **Enhance:** tune the layers in a live preview, then write them full size.
-5. **Earthshine:** stack the Moon and blend it into the picture.
+5. **Earthshine:** stack the Moon, then write the final image: the Moon put
+   into the HDR stack and stretched together with the corona.
 6. **Prominences:** pick out the prominences and put them on top.
 
 Then finish in Photoshop (or not: steps 5 and 6 write a finished picture).
@@ -94,6 +95,11 @@ totality elements-update --from ~/Downloads/eclipse_besselian_from_mysqldump2.cs
 
 The script finds the core package in `../src`, so keep the folders together.
 
+To update, pull the repository (`git pull`) and run the script again. The
+window title shows the version and the commit it is running (for example
+`Solar Eclipse Toolkit 0.1.0 (8e54fa8)`), so you can check an update took
+effect.
+
 The window has one tab per step, and each step saves into the project file:
 
 | Tab | What you do | What you see |
@@ -102,7 +108,7 @@ The window has one tab per step, and each step saves into the project file:
 | 2 Align | Enter the site (latitude, longitude, elevation), the camera time zone and clock error if known; choose the rotation model | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep | The stacked preview and each frame's measured brightness |
 | 4 Enhance | Layers to write; each layer's blend strength and Soft Light or Overlay; flatten, saturation, white balance, sky removal; FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
-| 5 Earthshine | Frames to use, glare removal, smoothing; then the corona image (last-written blend, natural layer or a file), strength and blend mode | The Moon close up, then a preview of the picture; **Write final image** |
+| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
 Every setting has hover help explaining what it does and when to change it.
@@ -158,7 +164,8 @@ totality prominences "$P"
 totality final-prominences "$P" -o "Eclipse 2024/finished.png"
 ```
 
-`totality <command> --help` lists every option. More examples:
+`totality <command> --help` lists every option (all of them are also in the
+*Command-line reference* below). More examples:
 
 ```bash
 totality inventory "D:/Eclipse 2024/RAW" --project eclipse2024.json --csv frames.csv
@@ -414,9 +421,11 @@ rather than on the Moon, so the limb terms (smooth round the limb) leave a
 bright fan with dark streaks beside it. Where the residual just inside the
 limb stands well above the range of the lunar surface, the fan is fitted in
 polar coordinates about the prominence: a pattern of directions times a
-fall-off with distance (two such terms, fitted robustly), which the maria do
-not follow. The prominence's place on the limb is searched within 2 degrees
-for the fit that leaves least behind. On the 2024 stack this removed the fan
+fall-off with distance shared by every direction (fitted robustly, the
+fall-off only allowed to decrease, so a mare in the fan is not taken for
+glare), which the maria do not follow. The prominence's place on the limb
+(on it or just outside) is searched within 2 degrees for the fit that leaves
+least behind. Up to four such sources are fitted, brightest first. On the 2024 stack this removed the fan
 at 74 degrees; before, it was covered by a smooth lighter patch.
 `--no-prominence-glare` (or the checkbox on the tab) turns it off.
 
@@ -483,42 +492,57 @@ next to the linear stack.
 | `<name>_earthshine.tif` | layer the size of the HDR stack: the lunar surface inside the disc, black outside, so it drops into the corona layers' black disc (Screen or Lighten mode); `--format png|jpg` for another type |
 | `<name>_earthshine_crop.tif` | the same, cropped to the Moon |
 | `<name>_earthshine.fit` | the Moon-aligned linear stack before glare removal |
+| `<name>_earthshine_rgb.fit` | the same, per colour channel (used by the final image) |
+| `<name>_earthshine_weight.fit` | the stack weights (how much went into each pixel) |
+| `<name>_moon_surface.fit` | the seas and highlands, glare removed, as added to the final image (RGB and where to show them) |
+| `<name>_earthshine.json` | where the crop sits, the Moon's centre and radius, and the settings used |
 
 **The final image: Moon and corona stretched together.** `totality final
 eclipse2024.json` (or **Final image** on the Earthshine tab, with a preview)
 puts the Moon-aligned earthshine stack, linear and in the same units, into
-the HDR stack inside the lunar disc (registered on the limb). Just outside
-the limb neither stack is used as it is: the earthshine stack's corona is
-smeared (it is aligned on the Moon) and the HDR stack's holds few frames
-there, so the earthshine stack's own limb edge hands over to the HDR's
-corona continued inwards from where the HDR stack is reliable (switching
-from one stack to the other showed as a line round the limb). That distance
-is measured from the HDR stack's weights, not fixed: the outermost ring
-where the weight still climbs steeply away from the limb (the Moon
-covering frames as it moves: a rise of over 0.1 in log per px and over 3x
-the rise a few rings further out, where the weight keeps rising more
-gently as fewer long frames saturate), at least 2 px, at most 3% of the
-radius (on the 2024 stack: 3 px);
-the log names it ("the HDR stack's corona is used from N px outside the
-limb"). It is wider at long focal lengths or small pixels. The fill inside
-the limb reaches 7% of the radius. By a bright
-prominence the long earthshine frames saturate, so towards it ever fewer
-frames are usable and the last are near full well: there (under 40% of the
-usual frames, fully below 10%) the light is interpolated along each radius in
-log brightness, from the last well-exposed earthshine pixel to the limb,
-where it takes the corona at the start of the HDR's reliable zone times the drop across the limb seen in the
-nearest good directions. Spreading it sideways from neighbours, as before,
-left a ragged dark-red fringe. The settings of
+the HDR stack inside the lunar disc, registered on the limb. The settings of
 your last Enhance run then stretch Moon and corona together, so the limb is
 the stack's own: one curve, one colour treatment, no seam. A prominence is
 the same red on both sides of the limb, and nothing at the limb is cut,
-pasted, softened or matched. The filter layers (NRGF, FNRGF, adaptive) have
-no data on the Moon, so in the blend they fade out over the 4 px outside
-the limb. The seas and highlands (glare removed, from
-`<name>_moon_surface.fit`) are added inside with screen at `--strength`
-(1 = as made by the earthshine step), so near the limb, where the Moon's own
-stretched light is brighter, that light wins. `--base natural` uses the
-natural layer instead of the blend. Writes `<name>_final.tif` (or `-o`).
+pasted, softened or matched. It needs the files the Earthshine step writes
+now (`_earthshine_rgb.fit`, `_moon_surface.fit`); with older ones it asks
+you to stack the earthshine again. Enhance does not need running again.
+
+* *Where the two stacks meet.* Just outside the limb neither stack is used as
+  it is: the earthshine stack's corona is smeared (it is aligned on the Moon)
+  and the HDR stack's holds few frames there (the Moon covered it part of the
+  time). The earthshine stack's own limb edge hands over to the HDR's corona,
+  continued inwards from where the HDR stack is reliable; switching from one
+  stack to the other showed as a line round the limb. That distance is
+  measured from the HDR stack's weights, not fixed: the outermost ring where
+  the weight still climbs steeply away from the limb (a rise of over 0.1 in
+  log per px and over 3x the rise a few rings further out; further out the
+  weight keeps rising more gently as fewer long frames saturate), at least
+  2 px, at most 3% of the radius (on the 2024 stack: 3 px). The log names it
+  ("the HDR stack's corona is used from N px outside the limb"). It is wider
+  at long focal lengths or small pixels.
+* *By a bright prominence.* The long earthshine frames saturate, so towards
+  it ever fewer frames are usable and the last are near full well. Below 40%
+  of the usual number of frames (fully below 10%) the light is interpolated
+  along each radius in log brightness, from the last well-exposed earthshine
+  pixel to the limb, where it takes the HDR's corona times the drop across
+  the limb seen in the nearest good directions (reaching up to 7% of the
+  radius inside). Spreading it sideways from neighbours left a ragged
+  dark-red fringe; the stack's own one-frame Moon, clipped white there, is
+  never used.
+* *Noise and colour.* The two stacks' weights are in different units; each
+  is turned into a noise level from its own pixel scatter, so the stretch
+  knows how good the Moon's pixels are. (With the HDR's one-frame weights the
+  colour inside the limb was faded to grey as if it were noise.)
+* *Filter layers.* NRGF, FNRGF and adaptive have no data on the Moon, so in
+  the blend they fade out over the 4 px outside the limb.
+* *The lunar surface.* The seas and highlands (glare removed, from
+  `<name>_moon_surface.fit`) are added inside with screen at `--strength`
+  (1 = as made by the earthshine step), so near the limb, where the Moon's
+  own stretched light is brighter, that light wins.
+
+`--base natural` uses the natural layer instead of the blend. Writes
+`<name>_final.tif` (or `-o`).
 
 The older way, pasting the earthshine layer (`<name>_earthshine.tif`, still
 written for Photoshop) into any image with a blend mode, is `--paste` or
@@ -605,6 +629,261 @@ corrects any camera with the same lens, so one set of flats serves both a
 D800 and a D850. `totality inventory` then picks it up automatically. A FITS
 master flat stacked in Siril can be used instead of RAW flats.
 
+## Command-line reference
+
+Every option of every command, as `totality <command> --help` gives it.
+Generated from the program by `python tools/cli_reference.py`; a test checks it is current.
+
+<!-- cli-reference:start -->
+### `totality inventory`
+
+read every RAW file in a folder and report brackets and calibration.
+
+| Option | What it does |
+| --- | --- |
+| `folder` | the folder of light frames, or a project folder holding lights/ (and optionally darks/, flats/, bias/); with a project folder the project file and every result go in it |
+| `--recursive` | also read sub-folders |
+| `--csv` | write the frame table to this CSV file |
+| `--project` | create or update this project file (.json) |
+| `--lens` | force this lensfun lens profile |
+| `--no-exiftool` | do not use exiftool even if installed |
+| `--c2` | second contact, e.g. 2024-04-08T13:47:33 (camera time, or true time with --clock-offset) |
+| `--c3` | third contact |
+| `--clock-offset` | add this to the camera clock to get true time, e.g. +1:04:08, -45s, 1h |
+| `--bias` | folder of bias frames |
+| `--darks` | folder of dark frames |
+| `--flats` | folder of flat frames |
+| `--lensfun-db` | folder holding lensfun XML files |
+| `--profile` | use this own-flats vignetting profile (.json) for every frame |
+| `--profile-dir` | folder of saved own-flats profiles (default: your profile library) |
+
+### `totality flat-profile`
+
+fit a smooth vignetting profile from your own flat frames.
+
+| Option | What it does |
+| --- | --- |
+| `source` | folder of RAW flats, or a FITS master flat |
+| `--name` | a name for the profile |
+| `--output`, `-o` | save to this .json file instead of the profile library |
+| `--block` | block size in pixels for the fit (default 32) |
+| `--crop` | crop factor of the camera that took the flats (default: from lensfun, else 1.0) |
+| `--lens` | lens name to store, if the files do not say |
+| `--focal` | focal length to store, if the files do not say |
+| `--aperture` | aperture to store, if the files do not say |
+| `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
+
+### `totality lens`
+
+find a lensfun profile and show its vignetting.
+
+| Option | What it does |
+| --- | --- |
+| `name` | lens name or part of it (empty: list the lenses lensfun knows) |
+| `--focal` | focal length, mm |
+| `--aperture` | f-number |
+| `--crop` | camera crop factor (1.0 = full frame) (default 1.0) |
+| `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
+
+### `totality lensfun-update`
+
+download the lensfun database from GitHub.
+
+| Option | What it does |
+| --- | --- |
+| `--dest` | folder to put the database in (default: the toolkit's own data folder) |
+| `--from` | install from a downloaded lensfun .zip or a folder instead |
+
+### `totality frame`
+
+show everything read from one RAW file (for troubleshooting).
+
+| Option | What it does |
+| --- | --- |
+| `file` | one RAW file |
+| `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
+
+### `totality eclipse`
+
+eclipse circumstances (contacts, duration) for a site.
+
+| Option | What it does |
+| --- | --- |
+| `--date` | eclipse date, e.g. 2024-04-08 |
+| `--lat` | latitude, degrees north |
+| `--lon` | longitude, degrees east (west is negative) |
+| `--elev` | elevation, metres |
+| `--utc-offset` | also show local times at this UTC offset, hours |
+| `--delta-t` | TT-UT in seconds (default: the measured or predicted value) |
+| `--elements` | JSON file with Besselian elements for other eclipses |
+
+### `totality frames`
+
+list a project's frames, or exclude / include some.
+
+| Option | What it does |
+| --- | --- |
+| `project` | the project file (.json) |
+| `--exclude` | leave these frames out (file names) |
+| `--include` | use these frames again |
+
+### `totality elements-update`
+
+download NASA's Besselian elements for every eclipse (1600-2400).
+
+| Option | What it does |
+| --- | --- |
+| `--from` | use a downloaded copy of NASA's canon CSV instead |
+
+### `totality align`
+
+align the light frames of a project on the corona and find the Sun's centre.
+
+| Option | What it does |
+| --- | --- |
+| `project` | project file made by 'totality inventory --project' |
+| `--lat` | observing site latitude (saved in the project) |
+| `--lon` | observing site longitude, east positive (saved in the project) |
+| `--elev` | observing site elevation, metres |
+| `--clock-error` | seconds to add to the camera's UT to get true UT, if known (saved in the project); otherwise bounded from totality |
+| `--camera-utc-offset` | camera time zone, hours, when the files carry none |
+| `--mirrored`, `--no-mirrored` | the optics mirror the image (telescope with a star diagonal); saved in the project |
+| `--window` | analysis window in superpixels (default: about 8 solar radii) |
+| `--rotation` | field rotation: smooth drift over time (default), per frame, or none |
+| `--any-angle` | search any rotation and scale (alt-az mounts) |
+| `--rho` | tangential filter length in superpixels (default: from the Sun's size) |
+| `--output`, `-o` | alignment results file (default: next to the project) |
+| `--profile-dir` | folder of saved own-flats profiles |
+| `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
+| `--quiet` | print only the result, not each step |
+
+### `totality stack`
+
+merge the aligned frames into one linear HDR image.
+
+| Option | What it does |
+| --- | --- |
+| `project` | project file (run 'totality align' on it first) |
+| `--align` | alignment results file (default: the one saved by 'totality align') |
+| `--output`, `-o` | output folder (default: next to the project) |
+| `--name` | output file name prefix (default: the project name) |
+| `--square` | quicker run: output only a square 10 solar radii wide around the Sun (default: the full frame, the same size as the RAW files) |
+| `--radii` | like --square, but this many solar radii from the centre to the edge |
+| `--moon-frame` | frame number whose Moon (and earthshine) is kept (default: the alignment reference) |
+| `--include-rejected` | also stack frames the Sun-centre fit flagged as off the Moon's track |
+| `--no-hot-pixels` | skip the hot-pixel correction |
+| `--profile-dir` | folder of saved own-flats profiles |
+| `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
+| `--quiet` | print only the result, not each step |
+
+### `totality enhance`
+
+reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
+
+| Option | What it does |
+| --- | --- |
+| `project` | project file (run 'totality stack' on it first) |
+| `--hdr` | HDR FITS file (default: the one saved by 'totality stack') |
+| `--output`, `-o` | output folder (default: next to the project) |
+| `--name` | output file name prefix (default: the project name) |
+| `--layers` | comma-separated layers to write (default: all of natural, nrgf, fnrgf, fnrgf_n, adaptive) |
+| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' (default soft light), e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s) |
+| `--order` | FNRGF Fourier order (default 10) |
+| `--segments` | FNRGF angular segments (default 50) |
+| `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
+| `--std-att` | FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0) |
+| `--noise-m` | FNRGF-N noise compensation, 0..0.99 (default 0.7) |
+| `--flatten` | natural layer: how much of the radial fall-off to remove, 0..1 (default 0.8) |
+| `--saturation` | colour saturation, 0 = monochrome (default 1) |
+| `--white` | white balance: inner corona neutral (default), the camera's as-shot, or none |
+| `--format` | picture type: 16-bit TIFF (default), 16-bit PNG or 8-bit JPG; all 300 dpi |
+| `--keep-sky`, `--keep-background-colour` | do not model and remove the sky background (level, colour and gradient) |
+| `--quiet` | print only the result, not each step |
+
+### `totality earthshine`
+
+Moon-aligned stack of the long exposures: a layer for the black lunar disc.
+
+| Option | What it does |
+| --- | --- |
+| `project` | project file (run 'totality stack' on it first) |
+| `--stops` | use frames within this many stops of the longest exposure (default 6) |
+| `--no-limb-glare` | do not model the steep glare just inside the limb (shows as a bright rim) |
+| `--no-prominence-glare` | do not fit and remove the fan of glare (and spikes) round a bright prominence |
+| `--no-limb-shape` | do not fit the limb glare as light fading inward (that fit keeps maria by the limb) |
+| `--channel` | colour channels to make the earthshine from (default auto: chosen on the stack; the red channel carries most of the chromosphere glare) |
+| `--albedo-map` | lunar albedo map (2:1, 0 deg longitude centred, e.g. lroc_color_2k.jpg from NASA's CGI Moon Kit) to guide the glare removal near the limb |
+| `--albedo-strength` | how much the map guides it, 0-1 (default 0.5); nothing from the map is added to the picture |
+| `--glare-order` | smoothness of the glare removed from the disc: polynomial order (default 2) |
+| `--smooth` | smoothing of the layer in pixels (default 1, 0 = none) |
+| `--brightness` | brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona) |
+| `--limb-darkening` | vignette: how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit) |
+| `--keep-glare` | how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.5) |
+| `--limb-soften` | extra softening of the limb in px, on top of the real one (default 1.5, 0 = none) |
+| `--no-colour` | make the earthshine layer grey (default: natural colour, so a prominence at the limb stays red on the Moon side too) |
+| `--no-edge-grain` | leave the filled last pixels by the limb smooth (default: grain like the rest) |
+| `--vignette-shape` | how the darkening falls from the centre: 1 = straight line, 1.5 (default) = gentle in the middle, 3 = the middle stays bright longer |
+| `--edge-smooth` | most smoothing of the noisier pixels near the limb, px (default 3) |
+| `--include-rejected` | also use frames marked as rejected |
+| `--output`, `-o` | output folder (default: next to the project) |
+| `--name` | output file name prefix (default: the project name) |
+| `--format` | picture type: 16-bit TIFF (default), 16-bit PNG or 8-bit JPG; all 300 dpi |
+| `--profile-dir` | folder of saved own-flats profiles (default: your profile library) |
+| `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
+| `--quiet` | print only the result, not each step |
+
+### `totality final`
+
+the finished image: Moon and corona stretched together from the stacks.
+
+| Option | What it does |
+| --- | --- |
+| `project` | the project file (.json) |
+| `--paste` | the older way: paste the earthshine layer into an enhanced layer with a blend mode (needed with --base-file) |
+| `--base` | enhanced layer to use as the corona (default: blend, the last one written) |
+| `--base-file` | use this image as the corona instead (the size of the HDR stack) |
+| `--strength` | brightness of the lunar surface, 1 = as made by the earthshine step (default 1) |
+| `--mode` | blend mode (default screen) |
+| `--name` | output file name prefix (default: the project name) |
+| `--output`, `-o` | output file (.tif, .png or .jpg); default <name>_final.tif |
+| `--quiet` | print only the result, not each step |
+
+### `totality prominences`
+
+find the prominences and write them as a layer (transparent elsewhere).
+
+| Option | What it does |
+| --- | --- |
+| `project` | project file (run 'totality stack' on it first) |
+| `--height` | how far above the solar limb to look, in solar radii (default 0.3) |
+| `--sensitivity` | red excess needed, in noise standard deviations (default 4; lower finds fainter ones) |
+| `--min-redness` | red/green ratio needed; the white corona is about 1 (default 1.2) |
+| `--no-chromosphere` | leave out the thin pink rim along the limb |
+| `--chromosphere-arcsec` | height of the rim left out by --no-chromosphere, arcsec (default 12) |
+| `--brightness` | brightness of the layer (1 = as measured) (default 1.0) |
+| `--saturation` | colour saturation of the layer (1 = as measured) (default 1.2) |
+| `--output`, `-o` | layer file (.tif, .png or .jpg); default <project>_prominences.tif |
+| `--quiet` | print only the result, not each step |
+
+### `totality final-prominences`
+
+put the prominence layer on top of the final image.
+
+| Option | What it does |
+| --- | --- |
+| `project` | the project file (.json) |
+| `--base` | final: the image from 'totality final' (default); blend or natural: the last-written layer |
+| `--base-file` | put them on this image instead (the size of the HDR stack) |
+| `--strength` | opacity (normal) or brightness (screen, lighten) (default 1.0) |
+| `--mode` | normal (default) keeps their colour over the bright inner corona |
+| `--output`, `-o` | output file (.tif, .png or .jpg); default <project>_final_prominences.tif |
+| `--quiet` | print only the result, not each step |
+
+### `totality doctor`
+
+show which optional readers are available.
+<!-- cli-reference:end -->
+
 ## Tests
 
 ```bash
@@ -625,6 +904,18 @@ added to the tests.
   synthetic data missed (non-image edge columns, an uneven twilight sky with
   a negative red level, corona reaching the frame edges, dust and stars) and
   checks for rings, a bright sky and colour casts.
+* `tests/test_earthshine_real.py` runs the earthshine glare removal on the
+  real 2024 Moon-aligned stack, binned 2 x 2
+  (`tests/data/earthshine2024_bin2.npz`): glare round the limb and round the
+  bright prominence, maria kept by the limb, no arcs or teeth at the edge.
+  Other tests use real figures from that stack too (the HDR weights across
+  the limb).
+* `tests/test_moonmap.py` checks the albedo map guide on a simulated Moon:
+  orientation found, maria by the limb recovered, a false feature hardly
+  leaking, a wrong map refused.
+* `tests/test_viewzoom.py` checks the zoom and pan of the picture views.
+* `tests/test_readme.py` checks that the command-line reference below is
+  complete and up to date.
 * `tests/test_gui.py` runs every tab of the Siril window's logic end to end
   with a small stand-in for PyQt6 (`tests/qtstub`), so it needs no display;
   layout and rendering are only checked by running it in Siril.
