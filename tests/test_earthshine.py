@@ -92,7 +92,7 @@ def test_moon_aligned_stack_recovers_surface(run, tmp_path):
     assert layer[int(ref.moon_y), int(ref.moon_x)].max() > 0
     yy, xx = np.mgrid[0:SIZE, 0:SIZE]
     p = EarthshineParams()
-    outside = np.hypot(xx - ref.moon_x, yy - ref.moon_y) > MOON_R + p.limb_px + p.feather_px / 2
+    outside = np.hypot(xx - ref.moon_x, yy - ref.moon_y) > MOON_R + p.limb_px + 2  # the real limb, then nothing
     assert layer[outside].max() == 0
 
 
@@ -243,7 +243,7 @@ def test_limb_glare_removed_and_layer_meets_the_corona(run, tmp_path):
     disc = rf < MOON_R * 0.9
     ring = (rf > MOON_R - 4) & (rf < MOON_R + 1.0)
     assert np.median(layer[ring]) > 0.5 * np.median(layer[disc])
-    assert layer[rf > MOON_R + p.limb_px + p.feather_px].max() == 0
+    assert layer[rf > MOON_R + p.limb_px + 2].max() == 0
     # Into a corona layer that is black out to moon_r + 1.5: no dark ring at the limb.
     corona = np.where(rf > MOON_R + 1.5, 0.8, 0.0)[..., None].repeat(3, axis=2)
     out = composite(corona, np.repeat(layer[..., None], 3, axis=2), 1.0, "screen").mean(axis=2)
@@ -293,7 +293,8 @@ def test_limb_darkening_in_the_layer(run, tmp_path):
 
     mos, infos, tex, matches, ref = run
     res, *_ = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
-                               (0, 0, SIZE, SIZE), EarthshineParams(limb_darkening=0.6), out_dir=tmp_path, name="d")
+                               (0, 0, SIZE, SIZE), EarthshineParams(limb_darkening=0.6, keep_glare=0.0, limb_reach=0.0),
+                               out_dir=tmp_path, name="d")
     layer = tifffile.imread(res.outputs["earthshine"]).mean(axis=2)
     yy, xx = np.mgrid[0:SIZE, 0:SIZE]
     rf = np.hypot(xx - ref.moon_x, yy - ref.moon_y) / MOON_R
@@ -345,3 +346,67 @@ def test_limb_falloff_keeps_a_mare_by_the_limb():
     assert np.median(left[on]) - np.median(left[off]) < -0.03  # the mare is still there
     rim = good & (d < 10) & (np.cos(phi) < 0.3)
     assert np.abs(left[rim]).mean() < 0.15 * glare[rim].mean()  # most glare taken away
+
+
+def _limb_scene(bumps=True, n=300, r=110.0, seed=4):
+    """A Moon-aligned linear stack with a bumpy real limb, steep glare inside it and corona outside."""
+    yy, xx = np.mgrid[0:n, 0:n]
+    cx = cy = n / 2 - 0.4
+    rr = np.hypot(xx - cx, yy - cy)
+    phi = np.arctan2(yy - cy, xx - cx)
+    true_r = r + (1.5 * np.cos(17 * phi) + 1.0 * np.sin(29 * phi) if bumps else 0.0)  # mountains and valleys
+    d = true_r - rr
+    surface = 1e-3 * (1 + 0.15 * ndimage.gaussian_filter(np.random.default_rng(seed).normal(0, 1, (n, n)), 5) * 6)
+    glare = 3e-3 * np.exp(-np.clip(d, 0, None) / 4) + 1e-3 * np.exp(-np.clip(d, 0, None) / 25)
+    corona = 0.05 * np.exp(-np.clip(-d, 0, None) / 30)
+    lin = np.where(d > 0, surface + glare, corona)
+    lin = ndimage.gaussian_filter(lin, 0.8)  # lens and seeing
+    return lin.astype(np.float32), cx, cy, r, rr, phi, true_r
+
+
+def test_layer_follows_the_real_limb_and_glows():
+    from tse_core.earthshine import EarthshineParams, compose_layer, remove_glare
+
+    lin, cx, cy, r, rr, phi, true_r = _limb_scene()
+    p = EarthshineParams(keep_glare=0.3, limb_soften=0.0, limb_darkening=0.0)
+    good = rr < r - p.margin_px - 2
+    weight = (rr < r + p.limb_reach + 2).astype(np.float32)
+    detail, glare = remove_glare(lin, good, cx, cy, r, EarthshineParams(limb_shape=False))
+    layer = compose_layer(detail, good, weight, cx, cy, r, p, keep_from=6.0, linear=lin, glare=glare)
+    # The edge (the steepest rise from the dark Moon to the corona) follows the bumps.
+    edges = []
+    for a in np.linspace(-np.pi, np.pi, 180, endpoint=False):
+        rs = np.arange(r - 8, r + 4, 0.1)
+        v = ndimage.map_coordinates(layer, [cy + rs * np.sin(a), cx + rs * np.cos(a)], order=1)
+        edges.append(rs[np.argmax(np.gradient(ndimage.gaussian_filter1d(v, 3)))])
+    want = r + 1.5 * np.cos(17 * np.linspace(-np.pi, np.pi, 180, endpoint=False)) \
+        + 1.0 * np.sin(29 * np.linspace(-np.pi, np.pi, 180, endpoint=False))
+    assert np.corrcoef(edges, want)[0, 1] > 0.75  # a drawn circle: about -0.5 (no relation)
+    # A glow: brighter near the limb than in the middle, fading inward; and the middle is the surface.
+    mid = np.median(layer[rr < 0.5 * r])
+    near = np.median(layer[(rr > r - 10) & (rr < r - 4)])
+    assert near > mid * 1.15
+    off = compose_layer(detail, good, weight, cx, cy, r, EarthshineParams(keep_glare=0.0, limb_soften=0.0,
+                        limb_darkening=0.0), keep_from=6.0, linear=lin, glare=glare)
+    assert np.median(off[(rr > r - 40) & (rr < r - 25)]) < np.median(layer[(rr > r - 40) & (rr < r - 25)])
+    # Nothing beyond the reach of the stack.
+    assert layer[rr > r + p.limb_px + 2].max() == 0
+
+
+def test_filled_edge_gets_grain():
+    from tse_core.earthshine import EarthshineParams, compose_layer
+
+    n, r = 200, 80.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - 100, yy - 100)
+    good = rr < r - 3
+    shown = np.where(good, np.random.default_rng(0).normal(0, 1, (n, n)), 0).astype(np.float32)
+    shown = ndimage.gaussian_filter(shown, 0.8)
+    band = (rr > r - 8) & (rr < r - 1)
+    for grain, expect in ((True, True), (False, False)):
+        p = EarthshineParams(edge_grain=grain, limb_darkening=0.0, limb_reach=0.0)
+        out = compose_layer(shown, good, good.astype(np.float32), 100, 100, r, p, keep_from=10.0)
+        hp = out - ndimage.gaussian_filter(out, 2)
+        inner = good & (rr < r - 15) & (rr > r - 30)
+        ratio = hp[band].std() / hp[inner].std()
+        assert (ratio > 0.5) == expect, ratio

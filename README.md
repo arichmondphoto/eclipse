@@ -409,6 +409,23 @@ along the limb). On simulations a
 false mare 25 px inside the limb came through at about 15–20% of
 `--albedo-strength` (default 0.5), and not at all 45 px or more inside.
 
+**How the Moon meets the corona.** A perfectly clean disc cut on a circle
+looks pasted in, so the layer is built like a photograph of the limb:
+
+* *The real limb.* The Moon-aligned stack reaches `--limb-reach` (6) px past
+  the limb, and over the last few pixels and beyond the layer shows that
+  data itself, compressed logarithmically so the corona just outside comes
+  to full brightness. The edge therefore has the Moon's own outline
+  (mountains, valleys) and softness, and runs into the corona; the layer
+  hands over to the corona layers 2 px past their black disc.
+  `--limb-soften` (1.5 px) adds a little extra softness.
+* *A glow.* `--keep-glare` (0.3) of the glare that was taken away is put back
+  as a glow fading inward from the limb (the inner corona's light spilling
+  over the dark Moon), on the same logarithmic scale, so it cannot clip.
+* *Grain in the filled edge.* The last pixels, which are only noise and are
+  filled from just inside, get grain matching the surface next to them
+  (`--no-edge-grain` to leave them smooth).
+
 The shown layer gets a little extra smoothing (up to `--edge-smooth`, 3 px)
 only where the noise is high: the last pixels by the limb, where the long
 exposures are saturated. Real structure such as diffraction spikes from a

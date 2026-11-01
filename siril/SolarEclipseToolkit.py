@@ -1181,6 +1181,20 @@ class EarthshineTab(StepTab):
         self.vignette_shape.setSingleStep(0.25)
         self.vignette_shape.setValue(1.5)
         f.addRow("Gradient shape:", self.vignette_shape)
+        self.keep_glare = QDoubleSpinBox()
+        self.keep_glare.setRange(0.0, 1.0)
+        self.keep_glare.setSingleStep(0.05)
+        self.keep_glare.setValue(0.3)
+        f.addRow("Keep glare (glow):", self.keep_glare)
+        self.limb_soften = QDoubleSpinBox()
+        self.limb_soften.setRange(0.0, 6.0)
+        self.limb_soften.setSingleStep(0.5)
+        self.limb_soften.setValue(1.5)
+        self.limb_soften.setSuffix(" px")
+        f.addRow("Soften the limb:", self.limb_soften)
+        self.edge_grain = QCheckBox("Grain in the filled edge, like the rest of the surface")
+        self.edge_grain.setChecked(True)
+        f.addRow(self.edge_grain)
         self.edge_smooth = QDoubleSpinBox()
         self.edge_smooth.setRange(0.0, 12.0)
         self.edge_smooth.setSingleStep(0.5)
@@ -1310,6 +1324,15 @@ class EarthshineTab(StepTab):
              "gradually all the way out to the edge. 0 = evenly lit, 0.6 = the edge at 40% of the middle (the "
              "default), 1 = fading to black at the edge. Removing the glare also removes the Moon's overall "
              "shading; this gives back a brighter middle and keeps the noisier last pixels by the edge dim.", f)
+        _tip(self.keep_glare, "How much of the glare that was taken away is put back as a soft glow just inside "
+             "the edge of the Moon, fading inward: the inner corona's light spilling over the dark Moon, as the eye "
+             "sees it at totality. 0 = none, 0.3 = a gentle glow (default), 1 = all of it (compressed so it cannot "
+             "clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
+             "softness, not a drawn circle.", f)
+        _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "
+             "has in your frames. 0 = none.", f)
+        _tip(self.edge_grain, "The last few pixels by the edge are only noise and are filled from just inside; "
+             "this gives them grain like the rest of the surface, so they do not look smoother.")
         _tip(self.vignette_shape, "How the darkening is spread from the middle to the edge. 1 = a straight-line "
              "fall from the centre; 1.5 (the default) = gentle in the middle, steady further out; 3 = the middle "
              "stays bright longer and the darkening gathers towards the edge.", f)
@@ -1421,6 +1444,8 @@ class EarthshineTab(StepTab):
                                   smooth=self.smooth.value(), brightness=self.brightness.value(),
                                   limb_glare=self.limb_glare.isChecked(), limb_darkening=self.limb_dark.value(),
                                   vignette_shape=self.vignette_shape.value(),
+                                  keep_glare=self.keep_glare.value(), limb_soften=self.limb_soften.value(),
+                                  edge_grain=self.edge_grain.isChecked(),
                                   edge_smooth=self.edge_smooth.value(), limb_shape=self.limb_shape.isChecked(),
                                   channel=self.channel.currentData(),
                                   albedo_map=self.albedo_path.text().strip(),

@@ -175,6 +175,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona)")
     p.add_argument("--limb-darkening", type=float, default=0.6,
                    help="vignette: how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit)")
+    p.add_argument("--keep-glare", type=float, default=0.3,
+                   help="how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.3)")
+    p.add_argument("--limb-soften", type=float, default=1.5,
+                   help="extra softening of the limb in px, on top of the real one (default 1.5, 0 = none)")
+    p.add_argument("--no-edge-grain", action="store_true",
+                   help="leave the filled last pixels by the limb smooth (default: grain like the rest)")
     p.add_argument("--vignette-shape", type=float, default=1.5,
                    help="how the darkening falls from the centre: 1 = straight line, 1.5 (default) = gentle in the "
                         "middle, 3 = the middle stays bright longer")
@@ -622,6 +628,8 @@ def cmd_earthshine(args) -> int:
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
                               brightness=args.brightness, limb_glare=not args.no_limb_glare,
                               limb_darkening=args.limb_darkening, vignette_shape=args.vignette_shape,
+                              keep_glare=args.keep_glare, limb_soften=args.limb_soften,
+                              edge_grain=not args.no_edge_grain,
                               edge_smooth=args.edge_smooth,
                               limb_shape=not args.no_limb_shape, channel=args.channel,
                               albedo_map=args.albedo_map, albedo_strength=args.albedo_strength)
