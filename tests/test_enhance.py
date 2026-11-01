@@ -252,3 +252,45 @@ def test_highlight_shoulder_rolls_off_without_clipping():
     valid = np.ones_like(y, bool)
     assert (stretch(y, valid, 0, 90) >= 1.0).sum() > 20  # hard white point: the top clips
     assert (stretch(y, valid, 0, 90, shoulder=0.3) >= 0.999).sum() <= 1
+
+
+def _noisy_corona(strands_amp, seed=1):
+    """A corona falling off from the limb, 2% noise correlated like a demosaiced, resampled stack,
+    optionally with radial strands; weights are the true inverse variances."""
+    import numpy as np
+    from scipy import ndimage
+
+    n, R = 700, 100.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    r = np.hypot(xx - n / 2, yy - n / 2)
+    phi = np.arctan2(yy - n / 2, xx - n / 2)
+    img = 0.1 * np.exp(-(r - R) / 60) + 1e-3
+    img = img * (1 + strands_amp * np.cos(40 * phi) * np.exp(-(r - R) / 200))
+    z = ndimage.gaussian_filter(np.random.default_rng(seed).normal(0, 1, img.shape), 0.45)
+    img = (img * (1 + 0.02 * z / z.std())).astype(np.float32)
+    return img, (1 / (0.02 * img) ** 2).astype(np.float32), r > R * 1.06, r, R
+
+
+def test_gated_adaptive_does_not_make_texture_out_of_noise():
+    """The noise-gated adaptive filter (with smoothing along the strands) brings out real strands
+    but leaves pure noise nearly flat; the plain filter turns that noise into full-contrast
+    texture. Measured as fine texture (minus a 10 px blur) away from the limb."""
+    import numpy as np
+    from scipy import ndimage
+
+    from tse_core.enhance import mgn, mgn_gated, noise_map
+
+    def texture(strands_amp, gated):
+        img, w, valid, r, R = _noisy_corona(strands_amp)
+        scales = [R * f for f in (0.006, 0.012, 0.025, 0.05, 0.1, 0.2)]
+        if gated:
+            out = mgn_gated(img, valid, scales, 0.7, 1e-4, noise_map(img, w, valid), R, strands=1.0, gate=3.0)
+        else:
+            out = mgn(img, valid, scales, 0.7, 1e-4)
+        tex = out - ndimage.gaussian_filter(out, 10)
+        return float(tex[valid & (r > 1.3 * R) & (r < 3.5 * R)].std())
+
+    noise_gated, noise_plain = texture(0.0, True), texture(0.0, False)
+    strands_gated = texture(0.15, True)
+    assert noise_gated < 0.4 * noise_plain, (noise_gated, noise_plain)
+    assert noise_gated < 0.4 * strands_gated, (noise_gated, strands_gated)

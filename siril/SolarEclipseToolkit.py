@@ -899,6 +899,10 @@ class EnhanceTab(StepTab):
         tf.addRow("Flatten:", self.flatten)
         self.shoulder = self._dspin(0.0, 0.6, 0.0, 0.05, "How softly the brightest parts roll off to white")
         tf.addRow("Highlight roll-off:", self.shoulder)
+        self.noise_gate = self._dspin(0.0, 6.0, 0.0, 0.5, "Adaptive layer: keep noise from becoming texture")
+        tf.addRow("Adaptive noise gate:", self.noise_gate)
+        self.strands = self._dspin(0.0, 3.0, 0.0, 0.25, "Adaptive layer: smooth along the coronal strands")
+        tf.addRow("Smooth along strands:", self.strands)
         self.saturation = self._dspin(0.0, 3.0, 1.0, 0.1, "0 = monochrome")
         tf.addRow("Saturation:", self.saturation)
         self.white = QComboBox()
@@ -993,6 +997,16 @@ class EnhanceTab(StepTab):
                  "as 'no change', so the sky stays dark.\n\nSoft Light (default): gentle, keeps the natural "
                  "tones.\n\nOverlay: stronger, adds more contrast, mostly in the mid-tones. Use a lower "
                  "strength with Overlay (for example 5-20 %).")
+        _tip(self.noise_gate, "Adaptive layer only. The adaptive filter brings out structure at six scales; at the "
+             "finest ones a stack is mostly noise, which it turns into grain. With the gate, each scale's detail "
+             "counts only as far as it stands above the noise measured in your stack at that scale (the number is how "
+             "many times the noise counts as clearly above it).\n\n0 (default): off, as before. 3 is a good start; "
+             "higher keeps more of the faint corona smooth, lower shows finer detail and more grain.")
+        _tip(self.strands, "Adaptive layer only. Smooths along the direction the coronal strands run, never across "
+             "them, so the grain goes and the strands stay sharp and continuous. Directions are taken only where they "
+             "are clearer than noise alone would give, so it does not draw strands out of noise. 1 = about 2% of the "
+             "Sun's radius (8 px on a 400 mm D850 frame).\n\n0 (default): off. Use it with the noise gate (try 1 "
+             "and 3). Slower: the full-size run takes a few minutes more.")
         _tip(self.shoulder, "How the brightest parts of the picture (the inner corona by the limb, bright "
              "prominences) reach white.\n\n0 (default): a hard white point, so the brightest 0.1% clip to flat "
              "white. Above 0 that top part of the range rolls off smoothly instead, so it keeps its gradations and "
@@ -1065,7 +1079,8 @@ class EnhanceTab(StepTab):
         layers = tuple(k for k, c in self.layer_checks.items() if c.isChecked())
         modes = {k: c.currentText().lower() for k, c in self.blend_mode.items() if k in blend}
         return EnhanceParams(layers=layers, segments=self.segments.value(), order=self.order.value(),
-                             noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(),
+                             noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(), noise_gate=self.noise_gate.value(),
+                             strands=self.strands.value(),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
                              blend_modes=modes, neutral_background=not self.keep_sky.isChecked())
 

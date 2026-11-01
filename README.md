@@ -375,6 +375,25 @@ instead: nothing clips, and colours keep their hue. On the 2024 stack with
 `--flatten 1` it took the clipped share of the inner corona (out to 2.5 Moon
 radii) from 1.5% to 0%.
 
+Noise in the adaptive layer: at its finest scales a stack is mostly noise
+(on the 2024 stack, structure stood only 2x and 3.6x above the noise at
+2.5 and 5 px, against 9-250x at 10-83 px), and the adaptive filter turns it
+into grain. `--noise-gate 3` (**Adaptive noise gate**) weights each scale's
+detail by how far it stands above the noise at that scale (a Wiener gain).
+The noise at each scale comes from a noise image with the stack's own noise
+level (from its weights) and spatial spectrum (measured in the faint corona:
+demosaicing and resampling correlate neighbouring pixels), put through the
+same steps. `--strands 1` (**Smooth along strands**) first smooths along
+the direction the coronal strands run (from the mid-scale structure, with
+the Moon filled from around it so its edge does not set the direction),
+never across them. Directions are only followed where they are clearer
+than noise alone would give, and the noise image is smoothed along its own
+ridges as the data's noise would be, so strands are not drawn out of noise.
+A test checks that pure noise gives under 0.4x the texture of the plain
+filter and of real strands. Both are off by default; the output keeps a
+fixed scale, so where there is little real structure it stays flat instead
+of being stretched back up.
+
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
 
@@ -800,6 +819,8 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
 | `--std-att` | FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0) |
 | `--noise-m` | FNRGF-N noise compensation, 0..0.99 (default 0.7) |
+| `--noise-gate` | adaptive layer: each scale's detail counts only as far as it stands above the stack's noise at that scale (e.g. 3); 0 = off |
+| `--strands` | adaptive layer: smooth along the coronal strands first, in units of 2%% of the Sun's radius (e.g. 1); 0 = off |
 | `--shoulder` | highlight roll-off: 0 = hard white point (the brightest 0.1%% clip); e.g. 0.3 = the top 30%% of the range rolls off smoothly to white, nothing clips and colours keep their hue |
 | `--flatten` | natural layer: how much of the radial fall-off to remove, 0..1 (default 0.8) |
 | `--saturation` | colour saturation, 0 = monochrome (default 1) |

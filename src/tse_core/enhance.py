@@ -65,6 +65,15 @@ class EnhanceParams:
     shoulder: float = 0.0
     mgn_scales: Optional[Sequence[float]] = None  # px; default from the Sun's radius
     mgn_k: float = 0.7
+    # Adaptive layer, noise-aware (both 0 = off, as before):
+    # strands: smoothing along the coronal strands before the filter, in units of 2% of the Sun's
+    # radius (1 = about 8 px on a 2024 D850 frame at 400 mm); grain is smoothed out along each
+    # strand while the strand stays sharp across.
+    strands: float = 0.0
+    # noise_gate: each scale's detail counts only as far as it stands above the noise at that scale
+    # (measured from the stack); the number is how many times the noise counts as "clearly above"
+    # (3 is a good start). Keeps the finest scales from turning grain into texture.
+    noise_gate: float = 0.0
     saturation: float = 1.0  # colour saturation of every layer (0 = monochrome)
     white: str = "corona"  # "corona" (inner corona is white), "camera" (as-shot), or "none"
     neutral_background: bool = True  # model and remove the sky (level, colour and gradient) before filtering
@@ -543,6 +552,174 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
     return out
 
 
+def _masked_fill(b: np.ndarray, valid: np.ndarray, r: float) -> np.ndarray:
+    """``b`` with the invalid pixels (the Moon, frame edges) filled smoothly from around them:
+    normalized blurs of widening size until every pixel is reached, then smoothed, so the filled
+    part carries no edge or level step into the filters."""
+    m = valid.astype(np.float32)
+    f = np.where(valid, b, 0.0).astype(np.float32)
+    have = valid.copy()
+    sig = max(2.0, 0.02 * r)
+    while not have.all() and sig < 4 * max(b.shape):
+        den = blur(m, sig)
+        num = blur(np.where(valid, b, 0.0).astype(np.float32), sig)
+        ok = ~have & (den > 0.02)
+        f = np.where(ok, num / np.maximum(den, 1e-6), f)
+        have |= ok
+        sig *= 2.0
+    s2 = max(4.0, 0.04 * r)
+    for _ in range(3):
+        f = np.where(valid, b, blur(f, s2)).astype(np.float32)
+    return f
+
+
+def strand_orientation(b: np.ndarray, r: float) -> tuple[np.ndarray, np.ndarray]:
+    """Direction along the coronal strands (radians) and how clear it is (coherence 0..1).
+
+    From the structure tensor of the mid-scale detail (``b`` minus a blur of 10% of the Sun's
+    radius): taken from the image itself, the corona's overall fall-off would set the direction
+    (across the strands), and the finest scales are mostly noise.
+    """
+    d = b - blur(b, max(4.0, 0.1 * r))
+    sg, st = max(1.0, 0.0073 * r), max(2.0, 0.024 * r)
+    gx = ndimage.gaussian_filter(d, sg, order=(0, 1))
+    gy = ndimage.gaussian_filter(d, sg, order=(1, 0))
+    jxx, jyy, jxy = blur(gx * gx, st), blur(gy * gy, st), blur(gx * gy, st)
+    theta = 0.5 * np.arctan2(2 * jxy, jxx - jyy) + math.pi / 2
+    coh = np.sqrt((jxx - jyy) ** 2 + 4 * jxy**2) / np.maximum(jxx + jyy, 1e-30)
+    return theta.astype(np.float32), coh.astype(np.float32)
+
+
+def smooth_along(b: np.ndarray, theta: np.ndarray, coh: np.ndarray, length: float,
+                 iso: float = 2.0, chunk: int = 512) -> np.ndarray:
+    """Gaussian smoothing along the strands (sigma ``length`` px) where the direction is clear,
+    a light isotropic one (``iso``) where it is not. Done in row blocks to bound memory."""
+    h, w = b.shape
+    n = int(math.ceil(2.5 * length))
+    ts = np.arange(-n, n + 1, dtype=np.float32)
+    wts = np.exp(-0.5 * (ts / length) ** 2)
+    wts /= wts.sum()
+    base = ndimage.gaussian_filter(b, 0.6)
+    out = np.empty_like(b, dtype=np.float32)
+    iso_img = ndimage.gaussian_filter(b, iso)
+    xx = np.arange(w, dtype=np.float32)[None, :]
+    for r0 in range(0, h, chunk):
+        rows = slice(r0, min(h, r0 + chunk))
+        yy = np.arange(rows.start, rows.stop, dtype=np.float32)[:, None]
+        c, s_ = np.cos(theta[rows]), np.sin(theta[rows])
+        acc = np.zeros((rows.stop - rows.start, w), np.float32)
+        for t, wt in zip(ts, wts):
+            acc += wt * ndimage.map_coordinates(base, [yy + t * s_, xx + t * c], order=1, mode="nearest")
+        k = np.clip((coh[rows] - 0.2) / 0.3, 0.0, 1.0)
+        out[rows] = k * acc + (1 - k) * iso_img[rows]
+    return out
+
+
+def correlated_noise(shape, valid: np.ndarray, sample: np.ndarray, seed: int = 0, patch: int = 64) -> np.ndarray:
+    """Unit noise with the spatial spectrum measured in ``sample`` over ``valid`` (demosaicing and
+    the alignment's resampling correlate neighbouring pixels, so white noise understates the noise
+    left after any smoothing), scaled so that the 1-px scatter statistic used by
+    :func:`noise_map` reads 1. The spectrum is the average over patches of the residual after a
+    6 px blur, so smooth structure in the sample does not count as noise."""
+    r = (sample - ndimage.gaussian_filter(sample, 6.0)).astype(np.float32)
+    h, w = r.shape
+    win = np.outer(np.hanning(patch), np.hanning(patch))
+    psd = np.zeros((patch, patch))
+    count = 0
+    for need in (0.8, 0.0):  # patches mostly in ``valid``; if too few, any fully usable patch
+        for y0 in range(0, h - patch + 1, patch):
+            for x0 in range(0, w - patch + 1, patch):
+                if (np.isfinite(r[y0:y0 + patch, x0:x0 + patch]).all()
+                        and valid[y0:y0 + patch, x0:x0 + patch].mean() >= max(need, 1e-9)):
+                    q = r[y0:y0 + patch, x0:x0 + patch]
+                    psd += np.abs(np.fft.fft2((q - q.mean()) * win)) ** 2
+                    count += 1
+        if count >= 4:
+            break
+    n = np.random.default_rng(seed).normal(0.0, 1.0, shape).astype(np.float32)
+    if count >= 4:
+        # Undo the 6 px high-pass where it let enough through; below that frequency the noise is
+        # taken as flat (demosaicing and resampling correlate only neighbouring pixels).
+        fy = np.fft.fftfreq(patch)[:, None]
+        fx = np.fft.fftfreq(patch)[None, :]
+        f = np.hypot(fy, fx)
+        t = 1.0 - np.exp(-2.0 * math.pi**2 * 36.0 * f**2)
+        psd = psd / count
+        ok = t > 0.5
+        corr = np.where(ok, psd / np.maximum(t, 1e-6) ** 2, 0.0)
+        f_cut = float(f[ok].min())
+        ring = ok & (f < f_cut * 1.5)
+        corr = np.where(ok, corr, float(corr[ring].mean()))
+        kern = np.real(np.fft.fftshift(np.fft.ifft2(np.sqrt(corr))))
+        kern /= np.sqrt((kern**2).sum())
+        from scipy.signal import fftconvolve
+        n = fftconvolve(n, kern.astype(np.float32), mode="same").astype(np.float32)
+    hp = n - ndimage.gaussian_filter(n, 1.0)
+    return (n / (1.4826 * float(np.median(np.abs(hp))) / 0.96)).astype(np.float32)
+
+
+def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float,
+              noise: np.ndarray, sun_r: float, strands: float = 0.0, gate: float = 3.0,
+              seed: int = 0) -> np.ndarray:
+    """:func:`mgn` with the noise kept down: optional smoothing along the strands first, and each
+    scale's detail weighted by how far it stands above the noise at that scale (a Wiener gain;
+    the noise at each scale comes from a noise image with the stack's measured noise and
+    correlation, put through the same smoothing). Pure noise gives almost no contrast."""
+    b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
+    bf = _masked_fill(b, valid, sun_r)
+    sig = np.where(valid, noise / np.maximum(np.maximum(x, 0) + max(floor, 1e-9), 1e-12), 0.0)
+    vm = valid.astype(np.float32)
+    sig = ndimage.gaussian_filter(sig.astype(np.float32), 4.0) / np.maximum(ndimage.gaussian_filter(vm, 4.0), 1e-3)
+    smooth_b = blur(bf, max(4.0, 0.05 * sun_r))  # the faint part, as a region (not single pixels)
+    faint = valid & (smooth_b < np.percentile(smooth_b[valid], 30))
+    nz = correlated_noise(b.shape, faint, bf, seed) * sig
+    del b, sig, vm, smooth_b, faint  # full frames are 45 megapixels: free what is done with
+    if strands > 0:
+        theta, coh = strand_orientation(bf, sun_r)
+        # How clear a direction noise alone would seem: only clearer directions than that are
+        # followed, or the smoothing would draw strands out of the noise itself.
+        theta_n, coh_n = strand_orientation(nz, sun_r)
+        base_n = blur(coh_n, max(8.0, 0.1 * sun_r))
+
+        def clear(c):
+            return np.clip((c - base_n) / np.maximum(1.0 - base_n, 1e-3), 0.0, 1.0).astype(np.float32)
+
+        length = max(1.0, strands * 0.02 * sun_r)
+        k_data = clear(coh)
+        bf = smooth_along(bf, theta, k_data, length)
+        del theta, coh
+        # The noise image is smoothed along its *own* ridges, as the data's noise is wherever the
+        # direction comes from the noise: noise smoothed along itself keeps more of its strength,
+        # and judging against that keeps strands from being drawn out of noise. (Where the
+        # direction comes from real strands this overstates the noise a little: safe side.)
+        # Mixed between along and round in the same places as the data (k_data): where the data
+        # is only smoothed round, its noise stays grainier, and the noise image must too.
+        nz = smooth_along(nz, theta_n, k_data, length)
+        del theta_n, coh_n, base_n, k_data
+    nz = np.where(valid, nz, 0.0).astype(np.float32)
+    acc = np.zeros_like(bf)
+    g2 = gate * gate
+    for w in scales:
+        d = bf - blur(bf, w)
+        sd2 = blur(d * d, w)
+        dn = nz - blur(nz, w)
+        # Both judged over a wider area than the scale itself: over a few pixels the estimates
+        # scatter so much that noise passes the gate by chance.
+        wide = max(3.0 * w, 8.0)
+        n2 = blur(dn * dn, wide)
+        s2 = blur(d * d, wide)
+        gain = np.maximum(s2 - n2, 0.0) / np.maximum(s2 + (g2 - 1.0) * n2, 1e-12) if gate > 0 else 1.0
+        acc += np.arctan(k * gain * d / np.sqrt(np.maximum(sd2, 1e-12)))
+        del d, sd2, dn, n2, s2, gain
+    acc /= len(scales)
+    # A fixed scale, not the image's own spread: stretching to the spread would bring noise back
+    # up to full contrast wherever there is little real structure.
+    out = (0.5 + np.arctan(1.6 * acc / 0.6) / math.pi).astype(np.float32)
+    out[~valid] = 0.0
+    return out
+
+
+
 def mgn(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float) -> np.ndarray:
     """Multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of log(X); local part only."""
     b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
@@ -804,7 +981,11 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
         elif name_l == "fnrgf_n":
             y = to_unit(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), valid)
         else:
-            y = mgn(lum, valid, scales, p.mgn_k, nlev)
+            if p.strands > 0 or p.noise_gate > 0:
+                say(f"adaptive: noise gate {p.noise_gate:g}, smoothing along the strands {p.strands:g}")
+                y = mgn_gated(lum, valid, scales, p.mgn_k, nlev, noise, g.sun_r, p.strands, p.noise_gate)
+            else:
+                y = mgn(lum, valid, scales, p.mgn_k, nlev)
         y[~(show if name_l == "natural" else valid)] = 0.0
         layers[name_l] = y
 

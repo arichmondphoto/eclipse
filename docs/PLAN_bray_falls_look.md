@@ -1,6 +1,6 @@
 # Plan: a final image like Bray Falls' blended eclipse
 
-Status: **step 1 done (option, not default); step 2 prototyped, not yet in the toolkit** (1 Nov 2026).
+Status: **steps 1 and 2 in the toolkit as options (not defaults); step 2 has open items; step 3 next** (1 Nov 2026).
 Code at the time of writing: commit `38830ba` on `main`. Tick items off here as they are done.
 
 ## Goal
@@ -70,44 +70,45 @@ signal (data), not stretch. Dust spots show as dark rings in the corona (no dust
 
 ### 2. Fine structure without noise
 
-- [ ] Edge-preserving noise reduction first (driven by the stack's own noise map,
-      `enhance.noise_map`), so strands stay sharp and grain does not.
-- [ ] Fine-structure enhancement in the Druckmüller style (adaptive filtering / multi-scale
-      normalization at small scales). Each scale is enhanced only where it rises above the noise
-      at that scale, so faint regions are not turned into grain.
-- [ ] Consider the paper's MGN form (gamma-stretched global image mixed with the local part,
-      settings h and γ) as an extra layer for comparison; Andy asked why it was not used. The
-      current choice: the natural layer is the global part, and the adaptive layer is blended in
-      Soft Light so the sky stays black.
-- [ ] Expose the adaptive filter's scales (now fixed at 0.6–20% of the Sun's radius) and its k.
-- [ ] Target: continuous filaments and loops like his, measured as fine-scale contrast against
-      noise on Andy's crop.
+Done as options of the adaptive layer (`EnhanceParams.noise_gate`, `.strands`; `--noise-gate`,
+`--strands`; **Adaptive noise gate** and **Smooth along strands** on the Enhance tab), in
+`enhance.mgn_gated`:
 
-**Prototype (1 Nov), `docs/prototypes/strands_step2.py`, run on the crop only (not wired in):**
+- [x] Noise per scale from a noise image with the stack's own level (`noise_map`, from the
+      weights) and spatial spectrum (`correlated_noise`: patch power spectrum of the faint
+      corona's residual, corrected for the 6 px high-pass below which it is taken as flat). White
+      noise understated it about 2x after smoothing: demosaicing and resampling correlate
+      neighbours (lag-1 correlation 0.26 on the 2024 crop).
+- [x] Wiener gain per scale, with signal and noise judged over 3x the scale (narrow windows let
+      noise through by chance). Fixed output scale (not stretched to the image's spread), so
+      where there is little structure the layer stays flat.
+- [x] Smoothing along the strands (`strand_orientation`, `smooth_along`): direction from the
+      structure tensor of the mid-scale detail (minus a blur of 10% R_sun, gradient 0.73%,
+      tensor 2.4%). The Moon is filled first by widening normalized blurs (`_masked_fill`; the
+      old fill left the Moon's middle at 0 and made a ring). Directions are only followed where
+      clearer than noise alone gives. The noise image is smoothed along its *own* ridges, mixed
+      like the data.
+- [x] Test `test_gated_adaptive_does_not_make_texture_out_of_noise`: pure correlated noise gives
+      < 0.4x the texture of the plain filter and of real strands.
+- [x] On the crop (adaptive layer alone, real weights): fine texture 0.12 inner / 0.06 outer
+      corona. The grain is gone and the strands are continuous; the outer corona between
+      streamers is smooth (`step2_final_1to1.png`, `fb_0.8_small.png`: natural + FNRGF-N 0.5 +
+      adaptive 0.8 soft light, flatten 1, roll-off 0.3).
+- Cost: a full frame takes ~6.5 min for Enhance (was ~4) and peaks at ~5.6 GB in the test
+  script (which also holds a full-frame canvas).
+- Testing pitfall: the crop pasted into the scaled-up quarter-size stack gives a wrong noise
+  level (the smooth scaled-up sky sets `noise_constant`), which shows as mottled texture in the
+  outer corona. Test the adaptive layer on the crop alone with its weights cut from
+  `Eclipse 2024_weight.fit` (scratch `crop_adapt.py` approach).
 
-- Measured on the crop: pixel noise 0.4% (bright) to 1% (faint) of the signal. After smoothing,
-  structure/noise per adaptive scale (1.05–1.8 Moon radii): 2.5 px 2.1, 5 px 3.6, 10 px 9,
-  21 px 21, 41 px 52, 83 px 258. The two finest scales are mostly noise in this data, which is why
-  the current adaptive layer looks grainy at 100%.
-- Smoothing along the strands (structure-tensor direction) plus a Wiener gain per scale gives
-  long, continuous strands much like his, in the inner corona.
-- Lessons:
-  - The direction must come from the mid-scale detail (b − blur 40 px, gradient σ 3, tensor
-    σ 10). From the raw log image, the radial fall-off made it tangential (streaks across the
-    strands).
-  - Fill the Moon from its surroundings first, or its edge sets the direction in a band about
-    40 px wide by the limb.
-- Open problems before wiring it in:
-  1. In the faint outer corona (beyond ~2 Moon radii) it paints a flow texture out of noise:
-     invented structure. A gain cap at 0.4× the median contrast did not help, and neither did the
-     Wiener gate (c 3). The suspicion is that the large scales normalize very low variance; try
-     limiting gain per scale against the measured noise at that scale, or fading the layer with
-     signal-to-noise.
-  2. Small speckles where the direction field has singularities (junctions, the dust rings).
-  3. It must never invent strands. Add a test: pure noise through the same pipeline must give
-     much less contrast than the real crop does.
-- Images sent to Andy: `cmp_p8.png` (100% by the limb, before and after the direction fix) and
-  `p9_small.png` (whole crop).
+Still open:
+- [ ] Speckled patches where strand directions meet or cross, and round the dust rings
+      (low-coherence spots).
+- [ ] Expose the adaptive filter's scales (fixed at 0.6–20% of the Sun's radius) and its k.
+- [ ] The paper's MGN form (gamma global + local, h and γ) as an extra layer for comparison.
+- [ ] Look: his corona is lighter, more even grey with finer, denser strands. Ours at 0.8 soft
+      light is closer but darker between streamers. Try stronger flattening of the local mean
+      (an NRGF-like normalization of the base) before the adaptive layer.
 
 ### 3. The Moon in his style
 
