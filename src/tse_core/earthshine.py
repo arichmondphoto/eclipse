@@ -1195,6 +1195,70 @@ def register_moon(hdr_lum: np.ndarray, es_lum: np.ndarray, es_good: np.ndarray, 
     return best[1], best[2]
 
 
+def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: float, floor: float,
+                 inner: float = 30.0, outer: float = 3.0) -> Optional[np.ndarray]:
+    """Light by the limb where neither stack is reliable, interpolated along each radius.
+
+    For each direction, in log brightness: inside the limb from the outermost fully trusted
+    pixel (trust >= 0.95, at most ``inner`` px in) to the limb, where the light is the corona
+    ``outer`` px out times the drop across the limb seen in the nearest directions where both
+    stacks are reliable (the Moon's edge is a step, not a slope); outside the limb, the corona
+    ``outer`` px out. Returns an image (h, w, 3) (a copy of ``img`` away from those spans), or None.
+    """
+    h, w = trust.shape
+    na = max(int(2 * math.pi * r), 360)
+    step = 0.5
+    radii = np.arange(r - inner, r + outer + 1.0 + 1e-9, step)
+    ang = np.arange(na) * 2 * math.pi / na
+    py = cy + radii[:, None] * np.sin(ang)[None]
+    px = cx + radii[:, None] * np.cos(ang)[None]
+    inside = (px >= 0) & (px <= w - 1) & (py >= 0) & (py <= h - 1)
+    T = ndimage.map_coordinates(trust, [py, px], order=1, mode="constant", cval=0.0)
+    T = np.where(inside, T, 0.0)
+    L = np.stack([ndimage.map_coordinates(np.log(np.maximum(img[..., c], floor)), [py, px], order=1,
+                                          mode="nearest") for c in range(3)], axis=-1)
+    j_out = int(np.searchsorted(radii, r + outer))
+    j_lim = int(np.searchsorted(radii, r - 1.0))  # last sample fully inside the limb
+    if j_out >= len(radii) - 1 or j_lim < 1:
+        return None
+    out_val = ndimage.gaussian_filter1d(0.5 * (L[j_out] + L[j_out + 1]), 1.0, axis=0, mode="wrap")
+    # The drop across the limb, from directions where the earthshine stack is good to the edge.
+    good_dir = (T[j_lim - 1: j_lim + 1] >= 0.95).all(axis=0) & inside[j_out]
+    if good_dir.sum() < 10:
+        return None
+    drop = np.where(good_dir[:, None], 0.5 * (L[j_lim - 1] + L[j_lim]) - out_val, 0.0)
+    sig = max(4.0, 0.03 * na)
+    den = ndimage.gaussian_filter1d(good_dir.astype(np.float64), sig, mode="wrap")
+    drop = ndimage.gaussian_filter1d(drop, sig, axis=0, mode="wrap") / np.maximum(den, 1e-6)[:, None]
+    limb_val = out_val + drop
+    # Outermost trusted sample inside, scanning in from the limb.
+    ok = T[: j_lim + 1] >= 0.95
+    rev = ok[::-1]
+    first = np.argmax(rev, axis=0)
+    has = rev.any(axis=0) & inside[j_out]
+    j_in = j_lim - first
+    in_val = ndimage.gaussian_filter1d(L[j_in, np.arange(na)], 1.0, axis=0, mode="wrap")
+    jj = np.arange(len(radii))[:, None]
+    u = np.clip((jj - j_in[None]) / np.maximum(j_lim - j_in, 1)[None], 0.0, 1.0)[..., None]
+    F = np.where((jj <= j_lim)[..., None], in_val[None] * (1 - u) + limb_val[None] * u, out_val[None])
+    span = (has[None] & (jj > j_in[None]) & (jj < j_out))[..., None]
+    F = np.where(span, F, L)
+    # Where the trusted pixels end at different depths in neighbouring directions, the
+    # interpolation starts at different points: smoothing round the limb hides the steps.
+    F = np.where(span, ndimage.gaussian_filter1d(F, 2.0, axis=1, mode="wrap"), F)
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - cx, yy - cy)
+    a = np.mod(np.arctan2(yy - cy, xx - cx), 2 * math.pi) * na / (2 * math.pi)
+    jr = (rr - radii[0]) / step
+    sel = (jr >= 0) & (jr <= len(radii) - 1)
+    out = img.copy()
+    for c in range(3):
+        Fc = np.concatenate([F[..., c], F[:, :1, c]], axis=1)  # wrap round
+        v = ndimage.map_coordinates(Fc, [jr[sel], a[sel]], order=1)
+        out[..., c][sel] = np.exp(v)
+    return out
+
+
 def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.ndarray, es_weight: np.ndarray,
                origin: tuple[int, int], es_centre: tuple[float, float], margin_px: float = 1.5,
                say: Optional[Say] = None):
@@ -1238,7 +1302,12 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
     ri = np.clip(rr.astype(int), 0, None)
     med = ndimage.median(ew, labels=np.where(ew > 0, ri + 1, 0), index=np.arange(1, ri.max() + 2))
     med = np.nan_to_num(np.asarray(med, np.float32))
-    es_ok = es_good & (ew >= 0.1 * med[ri])
+    frac = ew / np.maximum(med[ri], 1e-30)
+    es_ok = es_good & (frac >= 0.1)
+    # Between 10 and 40 % of the usual frames the stack is only partly trusted (see the radial
+    # fill below): a hard cut there gave a ragged edge round a bright prominence.
+    tq = np.clip((frac - 0.1) / 0.3, 0.0, 1.0)
+    trust = np.where(es_ok, tq * tq * (3 - 2 * tq), 0.0).astype(np.float32)
     # Fully the earthshine stack out to the limb (the stack's own Moon is a single noisy frame),
     # crossing over to the HDR stack's corona in the next 2 px, where both hold the same light.
     t = np.clip((mr + 2.0 - rr) / 2.0, 0.0, 1.0)
@@ -1299,6 +1368,20 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
             if not left.any():
                 break
         say(f"Moon: {n_hole} pixels by the limb that neither stack has reliably filled from around")
+    # Round a bright prominence: the light between the last well-exposed earthshine pixels and
+    # the corona 3 px out, interpolated along each radius (in log brightness: glare fades
+    # steeply and smoothly), not spread sideways from neighbours (which made blotches).
+    tc = np.where(had, 1.0, trust[sy, sx]).astype(np.float32)
+    target = band & ~had & (tc < 1.0)
+    if target.any():
+        es_c = np.moveaxis(es_rgb, 0, -1)[sy, sx]
+        floor = max(float(np.median(es_c[(rs < 0.8 * mr) & es_ok[sy, sx]])) * 0.05, 1e-12) \
+            if (es_ok[sy, sx] & (rs < 0.8 * mr)).any() else 1e-12
+        rad = _radial_fill(sub, tc, cx - sx.start, cy - sy.start, mr, floor)
+        if rad is not None:
+            k = np.where(target, tc, 1.0)[..., None]
+            sub[:] = np.where(target[..., None], k * sub + (1 - k) * rad, sub)
+            wnew = np.where(target, np.maximum(wnew, 0.0), wnew)
     wsub[:] = np.where((a > 0) | hole, np.maximum(wnew, 1e-12), wsub)
     mask = np.zeros((h, w), bool)
     inside = rr < mr + margin_px + 1.0  # overlaps the corona's own region: no gap between them

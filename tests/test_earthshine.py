@@ -663,3 +663,45 @@ def test_prominence_fan_is_removed_and_maria_kept():
     quiet = np.where(good, mare + 2e-5 * rng.normal(0, 1, (n, n)), 0).astype(np.float32)
     g0, a0 = ES.source_glare(quiet, good, cx, cy, r, 3.0)
     assert a0 == [] and not g0.any()
+
+
+def test_light_by_a_bright_prominence_is_smooth_round_the_limb(tmp_path):
+    """By a bright prominence ever fewer earthshine frames are usable towards it, and the last
+    ones are near full well (colour and level off). The merged light there must not be ragged:
+    it is interpolated along each radius, not patched from neighbours. Round the limb it varies
+    from pixel to pixel little more than the true light does (the older patching: 4-8x)."""
+    from tse_core.earthshine import merge_moon
+    from tse_core.fits import read_fits
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    hdr, head = read_fits(tmp_path / "e_hdr.fit")
+    wt, _ = read_fits(tmp_path / "e_weight.fit")
+    ew, _ = read_fits(tmp_path / "e_earthshine_weight.fit")
+    es, eh = read_fits(tmp_path / "e_earthshine_rgb.fit")
+    truth = es.copy()
+    crop = (slice(30, 270), slice(40, 280))
+    rc, pc = rr[crop], phi[crop]
+    zone = (np.abs(pc) < 0.12) & (rc > r - 8) & (rc < r + 1)
+    rng = np.random.default_rng(7)
+    dist = np.hypot(rc * np.cos(pc) - r, rc * np.sin(pc))[zone]
+    f = np.clip((0.02 + 0.6 * np.clip(dist / 10, 0, 1)) * rng.uniform(0.8, 1.2, zone.sum()), 0, 1)
+    ew = ew.copy()
+    ew[zone] *= f
+    es = es.copy()
+    bad = zone.copy()
+    bad[zone] = f < 0.3
+    es[:, bad] = es[:, bad].mean(axis=0) * rng.uniform(0.3, 1.5, bad.sum())
+    H = np.moveaxis(hdr, 0, -1).astype(np.float32).copy()
+    merge_moon(H, wt.astype(np.float32).copy(), head, es.astype(np.float32), ew.astype(np.float32), (40, 30),
+               (float(eh["MOONX"]), float(eh["MOONY"])))
+    ref = np.zeros_like(H)
+    ref[crop] = np.moveaxis(truth, 0, -1)
+
+    def rough(img, d):
+        a = np.linspace(-0.1, 0.1, 60)
+        ys, xs = 159.5 + (r + d) * np.sin(a), 159.5 + (r + d) * np.cos(a)
+        v = np.stack([ndimage.map_coordinates(img[..., c], [ys, xs], order=1) for c in range(3)]).mean(0)
+        return float(np.std(np.diff(np.log(np.maximum(v, 1e-9)))))
+
+    for d in (-1.5, -3.0):
+        assert rough(H, d) < 0.05, (d, rough(H, d), rough(ref, d))

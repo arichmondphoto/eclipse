@@ -471,8 +471,14 @@ next to the linear stack.
 eclipse2024.json` (or **Final image** on the Earthshine tab, with a preview)
 puts the Moon-aligned earthshine stack, linear and in the same units, into
 the HDR stack inside the lunar disc (registered on the limb, crossing over in
-the 2 px just outside it, where both hold the same light; pixels by the limb
-that neither stack has are filled from their neighbours). The settings of
+the 2 px just outside it, where both hold the same light). By a bright
+prominence the long earthshine frames saturate, so towards it ever fewer
+frames are usable and the last are near full well: there (under 40% of the
+usual frames, fully below 10%) the light is interpolated along each radius in
+log brightness, from the last well-exposed earthshine pixel to the limb,
+where it takes the corona 3 px out times the drop across the limb seen in the
+nearest good directions. Spreading it sideways from neighbours, as before,
+left a ragged dark-red fringe. The settings of
 your last Enhance run then stretch Moon and corona together, so the limb is
 the stack's own: one curve, one colour treatment, no seam. A prominence is
 the same red on both sides of the limb, and nothing at the limb is cut,
