@@ -85,6 +85,12 @@ carefully against the PyQt6 API. Say so when handing it over.
   to change them.
 - **Before pushing:** run the full suite and the GUI smoke script.
 
+## Work in progress
+
+- `docs/PLAN_bray_falls_look.md`: the plan to make the final image look like Bray Falls' blended
+  2024 image (corona tone, fine structure, the Moon, a crisp limb). Read it first when the user
+  asks to continue, and tick items off as they are done.
+
 ## Commits
 
 - Commit and push to `main` (the remote is `arichmondphoto/eclipse`).
