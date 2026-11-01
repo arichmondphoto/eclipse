@@ -1323,7 +1323,7 @@ class EarthshineTab(StepTab):
         self._final_changed()
 
     def _pick_albedo(self) -> None:
-        start = self.albedo_path.text().strip() or str(self.main.frames.project_dir())
+        start = self.albedo_path.text().strip() or str(self.main.frames_tab.project_dir())
         fname, _ = QFileDialog.getOpenFileName(self, "Lunar albedo map", start, "Images (*.jpg *.jpeg *.tif *.tiff *.png)")
         if fname:
             self.albedo_path.setText(fname)
