@@ -1,6 +1,6 @@
 # Plan: a final image like Bray Falls' blended eclipse
 
-Status: **steps 1 and 2 in the toolkit as options (not defaults); step 2 has open items; step 3 next** (1 Nov 2026).
+Status: **steps 1 and 2 in the toolkit as options (not defaults); step 3 (the Moon) next** (1 Nov 2026).
 Code at the time of writing: commit `38830ba` on `main`. Tick items off here as they are done.
 
 ## Goal
@@ -101,10 +101,22 @@ Done as options of the adaptive layer (`EnhanceParams.noise_gate`, `.strands`; `
   outer corona. Test the adaptive layer on the crop alone with its weights cut from
   `Eclipse 2024_weight.fit` (scratch `crop_adapt.py` approach).
 
+- [x] Speckles where two strand families meet: the along/round mix now changes over a strand
+      length (`smooth_along` blurs its coherence ramp). Much reduced; some remain round the
+      dust rings (real features in the stack; no dust tool, by rule).
+- [x] Adaptive strength and skipping the finest scales: `mgn_k` / `--adaptive-k` / **Adaptive
+      strength**; `mgn_skip_fine` / `--adaptive-skip-fine` / **Adaptive: skip finest scales**.
+- [x] Tone like his (light, even grey): `even` / `--even` / **Evenness** takes out a fraction
+      of the large-scale differences round the Sun. It is limited to where the corona is above
+      the noise, fades in from 1.15 to 1.4 R_sun (by the limb it pushed the gaps between loops
+      to black), and takes the black point before. `midtone` / `--midtone` / **Midtone** is a
+      midtones transfer curve (PixInsight-style, finite slope at black, not a gamma) putting the
+      inner corona's median at the level asked. On the crop, natural (flatten 1, even 0.7,
+      midtone 0.6) + adaptive (gate 3, strands 1) 0.8 soft light gives `step2b_small.png`, close
+      to his tone. They also lift the faint outer corona and twilight sky (far sky on the bin8
+      stack: 0.19 by default, 0.36 at flatten 1, 0.62 with midtone 0.6).
+
 Still open:
-- [ ] Speckled patches where strand directions meet or cross, and round the dust rings
-      (low-coherence spots).
-- [ ] Expose the adaptive filter's scales (fixed at 0.6–20% of the Sun's radius) and its k.
 - [ ] The paper's MGN form (gamma global + local, h and γ) as an extra layer for comparison.
 - [ ] Look: his corona is lighter, more even grey with finer, denser strands. Ours at 0.8 soft
       light is closer but darker between streamers. Try stronger flattening of the local mean

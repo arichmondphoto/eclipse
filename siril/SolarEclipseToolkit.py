@@ -899,10 +899,20 @@ class EnhanceTab(StepTab):
         tf.addRow("Flatten:", self.flatten)
         self.shoulder = self._dspin(0.0, 0.6, 0.0, 0.05, "How softly the brightest parts roll off to white")
         tf.addRow("Highlight roll-off:", self.shoulder)
+        self.even = self._dspin(0.0, 1.0, 0.0, 0.05, "Even out streamers against coronal holes")
+        tf.addRow("Evenness:", self.even)
+        self.midtone = self._dspin(0.0, 0.9, 0.0, 0.05, "Where the inner corona's middle brightness sits")
+        tf.addRow("Midtone:", self.midtone)
         self.noise_gate = self._dspin(0.0, 6.0, 0.0, 0.5, "Adaptive layer: keep noise from becoming texture")
         tf.addRow("Adaptive noise gate:", self.noise_gate)
         self.strands = self._dspin(0.0, 3.0, 0.0, 0.25, "Adaptive layer: smooth along the coronal strands")
         tf.addRow("Smooth along strands:", self.strands)
+        self.mgn_k = self._dspin(0.1, 3.0, 0.7, 0.1, "Adaptive layer: strength of the local contrast")
+        tf.addRow("Adaptive strength:", self.mgn_k)
+        self.skip_fine = QSpinBox()
+        self.skip_fine.setRange(0, 5)
+        self.skip_fine.setValue(0)
+        tf.addRow("Adaptive: skip finest scales:", self.skip_fine)
         self.saturation = self._dspin(0.0, 3.0, 1.0, 0.1, "0 = monochrome")
         tf.addRow("Saturation:", self.saturation)
         self.white = QComboBox()
@@ -1007,6 +1017,18 @@ class EnhanceTab(StepTab):
              "are clearer than noise alone would give, so it does not draw strands out of noise. 1 = about 2% of the "
              "Sun's radius (8 px on a 400 mm D850 frame).\n\n0 (default): off. Use it with the noise gate (try 1 "
              "and 3). Slower: the full-size run takes a few minutes more.")
+        _tip(self.mgn_k, "Adaptive layer only: how strongly local contrast is brought out at each scale. "
+             "Default 0.7. Higher gives harder, more graphic strands; lower is gentler.")
+        _tip(self.skip_fine, "Adaptive layer only: leave out this many of its six scales, finest first (about 2.5, "
+             "5, 10, 21, 41 and 83 px on a 400 mm D850 frame). The finest ones are mostly noise in a typical stack; "
+             "skipping 1 or 2 is an alternative or addition to the noise gate. Default 0.")
+        _tip(self.even, "Takes out this fraction of the large brightness differences round the Sun (bright "
+             "streamers against dark coronal holes, over about a quarter of the Sun's radius), as Flatten does for "
+             "the fall-off from the Sun. 0 (default): off. 0.6-0.8 gives the even grey corona of a strongly "
+             "processed eclipse picture; the strands themselves stay.")
+        _tip(self.midtone, "Lightens or darkens the middle tones (a gamma, black and white stay) so that the inner "
+             "corona's median brightness (1.05-2.5 solar radii) sits at this level. 0 (default): off. 0.6 gives a "
+             "light grey corona; 0.4 a darker one.")
         _tip(self.shoulder, "How the brightest parts of the picture (the inner corona by the limb, bright "
              "prominences) reach white.\n\n0 (default): a hard white point, so the brightest 0.1% clip to flat "
              "white. Above 0 that top part of the range rolls off smoothly instead, so it keeps its gradations and "
@@ -1079,7 +1101,8 @@ class EnhanceTab(StepTab):
         layers = tuple(k for k, c in self.layer_checks.items() if c.isChecked())
         modes = {k: c.currentText().lower() for k, c in self.blend_mode.items() if k in blend}
         return EnhanceParams(layers=layers, segments=self.segments.value(), order=self.order.value(),
-                             noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(), noise_gate=self.noise_gate.value(),
+                             noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(), even=self.even.value(), midtone=self.midtone.value(), noise_gate=self.noise_gate.value(), mgn_k=self.mgn_k.value(),
+                             mgn_skip_fine=self.skip_fine.value(),
                              strands=self.strands.value(),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
                              blend_modes=modes, neutral_background=not self.keep_sky.isChecked())

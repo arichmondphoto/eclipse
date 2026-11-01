@@ -63,8 +63,16 @@ class EnhanceParams:
     # Highlights: 0 = a hard white point (the brightest 0.1% clip); above 0, the top part of the
     # range (this fraction) rolls off smoothly towards white and nothing clips, colours keep their hue.
     shoulder: float = 0.0
+    # Evenness: this fraction of the large-scale brightness differences round the Sun (streamers
+    # against coronal holes, over ~25% of the Sun's radius) is taken out too, like the radial
+    # fall-off. 0 = off.
+    even: float = 0.0
+    # Midtones: above 0, a gamma puts the inner corona's median brightness (1.05-2.5 solar radii)
+    # at this level (e.g. 0.6 for a light grey corona). 0 = off.
+    midtone: float = 0.0
     mgn_scales: Optional[Sequence[float]] = None  # px; default from the Sun's radius
     mgn_k: float = 0.7
+    mgn_skip_fine: int = 0  # leave out this many of the finest adaptive scales (they are mostly noise)
     # Adaptive layer, noise-aware (both 0 = off, as before):
     # strands: smoothing along the coronal strands before the filter, in units of 2% of the Sun's
     # radius (1 = about 8 px on a 2024 D850 frame at 400 mm); grain is smoothed out along each
@@ -485,7 +493,7 @@ def radial_profile(x: np.ndarray, r: np.ndarray, valid: np.ndarray, smooth: floa
 
 def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
             flatten: float, stats_valid: Optional[np.ndarray] = None, show: Optional[np.ndarray] = None,
-            shoulder: float = 0.0) -> np.ndarray:
+            shoulder: float = 0.0, even: float = 0.0, sun_r: float = 0.0, midtone: float = 0.0) -> np.ndarray:
     """Log stretch with part of the radial fall-off removed.
 
     ``x`` has the sky removed. The flattening stops where the corona sinks
@@ -503,13 +511,45 @@ def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, no
     t = ri - i0
     base = (1 - t) * prof[i0] + t * prof[i0 + 1]
     out = lg - np.float32(flatten) * base.astype(np.float32)
-    # Black point: the sky (pixels at the noise level), so it comes out dark.
+    # Black point: the sky (pixels at the noise level), so it comes out dark (taken before any
+    # evening out, which must not move the sky).
     sky = valid & (x < floor)
     black = float(np.median(out[sky])) if sky.sum() > 1000 else float(np.percentile(out[valid], 0.5))
+    if even > 0 and sun_r > 0:
+        # Streamers against coronal holes: the large-scale differences round each circle.
+        m = sv.astype(np.float32)
+        sig = max(4.0, 0.25 * sun_r)
+        loc = blur(np.where(sv, out, 0.0).astype(np.float32), sig) / np.maximum(blur(m, sig), 1e-6)
+        lo2 = float(loc[sv].min()) if sv.any() else 0.0
+        rp = ring_stats(loc - lo2, r, phi, sv, 36, 0, 2.0).ring_mean + lo2
+        ring = ((1 - t) * rp[i0] + t * rp[i0 + 1]).astype(np.float32)
+        # Only where the corona stands well above the noise (the sky stays where it is), and
+        # fading in from 1.15 to 1.4 solar radii: right by the limb the corona's contrast is so
+        # steep that taking out its local mean pushed the dark gaps between bright loops to black.
+        above = np.clip((lg - math.log(4 * floor)) / 2.0, 0.0, 1.0)
+        rin = np.clip((r / sun_r - 1.15) / 0.25, 0.0, 1.0)
+        out = out - np.float32(even) * (above * rin * (loc - ring)).astype(np.float32)
     white = float(np.percentile(out[valid], 99.9))
     out = np.clip(roll_off((out - black) / ((white - black) or 1.0), shoulder), 0.0, 1.0).astype(np.float32)
+    if midtone > 0 and sun_r > 0:
+        out = set_midtone(out, valid & (r > 1.05 * sun_r) & (r < 2.5 * sun_r), midtone)
     out[~(valid if show is None else show)] = 0.0
     return out
+
+
+def set_midtone(out: np.ndarray, sel: np.ndarray, midtone: float) -> np.ndarray:
+    """A midtones transfer curve (as in PixInsight's) that puts the median of ``out`` over ``sel``
+    at ``midtone``; black and white stay, and unlike a gamma it has a finite slope at black, so the
+    dark sky is lifted only a little."""
+    if not sel.any():
+        return out
+    a = float(np.median(out[sel]))
+    t = min(max(midtone, 0.05), 0.95)
+    if not 0.0 < a < 1.0:
+        return out
+    m = a * (1 - t) / (a - 2 * t * a + t)
+    x = np.clip(out, 0.0, 1.0)
+    return ((m - 1) * x / np.minimum((2 * m - 1) * x - m, -1e-9)).astype(np.float32)
 
 
 def soft_light(base: np.ndarray, top: np.ndarray) -> np.ndarray:
@@ -528,7 +568,7 @@ BLEND_MODES = {"soft light": soft_light, "overlay": overlay}
 
 def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Optional[dict] = None,
                      show: Optional[np.ndarray] = None, fade: Optional[np.ndarray] = None,
-                     shoulder: float = 0.0) -> np.ndarray:
+                     shoulder: float = 0.0, midtone: float = 0.0, tone_sel: Optional[np.ndarray] = None) -> np.ndarray:
     """The natural layer as the base, each filter layer applied at its weight (like layer opacity
     in Photoshop) in its mode, soft light unless ``modes`` says overlay. The filter layers are
     centred on mid-grey, which both modes treat as 'no change', so they add structure without
@@ -548,6 +588,8 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
         else:
             base = (1 - w) * base + w * fn(base, layers[k])
     out = stretch(base, valid, 0.05, 99.95, shoulder)
+    if midtone > 0 and tone_sel is not None:
+        out = set_midtone(out, tone_sel, midtone)
     out[~(valid if show is None else show)] = 0.0
     return out
 
@@ -602,6 +644,9 @@ def smooth_along(b: np.ndarray, theta: np.ndarray, coh: np.ndarray, length: floa
     base = ndimage.gaussian_filter(b, 0.6)
     out = np.empty_like(b, dtype=np.float32)
     iso_img = ndimage.gaussian_filter(b, iso)
+    # Where two families of strands meet the direction flips over a few pixels; a mix that switched
+    # as fast between along and round made speckles there, so the mix changes over a strand length.
+    kmap = ndimage.gaussian_filter(np.clip((coh - 0.2) / 0.3, 0.0, 1.0).astype(np.float32), max(1.0, length))
     xx = np.arange(w, dtype=np.float32)[None, :]
     for r0 in range(0, h, chunk):
         rows = slice(r0, min(h, r0 + chunk))
@@ -610,7 +655,7 @@ def smooth_along(b: np.ndarray, theta: np.ndarray, coh: np.ndarray, length: floa
         acc = np.zeros((rows.stop - rows.start, w), np.float32)
         for t, wt in zip(ts, wts):
             acc += wt * ndimage.map_coordinates(base, [yy + t * s_, xx + t * c], order=1, mode="nearest")
-        k = np.clip((coh[rows] - 0.2) / 0.3, 0.0, 1.0)
+        k = kmap[rows]
         out[rows] = k * acc + (1 - k) * iso_img[rows]
     return out
 
@@ -968,12 +1013,14 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
 
     need = set(p.layers) | {k for k, v in p.blend.items() if v}
     scales = list(p.mgn_scales) if p.mgn_scales else [g.sun_r * f for f in (0.006, 0.012, 0.025, 0.05, 0.1, 0.2)]
+    scales = sorted(scales)[min(max(int(p.mgn_skip_fine), 0), len(scales) - 1):]
     for name_l in LAYERS:
         if name_l not in need:
             continue
         say(f"layer {name_l}")
         if name_l == "natural":
-            y = natural(lum, r, phi, valid, nlev, p.flatten, stats_valid, show=show, shoulder=p.shoulder)
+            y = natural(lum, r, phi, valid, nlev, p.flatten, stats_valid, show=show, shoulder=p.shoulder,
+                        even=p.even, sun_r=g.sun_r, midtone=p.midtone)
         elif name_l == "nrgf":
             y = to_unit(nrgf(lum, r, valid, stats), valid)
         elif name_l == "fnrgf":
@@ -993,7 +1040,8 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     blend_w = {k: float(v) for k, v in p.blend.items() if v and k in layers}
     if blend_w:
         layers["blend"] = soft_light_blend(layers, blend_w, valid, p.blend_modes, show=show, fade=fade,
-                                             shoulder=p.shoulder)
+                                             shoulder=p.shoulder, midtone=p.midtone,
+                                             tone_sel=valid & (r > 1.05 * g.sun_r) & (r < 2.5 * g.sun_r))
     unknown = set(p.blend) - set(LAYERS)
     if unknown:
         notes.append(f"unknown blend layer(s) ignored: {', '.join(sorted(unknown))}")

@@ -375,6 +375,13 @@ instead: nothing clips, and colours keep their hue. On the 2024 stack with
 `--flatten 1` it took the clipped share of the inner corona (out to 2.5 Moon
 radii) from 1.5% to 0%.
 
+Tone: `--even 0.7` (**Evenness**) takes out that fraction of the large
+brightness differences round the Sun (streamers against coronal holes, over
+about a quarter of the Sun's radius) as `--flatten` does for the fall-off
+from the Sun; the strands stay. `--midtone 0.6` (**Midtone**) puts the inner
+corona's median (1.05-2.5 solar radii) at that level with a gamma, for a
+light grey corona. Both off by default.
+
 Noise in the adaptive layer: at its finest scales a stack is mostly noise
 (on the 2024 stack, structure stood only 2x and 3.6x above the noise at
 2.5 and 5 px, against 9-250x at 10-83 px), and the adaptive filter turns it
@@ -392,7 +399,12 @@ ridges as the data's noise would be, so strands are not drawn out of noise.
 A test checks that pure noise gives under 0.4x the texture of the plain
 filter and of real strands. Both are off by default; the output keeps a
 fixed scale, so where there is little real structure it stays flat instead
-of being stretched back up.
+of being stretched back up. Where two families of strands meet, the change
+from smoothing along to smoothing round is spread over a strand length, so
+crossings do not speckle. `--adaptive-k` (**Adaptive strength**, default
+0.7) sets how hard local contrast is brought out, and
+`--adaptive-skip-fine N` (**Adaptive: skip finest scales**) leaves out the N
+finest of the six scales.
 
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
@@ -819,8 +831,12 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
 | `--std-att` | FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0) |
 | `--noise-m` | FNRGF-N noise compensation, 0..0.99 (default 0.7) |
+| `--adaptive-k` | adaptive layer: strength of the local contrast at each scale (default 0.7) |
+| `--adaptive-skip-fine` | adaptive layer: leave out this many of its finest scales (0-5; they are mostly noise) |
 | `--noise-gate` | adaptive layer: each scale's detail counts only as far as it stands above the stack's noise at that scale (e.g. 3); 0 = off |
 | `--strands` | adaptive layer: smooth along the coronal strands first, in units of 2%% of the Sun's radius (e.g. 1); 0 = off |
+| `--even` | take out this fraction of the large brightness differences round the Sun (streamers against coronal holes); 0 = off, e.g. 0.7 |
+| `--midtone` | put the inner corona's median brightness at this level with a gamma; 0 = off, e.g. 0.6 |
 | `--shoulder` | highlight roll-off: 0 = hard white point (the brightest 0.1%% clip); e.g. 0.3 = the top 30%% of the range rolls off smoothly to white, nothing clips and colours keep their hue |
 | `--flatten` | natural layer: how much of the radial fall-off to remove, 0..1 (default 0.8) |
 | `--saturation` | colour saturation, 0 = monochrome (default 1) |

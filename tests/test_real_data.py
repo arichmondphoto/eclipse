@@ -93,3 +93,29 @@ def test_white_balance_is_plausible_for_a_d850(real):
     res, *_ = real
     assert res.white[0] == pytest.approx(2.0, abs=0.15)
     assert res.white[2] == pytest.approx(1.34, abs=0.1)
+
+
+def test_even_and_midtone_give_a_light_even_corona():
+    """--even takes out much of the streamer/coronal-hole contrast round the Sun, and --midtone
+    puts the inner corona's median where asked, on the real 2024 stack."""
+    z = np.load(DATA)
+    hdr = np.ascontiguousarray(np.moveaxis(z["hdr"].astype(np.float32) * float(z["scale"]), 0, -1))
+    geo = {k: float(z[k]) for k in ("SUNX", "SUNY", "SUNR", "MOONX", "MOONY", "MOONR")}
+    weight = (np.abs(hdr).sum(axis=2) > 0).astype(np.float32)
+    g = E.geometry_from_header(geo)
+    r, phi = E.polar(hdr.shape[:2], g)
+    band = (r > 1.4 * g.sun_r) & (r < 2.2 * g.sun_r)
+
+    def sector_spread(img):
+        lum = img.mean(axis=2)
+        secs = [lum[band & (phi >= a) & (phi < a + np.pi / 12)] for a in np.arange(-np.pi, np.pi, np.pi / 12)]
+        return float(np.std([np.median(v) for v in secs if v.size > 50]))  # sectors inside the frame
+
+    keep = {"natural"}
+    _, plain = E.enhance(hdr.copy(), weight, geo, E.EnhanceParams(layers=("natural",), blend={}), keep=keep)
+    _, even = E.enhance(hdr.copy(), weight, geo, E.EnhanceParams(layers=("natural",), blend={}, even=0.8), keep=keep)
+    assert sector_spread(even["natural"]) < 0.6 * sector_spread(plain["natural"])
+    _, light = E.enhance(hdr.copy(), weight, geo, E.EnhanceParams(layers=("natural",), blend={}, midtone=0.6),
+                         keep=keep)
+    sel = (r > 1.05 * g.sun_r) & (r < 2.5 * g.sun_r) & (light["natural"].mean(axis=2) > 0)
+    assert abs(float(np.median(light["natural"].max(axis=2)[sel])) - 0.6) < 0.08
