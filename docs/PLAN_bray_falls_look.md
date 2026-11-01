@@ -1,6 +1,6 @@
 # Plan: a final image like Bray Falls' blended eclipse
 
-Status: **not started; waiting for the full-size HDR crop** (1 Nov 2026).
+Status: **step 1 done (option, not default); step 2 next** (1 Nov 2026).
 Code at the time of writing: commit `38830ba` on `main`. Tick items off here as they are done.
 
 ## Goal
@@ -52,13 +52,21 @@ Moon's radius, log what was measured, README and CLI reference kept current.
 
 ### 1. Corona tone without clipping
 
-- [ ] Replace the natural layer's hard white point with smooth highlight compression (for
-      example a soft shoulder or an asinh-like curve on the flattened log image), so the inner
-      corona keeps its structure instead of clipping.
-- [ ] Allow full radial flattening (`flatten` 1.0) without lifting the sky or the noise beyond
-      the corona.
-- [ ] Target: even mid-to-light grey from the limb outward on Andy's crop; report the fraction
-      of clipped pixels before and after.
+- [x] Smooth highlight roll-off instead of a hard white point: `EnhanceParams.shoulder` /
+      `--shoulder` / **Highlight roll-off** (`enhance.roll_off`), in the natural layer and the
+      blend; colours scaled to keep their hue instead of clipping per channel. Default 0 (off).
+- [x] Full flattening (`flatten` 1.0) works with it.
+- [x] Measured on the crop (blend, out to 2.5 Moon radii): default 1.5% clipped, median 0.34;
+      `flatten=1.0, shoulder=0.3`: 0% clipped, median 0.31. The prominence at the right keeps a red
+      core instead of flat pink.
+- [ ] Still open: a bright band ~20 px wide stays by the limb (lighter, but not even grey). That
+      is local contrast, so it belongs to step 2.
+
+Notes from the crop (`hdr_crop_2500.fit`, 2530 px, top-left (2715, 1468) full frame): the crop
+alone has no sky, so sky removal and white balance fail on it. Test renders paste it into the
+quarter-size stack scaled up to full frame (scratch scripts `load2.canvas()`); a full-frame
+Enhance takes ~4 min. At 1:1 the strands are soft and grainy: much of the gap to his image is
+signal (data), not stretch. Dust spots show as dark rings in the corona (no dust tool, by rule).
 
 ### 2. Fine structure without noise
 

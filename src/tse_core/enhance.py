@@ -60,6 +60,9 @@ class EnhanceParams:
     noise_m: float = 0.7  # FNRGF-N: fraction of the noise removed from the local deviation, in [0, 1)
     ring_smooth: float = 1.5  # smoothing of the circle statistics along the radius, px
     flatten: float = 0.8  # natural layer: fraction of the radial fall-off (in log) removed
+    # Highlights: 0 = a hard white point (the brightest 0.1% clip); above 0, the top part of the
+    # range (this fraction) rolls off smoothly towards white and nothing clips, colours keep their hue.
+    shoulder: float = 0.0
     mgn_scales: Optional[Sequence[float]] = None  # px; default from the Sun's radius
     mgn_k: float = 0.7
     saturation: float = 1.0  # colour saturation of every layer (0 = monochrome)
@@ -146,9 +149,19 @@ def to_unit(y: np.ndarray, valid: np.ndarray, spread: float = 99.5) -> np.ndarra
     return (0.5 + np.arctan(1.6 * y / s) / math.pi).astype(np.float32)
 
 
-def stretch(x: np.ndarray, valid: np.ndarray, lo: float = 0.5, hi: float = 99.8) -> np.ndarray:
+def roll_off(y: np.ndarray, shoulder: float) -> np.ndarray:
+    """Above 1 - ``shoulder`` the values approach 1 smoothly (slope 1 at the knee, never reaching
+    it), so the brightest parts keep their gradations instead of clipping. 0: unchanged."""
+    if shoulder <= 0:
+        return y
+    knee = 1.0 - shoulder
+    return np.where(y > knee, knee + shoulder * (1.0 - np.exp(-(y - knee) / shoulder)), y).astype(np.float32)
+
+
+def stretch(x: np.ndarray, valid: np.ndarray, lo: float = 0.5, hi: float = 99.8, shoulder: float = 0.0) -> np.ndarray:
     a, b = np.percentile(x[valid], [lo, hi]) if valid.any() else (0.0, 1.0)
-    return np.clip((x - a) / ((b - a) or 1.0), 0.0, 1.0).astype(np.float32)
+    y = (x - a) / ((b - a) or 1.0)
+    return np.clip(roll_off(y, shoulder), 0.0, 1.0).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +475,8 @@ def radial_profile(x: np.ndarray, r: np.ndarray, valid: np.ndarray, smooth: floa
 
 
 def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
-            flatten: float, stats_valid: Optional[np.ndarray] = None, show: Optional[np.ndarray] = None) -> np.ndarray:
+            flatten: float, stats_valid: Optional[np.ndarray] = None, show: Optional[np.ndarray] = None,
+            shoulder: float = 0.0) -> np.ndarray:
     """Log stretch with part of the radial fall-off removed.
 
     ``x`` has the sky removed. The flattening stops where the corona sinks
@@ -484,7 +498,7 @@ def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, no
     sky = valid & (x < floor)
     black = float(np.median(out[sky])) if sky.sum() > 1000 else float(np.percentile(out[valid], 0.5))
     white = float(np.percentile(out[valid], 99.9))
-    out = np.clip((out - black) / ((white - black) or 1.0), 0.0, 1.0).astype(np.float32)
+    out = np.clip(roll_off((out - black) / ((white - black) or 1.0), shoulder), 0.0, 1.0).astype(np.float32)
     out[~(valid if show is None else show)] = 0.0
     return out
 
@@ -504,7 +518,8 @@ BLEND_MODES = {"soft light": soft_light, "overlay": overlay}
 
 
 def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Optional[dict] = None,
-                     show: Optional[np.ndarray] = None, fade: Optional[np.ndarray] = None) -> np.ndarray:
+                     show: Optional[np.ndarray] = None, fade: Optional[np.ndarray] = None,
+                     shoulder: float = 0.0) -> np.ndarray:
     """The natural layer as the base, each filter layer applied at its weight (like layer opacity
     in Photoshop) in its mode, soft light unless ``modes`` says overlay. The filter layers are
     centred on mid-grey, which both modes treat as 'no change', so they add structure without
@@ -523,7 +538,7 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
             base = (1 - wf) * base + wf * fn(base, layers[k])
         else:
             base = (1 - w) * base + w * fn(base, layers[k])
-    out = stretch(base, valid, 0.05, 99.95)
+    out = stretch(base, valid, 0.05, 99.95, shoulder)
     out[~(valid if show is None else show)] = 0.0
     return out
 
@@ -781,7 +796,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             continue
         say(f"layer {name_l}")
         if name_l == "natural":
-            y = natural(lum, r, phi, valid, nlev, p.flatten, stats_valid, show=show)
+            y = natural(lum, r, phi, valid, nlev, p.flatten, stats_valid, show=show, shoulder=p.shoulder)
         elif name_l == "nrgf":
             y = to_unit(nrgf(lum, r, valid, stats), valid)
         elif name_l == "fnrgf":
@@ -796,13 +811,17 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     notes = []
     blend_w = {k: float(v) for k, v in p.blend.items() if v and k in layers}
     if blend_w:
-        layers["blend"] = soft_light_blend(layers, blend_w, valid, p.blend_modes, show=show, fade=fade)
+        layers["blend"] = soft_light_blend(layers, blend_w, valid, p.blend_modes, show=show, fade=fade,
+                                             shoulder=p.shoulder)
     unknown = set(p.blend) - set(LAYERS)
     if unknown:
         notes.append(f"unknown blend layer(s) ignored: {', '.join(sorted(unknown))}")
 
     def coloured(k: str) -> np.ndarray:
-        img = np.clip(layers[k][..., None] * col, 0.0, 1.0)
+        img = layers[k][..., None] * col
+        if p.shoulder > 0:  # keep the hue where a colour would go past white (a bright prominence)
+            img = img / np.maximum(img.max(axis=2, keepdims=True), 1.0)
+        img = np.clip(img, 0.0, 1.0)
         if moon is not None and moon.surface is not None and k in ("natural", "blend"):
             # The seas and highlands, added (screen) where the stretched light of the Moon itself
             # leaves room for them: nothing is cut or pasted, so the limb is the stack's own.

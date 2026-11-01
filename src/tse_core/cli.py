@@ -141,6 +141,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mean-att", help="FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0)")
     p.add_argument("--std-att", help="FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0)")
     p.add_argument("--noise-m", type=float, default=0.7, help="FNRGF-N noise compensation, 0..0.99 (default 0.7)")
+    p.add_argument("--shoulder", type=float, default=0.0,
+                   help="highlight roll-off: 0 = hard white point (the brightest 0.1%% clip); e.g. 0.3 = the top 30%% of "
+                        "the range rolls off smoothly to white, nothing clips and colours keep their hue")
     p.add_argument("--flatten", type=float, default=0.8,
                    help="natural layer: how much of the radial fall-off to remove, 0..1 (default 0.8)")
     p.add_argument("--saturation", type=float, default=1.0, help="colour saturation, 0 = monochrome (default 1)")
@@ -618,7 +621,7 @@ def cmd_enhance(args) -> int:
         return 1
     params = EnhanceParams(layers=layers, segments=args.segments, order=args.order,
                            mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
-                           noise_m=args.noise_m, flatten=args.flatten, saturation=args.saturation,
+                           noise_m=args.noise_m, flatten=args.flatten, shoulder=args.shoulder, saturation=args.saturation,
                            white=args.white, blend=blend, blend_modes=blend_modes,
                            neutral_background=not args.keep_background_colour)
     out, code = _run(enhance_project, args.project, params, hdr_file=args.hdr, output=args.output,

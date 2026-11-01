@@ -235,3 +235,20 @@ def test_parse_blend_with_modes():
     assert W.parse_blend_modes(text) == {"adaptive": "soft light", "fnrgf": "overlay"}
     with pytest.raises(W.WorkflowError):
         W.parse_blend_modes("fnrgf=0.1:screen")
+
+
+def test_highlight_shoulder_rolls_off_without_clipping():
+    """With a shoulder the brightest values keep their order and gradations below 1 instead of
+    clipping; below the knee nothing changes; 0 leaves the hard white point as before."""
+    import numpy as np
+
+    from tse_core.enhance import roll_off, stretch
+
+    y = np.linspace(0, 3, 301).astype(np.float32)
+    out = roll_off(y, 0.3)
+    assert np.allclose(out[y <= 0.7], y[y <= 0.7])
+    assert np.all(np.diff(out) > 0) and out.max() < 1.0
+    assert np.array_equal(roll_off(y, 0.0), y)
+    valid = np.ones_like(y, bool)
+    assert (stretch(y, valid, 0, 90) >= 1.0).sum() > 20  # hard white point: the top clips
+    assert (stretch(y, valid, 0, 90, shoulder=0.3) >= 0.999).sum() <= 1

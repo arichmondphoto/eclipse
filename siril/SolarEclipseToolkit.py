@@ -897,6 +897,8 @@ class EnhanceTab(StepTab):
         tf = QFormLayout(tone)
         self.flatten = self._dspin(0.0, 1.0, 0.8, 0.05, "How much of the brightness fall-off from the Sun to remove")
         tf.addRow("Flatten:", self.flatten)
+        self.shoulder = self._dspin(0.0, 0.6, 0.0, 0.05, "How softly the brightest parts roll off to white")
+        tf.addRow("Highlight roll-off:", self.shoulder)
         self.saturation = self._dspin(0.0, 3.0, 1.0, 0.1, "0 = monochrome")
         tf.addRow("Saturation:", self.saturation)
         self.white = QComboBox()
@@ -991,6 +993,11 @@ class EnhanceTab(StepTab):
                  "as 'no change', so the sky stays dark.\n\nSoft Light (default): gentle, keeps the natural "
                  "tones.\n\nOverlay: stronger, adds more contrast, mostly in the mid-tones. Use a lower "
                  "strength with Overlay (for example 5-20 %).")
+        _tip(self.shoulder, "How the brightest parts of the picture (the inner corona by the limb, bright "
+             "prominences) reach white.\n\n0 (default): a hard white point, so the brightest 0.1% clip to flat "
+             "white. Above 0 that top part of the range rolls off smoothly instead, so it keeps its gradations and "
+             "nothing clips; prominences keep their colour instead of turning flat pink. 0.3 is a good start; "
+             "higher compresses more of the bright range.")
         _tip(self.flatten, "How much of the corona's brightness fall-off from the Sun the natural layer removes, "
              "from 0 (none: a plain log stretch, the inner corona dominates) to 1 (all of it: equal brightness at "
              "every height).\n\nDefault 0.8. Lower it (0.5-0.7) to keep more of the natural fall-off; raise it "
@@ -1058,7 +1065,7 @@ class EnhanceTab(StepTab):
         layers = tuple(k for k, c in self.layer_checks.items() if c.isChecked())
         modes = {k: c.currentText().lower() for k, c in self.blend_mode.items() if k in blend}
         return EnhanceParams(layers=layers, segments=self.segments.value(), order=self.order.value(),
-                             noise_m=self.noise_m.value(), flatten=self.flatten.value(),
+                             noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
                              blend_modes=modes, neutral_background=not self.keep_sky.isChecked())
 

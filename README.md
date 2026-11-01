@@ -367,6 +367,14 @@ to grey where the signal is buried in noise or no brighter than the
 uncertainty of the removed sky. The Moon is black in these layers; the
 Earthshine step fills it.
 
+Highlights: by default the natural layer and the blend set a white point
+at the brightest 0.1%, which clips the inner corona by the limb and bright
+prominences to flat white or flat pink. `--shoulder 0.3` (**Highlight
+roll-off** on the Enhance tab) rolls the top 30% of the range off smoothly
+instead: nothing clips, and colours keep their hue. On the 2024 stack with
+`--flatten 1` it took the clipped share of the inner corona (out to 2.5 Moon
+radii) from 1.5% to 0%.
+
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
 
@@ -792,6 +800,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
 | `--std-att` | FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0) |
 | `--noise-m` | FNRGF-N noise compensation, 0..0.99 (default 0.7) |
+| `--shoulder` | highlight roll-off: 0 = hard white point (the brightest 0.1%% clip); e.g. 0.3 = the top 30%% of the range rolls off smoothly to white, nothing clips and colours keep their hue |
 | `--flatten` | natural layer: how much of the radial fall-off to remove, 0..1 (default 0.8) |
 | `--saturation` | colour saturation, 0 = monochrome (default 1) |
 | `--white` | white balance: inner corona neutral (default), the camera's as-shot, or none |
