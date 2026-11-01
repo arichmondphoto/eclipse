@@ -525,7 +525,19 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
                             f"earthshine layer is {earth.shape[1] * step} x {earth.shape[0] * step} px. Use an image "
                             "the size of the HDR stack (not cropped or resized), or re-run the earthshine step after "
                             "the latest stack.")
-    out = composite(base, earth, strength, mode)
+    moon, limb_px, reach = None, 1.5, 6.0
+    info_path = resolve(path, project.parameters.get("earthshine", {}).get("info"))
+    if info_path:
+        try:
+            info = json.loads(Path(info_path).read_text(encoding="utf-8"))
+            if info.get("moon"):
+                mx, my, mr = info["moon"]
+                moon = ((mx + 0.5) / step - 0.5, (my + 0.5) / step - 0.5, mr / step)
+                limb_px = float(info.get("params", {}).get("limb_px", 1.5)) / step
+                reach = float(info.get("params", {}).get("limb_reach", 6.0)) / step
+        except (OSError, ValueError):
+            moon = None
+    out = composite(base, earth, strength, mode, moon=moon, limb_px=limb_px, reach=reach)
     if preview_side:
         return out
     say("writing the final image")

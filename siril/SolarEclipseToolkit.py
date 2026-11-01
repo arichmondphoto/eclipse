@@ -1184,7 +1184,7 @@ class EarthshineTab(StepTab):
         self.keep_glare = QDoubleSpinBox()
         self.keep_glare.setRange(0.0, 1.0)
         self.keep_glare.setSingleStep(0.05)
-        self.keep_glare.setValue(0.3)
+        self.keep_glare.setValue(0.5)
         f.addRow("Keep glare (glow):", self.keep_glare)
         self.limb_soften = QDoubleSpinBox()
         self.limb_soften.setRange(0.0, 6.0)
@@ -1326,7 +1326,7 @@ class EarthshineTab(StepTab):
              "shading; this gives back a brighter middle and keeps the noisier last pixels by the edge dim.", f)
         _tip(self.keep_glare, "How much of the glare that was taken away is put back as a soft glow just inside "
              "the edge of the Moon, fading inward: the inner corona's light spilling over the dark Moon, as the eye "
-             "sees it at totality. 0 = none, 0.3 = a gentle glow (default), 1 = all of it (compressed so it cannot "
+             "sees it at totality. 0 = none, 0.5 = a soft glow (default), 1 = all of it (compressed so it cannot "
              "clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
              "softness, not a drawn circle.", f)
         _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "

@@ -419,7 +419,7 @@ looks pasted in, so the layer is built like a photograph of the limb:
   (mountains, valleys) and softness, and runs into the corona; the layer
   hands over to the corona layers 2 px past their black disc.
   `--limb-soften` (1.5 px) adds a little extra softness.
-* *A glow.* `--keep-glare` (0.3) of the glare that was taken away is put back
+* *A glow.* `--keep-glare` (0.5) of the glare that was taken away is put back
   as a glow fading inward from the limb (the inner corona's light spilling
   over the dark Moon), on the same logarithmic scale, so it cannot clip.
 * *Grain in the filled edge.* The last pixels, which are only noise and are

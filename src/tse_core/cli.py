@@ -175,8 +175,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona)")
     p.add_argument("--limb-darkening", type=float, default=0.6,
                    help="vignette: how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit)")
-    p.add_argument("--keep-glare", type=float, default=0.3,
-                   help="how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.3)")
+    p.add_argument("--keep-glare", type=float, default=0.5,
+                   help="how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.5)")
     p.add_argument("--limb-soften", type=float, default=1.5,
                    help="extra softening of the limb in px, on top of the real one (default 1.5, 0 = none)")
     p.add_argument("--no-edge-grain", action="store_true",

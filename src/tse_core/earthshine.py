@@ -56,7 +56,7 @@ class EarthshineParams:
     albedo_min_match: float = 0.6  # the map is not used if it matches the middle of the disc less well than this
     limb_px: float = 1.5  # the corona layers' black disc reaches this far past the limb (enhance's margin)
     feather_px: float = 1.0  # soft edge of the disc in the layer (only without a measured limb)
-    keep_glare: float = 0.3  # how much of the removed glare is kept as a glow inside the limb, 0..1
+    keep_glare: float = 0.5  # how much of the removed glare is kept as a glow inside the limb, 0..1
     limb_reach: float = 6.0  # px past the limb the stack and layer reach: the real limb, from the data
     limb_soften: float = 1.5  # extra softening of the limb, px (Gaussian), on top of the real one
     edge_grain: bool = True  # put grain like the rest of the surface into the filled last pixels
@@ -660,6 +660,13 @@ def _ring_floor(values: np.ndarray, mask: np.ndarray, phi: np.ndarray, nb: int =
     return ndimage.map_coordinates(prof, [(phi + math.pi) / (2 * math.pi) * nb - 0.5], order=1, mode="grid-wrap")
 
 
+def soft_shoulder(x: np.ndarray, knee: float = 0.85) -> np.ndarray:
+    """0..1 like a clip, but above ``knee`` it rolls off smoothly towards 1 instead of a hard cut."""
+    x = np.clip(np.asarray(x, np.float32), 0.0, None)
+    k = 1.0 - knee
+    return np.where(x > knee, knee + k * (1.0 - np.exp(-(x - knee) / k)), x).astype(np.float32)
+
+
 def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: float, cy: float, moon_r: float,
                   p: "EarthshineParams", keep_from: Optional[float], linear: Optional[np.ndarray] = None,
                   glare: Optional[np.ndarray] = None, seed: int = 1) -> np.ndarray:
@@ -683,7 +690,20 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
     body = good & (rr < moon_r * 0.9)
     lo, hi = np.percentile(shown[body if body.sum() > 100 else good], [0.5, 99.5])
     span = float(hi - lo) or 1.0
-    surf = np.clip((shown - lo) / span, 0.0, 1.0)
+    xs = (shown - lo) / span
+    surf = soft_shoulder(xs)
+    # Light far above the brightest surface is glare left over (by a bright prominence): it goes
+    # into the glow below, on its gentle logarithmic scale, not into the surface as a flat patch.
+    excess = np.where(good, np.clip(xs - 1.0, 0.0, None) * span, 0.0)
+    # Under such glare the surface is not known: fill it smoothly from around (no flat patch).
+    over = ndimage.binary_dilation(good & (xs > 1.15), iterations=2)
+    if over.any():
+        ok = good & ~over
+        sig = 6.0
+        fill = ndimage.gaussian_filter(np.where(ok, surf, 0.0), sig) / np.maximum(
+            ndimage.gaussian_filter(ok.astype(np.float32), sig), 1e-6)
+        wgt = ndimage.gaussian_filter(over.astype(np.float32), 1.5)
+        surf = np.where(good, surf * (1 - wgt) + np.clip(fill, 0, 1) * wgt, surf).astype(np.float32)
     keep_from = p.margin_px if keep_from is None else keep_from
     r_in = moon_r - keep_from
     shown_good = good & (rr < r_in)
@@ -709,7 +729,7 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
 
     # Glow and real limb, both in units of the surface's stretch.
     floor = _ring_floor(glare, good & (rr > 0.66 * moon_r) & (rr < 0.74 * moon_r), phi)
-    g_in = np.where(good, np.clip(glare - floor, 0.0, None), 0.0)
+    g_in = np.where(good, np.clip(glare - floor, 0.0, None), 0.0) + ndimage.gaussian_filter(excess, 2.0)
     have = weight > 0
     num = ndimage.gaussian_filter(np.where(have, linear, 0.0), 1.0)
     den = ndimage.gaussian_filter(have.astype(np.float32), 1.0)
@@ -739,9 +759,9 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
         soft = ndimage.gaussian_filter(out, p.limb_soften)
         tb = np.clip(1.0 - np.abs(rr - moon_r) / (p.limb_reach + 3 * p.limb_soften), 0.0, 1.0)
         out = out * (1 - tb) + soft * tb
-    # Past the corona layers' black disc (limb_px out) the corona layers carry on: fade out over 2 px,
-    # so the two do not add up to an over-bright ring.
-    fade = np.clip((min(edge, moon_r + p.limb_px + 2.0) - rr) / 2.0, 0.0, 1.0)
+    # The stack ends limb_reach px out: fade over the last 2 px. Where this overlaps the corona
+    # layers (past their black disc), the final composite keeps the brighter of the two.
+    fade = np.clip((edge - rr) / 2.0, 0.0, 1.0)
     return np.clip(out * fade, 0.0, 1.0).astype(np.float32)
 
 
@@ -773,7 +793,9 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
         layer[ty0 : ty0 + hh, tx0 : tx0 + ww] = img[sy0 : sy0 + hh, sx0 : sx0 + ww]
     layer_tif = write_image(with_format(out / f"{name}_earthshine.tif", fmt), layer)
     info = out / f"{name}_earthshine.json"
-    info.write_text(json.dumps({"crop": crop, "canvas": canvas, "params": asdict(p)}, indent=2), encoding="utf-8")
+    moon = [cx + X0 - canvas[0], cy + Y0 - canvas[1], moon_r]  # in the layer's (canvas) pixels
+    info.write_text(json.dumps({"crop": crop, "canvas": canvas, "moon": moon, "params": asdict(p)}, indent=2),
+                    encoding="utf-8")
     return {"earthshine": str(layer_tif), "crop": str(crop_tif), "linear": str(lin_path), "info": str(info)}
 
 
@@ -787,7 +809,8 @@ from .imageout import with_format, write_image  # noqa: E402
 MODES = ("screen", "lighten", "add")
 
 
-def composite(base: np.ndarray, earth: np.ndarray, strength: float = 1.0, mode: str = "screen") -> np.ndarray:
+def composite(base: np.ndarray, earth: np.ndarray, strength: float = 1.0, mode: str = "screen",
+              moon: Optional[tuple] = None, limb_px: float = 1.5, reach: float = 6.0) -> np.ndarray:
     """Put the earthshine layer into the corona image, as Photoshop's blend modes would.
 
     Both are display images in 0..1 of the same size. The corona layers are
@@ -796,8 +819,16 @@ def composite(base: np.ndarray, earth: np.ndarray, strength: float = 1.0, mode: 
     they differ only where both have light (the soft edge of the limb).
     ``strength`` scales the earthshine first (like layer opacity, but it can
     go above 1 to brighten a faint Moon).
+
+    With ``moon`` (x, y, radius in these pixels) the limb is matched: round the limb the
+    earthshine layer's light at the edge is scaled to the corona's brightness just outside
+    (it was made from the linear data, the corona from the enhanced layers, so they differ),
+    and across the corona layers' disc edge the brighter of the two is kept. So the Moon's
+    real outline runs into the corona with no bright or dark ring.
     """
     e = np.clip(earth * strength, 0.0, 1.0)
+    if moon is not None:
+        e = match_limb(base, e, moon, limb_px, reach=reach)
     if mode == "screen":
         out = 1.0 - (1.0 - base) * (1.0 - e)
     elif mode == "lighten":
@@ -806,4 +837,61 @@ def composite(base: np.ndarray, earth: np.ndarray, strength: float = 1.0, mode: 
         out = base + e
     else:
         raise ValueError(f"unknown mode {mode!r}; choose from {', '.join(MODES)}")
+    if moon is not None:
+        cx, cy, r = moon
+        h, w = base.shape[:2]
+        y0, y1 = max(0, int(cy - r - 12)), min(h, int(cy + r + 13))
+        x0, x1 = max(0, int(cx - r - 12)), min(w, int(cx + r + 13))
+        if y1 > y0 and x1 > x0:
+            yy, xx = np.mgrid[y0:y1, x0:x1]
+            rr = np.hypot(xx - cx, yy - cy)
+            band = (rr > r + limb_px - 1.0) & (rr < r + max(reach, limb_px + 2.0) + 1.0)
+            sub = out[y0:y1, x0:x1]
+            sub[band] = np.maximum(base[y0:y1, x0:x1][band], e[y0:y1, x0:x1][band])
     return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+
+def match_limb(base: np.ndarray, e: np.ndarray, moon: tuple, limb_px: float = 1.5, nb: int = 180,
+               reach: float = 6.0) -> np.ndarray:
+    """Scale the earthshine layer's light at the limb to the corona just outside, angle by angle.
+
+    The brightest of the layer's limb light (out to ``reach``) is brought to the corona layers'
+    level a little further out (past their own dimmer edge), so the limb rises smoothly into the
+    corona with no bright ring."""
+    cx, cy, r = moon
+    h, w = base.shape[:2]
+    m = int(limb_px + reach + 14)
+    y0, y1 = max(0, int(cy - r - m)), min(h, int(cy + r + m + 1))
+    x0, x1 = max(0, int(cx - r - m)), min(w, int(cx + r + m + 1))
+    if y1 <= y0 or x1 <= x0:
+        return e
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    rr = np.hypot(xx - cx, yy - cy)
+    phi = np.arctan2(yy - cy, xx - cx)
+    bl = base[y0:y1, x0:x1]
+    el = e[y0:y1, x0:x1]
+    bl1 = bl.mean(axis=2) if bl.ndim == 3 else bl
+    el1 = el.mean(axis=2) if el.ndim == 3 else el
+    bins = ((phi + math.pi) / (2 * math.pi) * nb).astype(int) % nb
+    outside = (rr > r + limb_px + 4.0) & (rr < r + limb_px + 9.0)
+    edge = (rr > r - 2.0) & (rr < r + reach)
+    f = np.full(nb, np.nan)
+    for k in range(nb):
+        mo, me = outside & (bins == k), edge & (bins == k)
+        if mo.sum() > 2 and me.sum() > 2:
+            pk = float(np.percentile(el1[me], 95))
+            if pk > 1e-3:
+                f[k] = float(np.median(bl1[mo])) / pk
+    ok = np.isfinite(f)
+    if not ok.any():
+        return e
+    idx = np.arange(nb)
+    f = np.clip(np.interp(idx, idx[ok], f[ok], period=nb), 0.2, 1.5)
+    f = ndimage.gaussian_filter1d(f, 2.0, mode="wrap")
+    fmap = ndimage.map_coordinates(f, [(phi + math.pi) / (2 * math.pi) * nb - 0.5], order=1, mode="grid-wrap")
+    t = np.clip((rr - (r - 8.0)) / 8.0, 0.0, 1.0)
+    t = t * t * (3 - 2 * t)
+    scale = 1.0 + (fmap - 1.0) * t
+    out = e.copy()
+    out[y0:y1, x0:x1] = np.clip(el * (scale[..., None] if el.ndim == 3 else scale), 0.0, 1.0)
+    return out

@@ -92,7 +92,7 @@ def test_moon_aligned_stack_recovers_surface(run, tmp_path):
     assert layer[int(ref.moon_y), int(ref.moon_x)].max() > 0
     yy, xx = np.mgrid[0:SIZE, 0:SIZE]
     p = EarthshineParams()
-    outside = np.hypot(xx - ref.moon_x, yy - ref.moon_y) > MOON_R + p.limb_px + 2  # the real limb, then nothing
+    outside = np.hypot(xx - ref.moon_x, yy - ref.moon_y) > MOON_R + p.limb_reach  # the real limb, then nothing
     assert layer[outside].max() == 0
 
 
@@ -243,7 +243,7 @@ def test_limb_glare_removed_and_layer_meets_the_corona(run, tmp_path):
     disc = rf < MOON_R * 0.9
     ring = (rf > MOON_R - 4) & (rf < MOON_R + 1.0)
     assert np.median(layer[ring]) > 0.5 * np.median(layer[disc])
-    assert layer[rf > MOON_R + p.limb_px + 2].max() == 0
+    assert layer[rf > MOON_R + p.limb_reach].max() == 0
     # Into a corona layer that is black out to moon_r + 1.5: no dark ring at the limb.
     corona = np.where(rf > MOON_R + 1.5, 0.8, 0.0)[..., None].repeat(3, axis=2)
     out = composite(corona, np.repeat(layer[..., None], 3, axis=2), 1.0, "screen").mean(axis=2)
@@ -368,7 +368,7 @@ def test_layer_follows_the_real_limb_and_glows():
     from tse_core.earthshine import EarthshineParams, compose_layer, remove_glare
 
     lin, cx, cy, r, rr, phi, true_r = _limb_scene()
-    p = EarthshineParams(keep_glare=0.3, limb_soften=0.0, limb_darkening=0.0)
+    p = EarthshineParams(keep_glare=0.5, limb_soften=0.0, limb_darkening=0.0)
     good = rr < r - p.margin_px - 2
     weight = (rr < r + p.limb_reach + 2).astype(np.float32)
     detail, glare = remove_glare(lin, good, cx, cy, r, EarthshineParams(limb_shape=False))
@@ -390,7 +390,7 @@ def test_layer_follows_the_real_limb_and_glows():
                         limb_darkening=0.0), keep_from=6.0, linear=lin, glare=glare)
     assert np.median(off[(rr > r - 40) & (rr < r - 25)]) < np.median(layer[(rr > r - 40) & (rr < r - 25)])
     # Nothing beyond the reach of the stack.
-    assert layer[rr > r + p.limb_px + 2].max() == 0
+    assert layer[rr > r + p.limb_reach].max() == 0
 
 
 def test_filled_edge_gets_grain():
@@ -410,3 +410,43 @@ def test_filled_edge_gets_grain():
         inner = good & (rr < r - 15) & (rr > r - 30)
         ratio = hp[band].std() / hp[inner].std()
         assert (ratio > 0.5) == expect, ratio
+
+
+def test_composite_matches_the_limb_to_the_corona():
+    """Round the limb the layer's light is brought to the corona's level just outside, and over
+    the corona layers' disc edge the brighter one is kept: no bright ring, no dark ring."""
+    from tse_core.earthshine import composite
+
+    n, r = 240, 90.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - 120, yy - 120)
+    corona = np.where(rr > r + 1.5, 0.75 - 0.05 * np.exp(-(rr - r - 1.5) / 2), 0.0)  # a little dimmer at its edge
+    earth = np.where(rr < r, 0.3, 0.0) + np.where(np.abs(rr - r - 1) < 3, 1.0, 0.0) * np.clip(r + 6 - rr, 0, 1)
+    earth = np.clip(earth, 0, 1)
+    base = np.repeat(corona[..., None], 3, axis=2).astype(np.float32)
+    e = np.repeat(earth[..., None], 3, axis=2).astype(np.float32)
+    plain = composite(base, e, 1.0, "screen").mean(axis=2)
+    matched = composite(base, e, 1.0, "screen", moon=(120, 120, r), limb_px=1.5, reach=6.0).mean(axis=2)
+    ring = (rr > r) & (rr < r + 4)
+    outside = (rr > r + 8) & (rr < r + 12)
+    assert np.median(plain[ring]) > np.median(plain[outside]) + 0.15  # without matching: a bright ring
+    assert np.median(matched[ring]) < np.median(matched[outside]) + 0.05
+    prof = [np.median(matched[(rr >= r + d) & (rr < r + d + 1)]) for d in range(0, 10)]
+    assert min(prof) > 0.6  # and no dark gap where the layers meet
+
+
+def test_glare_far_above_the_surface_is_not_a_flat_patch():
+    from tse_core.earthshine import EarthshineParams, compose_layer
+
+    n, r = 200, 80.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - 100, yy - 100)
+    good = rr < r - 3
+    shown = ndimage.gaussian_filter(np.random.default_rng(0).normal(0, 1, (n, n)), 2)
+    blob = 20 * np.exp(-((xx - 100) ** 2 + (yy - 160) ** 2) / (2 * 3.0**2))  # glare by a bright prominence
+    shown = np.where(good, shown + blob, 0).astype(np.float32)
+    p = EarthshineParams(limb_darkening=0.0, limb_reach=0.0, edge_grain=False)
+    out = compose_layer(shown, good, good.astype(np.float32), 100, 100, r, p, keep_from=5.0)
+    core = np.hypot(xx - 100, yy - 160) < 2
+    around = (np.hypot(xx - 100, yy - 160) > 10) & (np.hypot(xx - 100, yy - 160) < 16) & good
+    assert out[core].mean() < out[around].mean() + 0.25 * p.brightness  # not a saturated plateau
