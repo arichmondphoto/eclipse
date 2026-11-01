@@ -1105,29 +1105,47 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
         es_good = ndimage.shift(es_good.astype(np.float32), (dy, dx), order=1, mode="constant") > 0.99
     yy, xx = np.mgrid[0:hc, 0:wc]
     rr = np.hypot(xx - cx, yy - cy)
+    # Trust the earthshine stack only where enough of its frames went in: by a bright prominence
+    # the long frames are saturated, and the few that are left are near full well (colours off).
+    ew = np.where(es_good, np.asarray(es_weight, np.float32), 0.0)
+    if abs(dx) + abs(dy) > 1e-3:
+        ew = ndimage.shift(ew, (dy, dx), order=1, mode="constant")
+    ri = np.clip(rr.astype(int), 0, None)
+    med = ndimage.median(ew, labels=np.where(ew > 0, ri + 1, 0), index=np.arange(1, ri.max() + 2))
+    med = np.nan_to_num(np.asarray(med, np.float32))
+    es_ok = es_good & (ew >= 0.1 * med[ri])
     # Fully the earthshine stack out to the limb (the stack's own Moon is a single noisy frame),
     # crossing over to the HDR stack's corona in the next 2 px, where both hold the same light.
     t = np.clip((mr + 2.0 - rr) / 2.0, 0.0, 1.0)
-    wm = np.where(es_good, t * t * (3 - 2 * t), 0.0).astype(np.float32)
+    wm = np.where(es_ok, t * t * (3 - 2 * t), 0.0).astype(np.float32)
     sub = hdr[ys, xs]
-    had = (weight[ys, xs] > 0) & np.isfinite(sub).all(axis=2)
-    # Where the HDR stack has nothing, the earthshine stack carries the pixel fully.
+    # The HDR stack's own pixels inside the Moon (out to 3 px past the limb) come from one
+    # frame, saturated by a bright prominence: not used. Its corona further out is.
+    had = (weight[ys, xs] > 0) & np.isfinite(sub).all(axis=2) & (rr[sy, sx] >= mr + 3.0)
     wm = wm.copy()
-    wm[sy, sx] = np.where(~had & es_good[sy, sx], 1.0, wm[sy, sx])
+    wm[sy, sx] = np.where(~had & es_ok[sy, sx], 1.0, wm[sy, sx])
     sub[:] = np.where(had[..., None], sub, 0.0) * (1 - wm[sy, sx, None]) \
         + np.moveaxis(es_rgb, 0, -1)[sy, sx] * wm[sy, sx, None]
-    # Pixels by the limb that neither stack has (every frame saturated or covered there):
-    # filled from their neighbours, so they do not show as black specks.
+    # Pixels that neither stack has reliably (every frame saturated there, or covered):
+    # filled from their neighbours, widening until they are all filled.
     have = had | (wm[sy, sx] > 0.5)
-    band = (rr[sy, sx] < mr + margin_px + 4.0)
+    band = rr[sy, sx] < mr + 3.0
     hole = band & ~have
-    if hole.any():
+    n_hole = int(hole.sum())
+    if n_hole:
         m = have.astype(np.float32)
-        for c in range(3):
-            num = ndimage.gaussian_filter(np.where(have, sub[..., c], 0.0), 1.5)
-            den = ndimage.gaussian_filter(m, 1.5)
-            fill = num / np.maximum(den, 1e-6)
-            sub[..., c] = np.where(hole & (den > 1e-3), fill, sub[..., c])
+        left = hole.copy()
+        for sig in (1.5, 3.0, 6.0, 12.0, 24.0):
+            den = ndimage.gaussian_filter(m, sig)
+            ok = left & (den > 0.05)
+            if ok.any():
+                for c in range(3):
+                    num = ndimage.gaussian_filter(np.where(have, sub[..., c], 0.0), sig)
+                    sub[..., c] = np.where(ok, num / np.maximum(den, 1e-6), sub[..., c])
+                left &= ~ok
+            if not left.any():
+                break
+        say(f"Moon: {n_hole} pixels by the limb that neither stack has reliably filled from around")
     wsub = weight[ys, xs]
     wsub[:] = np.where((wm[sy, sx] > 0) | hole, np.maximum(wsub, 1e-6), wsub)
     mask = np.zeros((h, w), bool)

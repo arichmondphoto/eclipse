@@ -579,7 +579,7 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         # Bin the crop on the same grid as the HDR stack: start it on a multiple of b.
         sx0, sy0 = (-ox) % b, (-oy) % b
         es_rgb, es_w, moon_data = es_rgb[:, sy0:, sx0:], es_w[sy0:, sx0:], moon_data[:, sy0:, sx0:]
-        es_w = (binned(es_w > 0) > 0.5).astype(np.float32)
+        es_w = np.where(binned(es_w > 0) > 0.5, binned(es_w), 0.0).astype(np.float32)
         es_rgb, moon_data = binned(es_rgb), binned(moon_data)
         ox, oy = (ox + sx0) // b, (oy + sy0) // b
         centre = ((centre[0] - sx0 + 0.5) / b - 0.5, (centre[1] - sy0 + 0.5) / b - 0.5)

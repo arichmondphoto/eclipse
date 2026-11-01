@@ -594,3 +594,30 @@ def test_surface_steps_back_where_the_moon_is_bright(tmp_path):
     at = (np.abs(phi) < 0.03) & (rr > r - 2) & (rr < r)
     red = np.median(img[at][:, 0] / np.maximum(img[at][:, 1], 1e-3))
     assert red > 1.05  # still red, not washed to white
+
+
+def test_saturated_prominence_core_is_not_white(tmp_path):
+    """By a bright prominence the earthshine frames are saturated (little or no weight) and the
+    stack's own one-frame Moon is clipped white: neither is used there; the gap is filled from
+    the reliable light around it, so the prominence stays pink across the limb."""
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams
+    from tse_core.fits import read_fits, write_fits
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    core = (np.abs(phi) < 0.04) & (rr > r - 4) & (rr < r + 3)
+    hdr, head = read_fits(tmp_path / "e_hdr.fit")
+    hdr[:, core] = 5.0  # clipped: equal in every channel, very bright
+    write_fits(tmp_path / "e_hdr.fit", hdr, head)
+    es, eh = read_fits(tmp_path / "e_earthshine_rgb.fit")
+    ew, _ = read_fits(tmp_path / "e_earthshine_weight.fit")
+    core_c = core[30:270, 40:280]
+    es[:, core_c] = 4.0  # the few frames left are near full well: grey
+    ew = np.where(core_c, 0.01, ew).astype(np.float32)
+    write_fits(tmp_path / "e_earthshine_rgb.fit", es, eh)
+    write_fits(tmp_path / "e_earthshine_weight.fit", ew)
+    img = W.final_with_moon(proj, "blend", 1.0, enhance_params=EnhanceParams(layers=(), blend={"natural": 1.0}),
+                            preview_side=10_000)
+    m = core & (rr < r)
+    red = np.median(img[m][:, 0] / np.maximum(img[m][:, 1], 1e-3))
+    assert red > 1.1, red
