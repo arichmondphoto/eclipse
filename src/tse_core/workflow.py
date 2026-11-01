@@ -426,6 +426,19 @@ def enhance_project(project_path, params, hdr_file: Optional[str] = None, output
 # ---------------------------------------------------------------------------
 
 
+def _corona_white(path, project) -> Optional[list]:
+    """The corona layers' white balance (from the Enhance step), so the earthshine's colour matches."""
+    info_path = resolve(path, project.parameters.get("enhance", {}).get("info"))
+    if info_path:
+        try:
+            white = json.loads(Path(info_path).read_text(encoding="utf-8")).get("white")
+            if white and len(white) == 3:
+                return [float(v) for v in white]
+        except (OSError, ValueError):
+            pass
+    return None
+
+
 def earthshine(project_path, params=None, include_rejected: bool = False, output: Optional[str] = None,
                name: Optional[str] = None, profile_dir: Optional[str] = None, lensfun_db: Optional[str] = None,
                say: Optional[Say] = None, cancel=None, fmt: str = "tif"):
@@ -473,7 +486,7 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
         result, _lum, _detail = stack_earthshine(use, lambda f: read_mosaic(frames[f.index].path), calibs, matches,
                                                  moon_xy, moon_r, canvas, p, out_dir=out_dir,
                                                  name=name or path.stem, image_crop=crop_factor, progress=say,
-                                                 fmt=fmt)
+                                                 fmt=fmt, white=_corona_white(path, project))
     except (RuntimeError, ValueError) as exc:
         raise WorkflowError(str(exc)) from exc
     project.parameters["earthshine"] = {**result.outputs, "frames": result.frames}

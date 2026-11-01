@@ -450,3 +450,31 @@ def test_glare_far_above_the_surface_is_not_a_flat_patch():
     core = np.hypot(xx - 100, yy - 160) < 2
     around = (np.hypot(xx - 100, yy - 160) > 10) & (np.hypot(xx - 100, yy - 160) < 16) & good
     assert out[core].mean() < out[around].mean() + 0.25 * p.brightness  # not a saturated plateau
+
+
+def test_layer_keeps_the_colour_at_the_limb():
+    """A red prominence at the limb: on the Moon side the glow is red too, not grey; the
+    surface far inside takes the given tint."""
+    from tse_core.earthshine import EarthshineParams, compose_layer, remove_glare
+
+    lin, cx, cy, r, rr, phi, true_r = _limb_scene(bumps=False)
+    prom = np.exp(-((phi - 0.5) ** 2) / (2 * 0.06**2)) * np.exp(-np.clip(np.abs(rr - r), 0, None) / 3)
+    rgb = np.stack([lin + 0.05 * prom, lin, lin]).astype(np.float32)  # red light at angle 0.5 rad
+    lum = rgb.mean(axis=0)
+    good = rr < r - 5
+    weight = (rr < r + 8).astype(np.float32)
+    detail, glare = remove_glare(lum, good, cx, cy, r, EarthshineParams(limb_shape=False))
+    p = EarthshineParams(limb_darkening=0.0)
+    tint = np.array([0.9, 1.0, 1.1], np.float32)
+    layer = compose_layer(detail, good, weight, cx, cy, r, p, keep_from=6.0, linear=lum, glare=glare,
+                          rgb=rgb, white=(1.0, 1.0, 1.0), tint=tint)
+    assert layer.ndim == 3
+    inside_prom = (rr > r - 4) & (rr < r) & (np.abs(phi - 0.5) < 0.05)
+    inside_other = (rr > r - 4) & (rr < r) & (np.abs(phi + 2.0) < 0.05)
+    red = lambda m: np.median(layer[m][:, 0] / np.maximum(layer[m][:, 1], 1e-6))
+    assert red(inside_prom) > 1.3 and red(inside_other) < 1.1
+    middle = rr < 0.4 * r
+    rb = np.median(layer[middle][:, 2] / layer[middle][:, 0])
+    assert rb == pytest.approx(1.1 / 0.9, rel=0.1)
+    grey = compose_layer(detail, good, weight, cx, cy, r, p, keep_from=6.0, linear=lum, glare=glare)
+    assert grey.ndim == 2

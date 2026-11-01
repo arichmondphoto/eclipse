@@ -422,6 +422,12 @@ looks pasted in, so the layer is built like a photograph of the limb:
 * *A glow.* `--keep-glare` (0.5) of the glare that was taken away is put back
   as a glow fading inward from the limb (the inner corona's light spilling
   over the dark Moon), on the same logarithmic scale, so it cannot clip.
+* *Colour.* The layer is in colour (`--no-colour` for grey): the glow and
+  the limb keep the colour measured in the stack, white balanced like the
+  corona layers (from the Enhance step), so a prominence or the pink
+  chromosphere stays red where it spills over the limb; the surface takes
+  the earthshine's own tint, measured from how strongly the lunar pattern
+  shows in each channel (on the 2024 stack R, G, B = 1.06, 0.97, 0.97).
 * *Grain in the filled edge.* The last pixels, which are only noise and are
   filled from just inside, get grain matching the surface next to them
   (`--no-edge-grain` to leave them smooth).

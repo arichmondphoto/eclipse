@@ -60,6 +60,8 @@ class EarthshineParams:
     limb_reach: float = 6.0  # px past the limb the stack and layer reach: the real limb, from the data
     limb_soften: float = 1.5  # extra softening of the limb, px (Gaussian), on top of the real one
     edge_grain: bool = True  # put grain like the rest of the surface into the filled last pixels
+    colour: bool = True  # natural colour: the glow and limb (prominences red) and the earthshine's own tint
+    saturation: float = 1.0  # colour saturation, as for the corona layers (0 = grey)
     saturation_level: float = 0.95
     saturation_taper: float = 0.15
     noise_floor: float = 0.002
@@ -559,6 +561,7 @@ def stack_earthshine(
     image_crop: float = 1.0,
     progress: Optional[Say] = None,
     fmt: str = "tif",
+    white: Optional[Sequence[float]] = None,
 ) -> tuple[EarthshineResult, np.ndarray, np.ndarray]:
     """Stack the frames on the Moon. ``matches``: frame index -> Match (gain, offset) from the HDR stack.
 
@@ -640,7 +643,9 @@ def stack_earthshine(
     outputs = {}
     if out_dir is not None:
         outputs = _write(lum, detail, shown, good, weight, crop, canvas, (cx, cy), moon_r, p, out_dir, name, fmt,
-                         keep_from, rgb, img=img, glare=extras.get("glare"))
+                         keep_from, rgb, img=img, glare=extras.get("glare"), white=white,
+                         tint=(surface_tint(rgb, detail, chan, good, cx, cy, moon_r, p, white, notes)
+                               if p.colour and p.saturation > 0 else None))
     return EarthshineResult([f.index for f in use], shifts, crop, snr, outputs, notes), lum, detail
 
 
@@ -667,9 +672,62 @@ def soft_shoulder(x: np.ndarray, knee: float = 0.85) -> np.ndarray:
     return np.where(x > knee, knee + k * (1.0 - np.exp(-(x - knee) / k)), x).astype(np.float32)
 
 
+def surface_tint(rgb: np.ndarray, detail: np.ndarray, chan: str, good: np.ndarray, cx: float, cy: float,
+                 r: float, p: "EarthshineParams", white: Optional[Sequence[float]], notes: Optional[list] = None):
+    """The earthshine's own colour (R, G, B, mean 1), after the corona's white balance.
+
+    Measured from how strongly the lunar pattern (maria against highlands) shows in each
+    channel once its glare is taken away: the same albedo pattern lit by earthlight, so the
+    ratios are the earthlight's colour. Returns None when a channel does not show it well.
+    """
+    wb = np.asarray(white if white is not None else (1.0, 1.0, 1.0), float)
+    h, w = good.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    body = good & (np.hypot(xx - cx, yy - cy) < 0.75 * r)
+    quick = EarthshineParams(glare_order=p.glare_order, limb_shape=False, margin_px=p.margin_px)
+    sig = max(3.0, 0.015 * r)
+    ref = ndimage.gaussian_filter(detail, sig)[body]
+    ref = ref - ref.mean()
+    slopes = []
+    for c in range(3):
+        d, _ = remove_glare(rgb[c], good, cx, cy, r, quick)
+        v = ndimage.gaussian_filter(d, sig)[body]
+        v = v - v.mean()
+        corr = float(np.sum(v * ref) / (np.sqrt(np.sum(v * v) * np.sum(ref * ref)) + 1e-30))
+        if corr < 0.5:
+            if notes is not None:
+                notes.append("earthshine colour not measured (a channel does not show the lunar pattern); grey")
+            return None
+        slopes.append(float(np.sum(v * ref) / (np.sum(ref * ref) + 1e-30)))
+    t = np.asarray(slopes) * wb
+    if np.any(t <= 0):
+        return None
+    t = t / t.mean()
+    if notes is not None:
+        notes.append("earthshine colour (R, G, B): " + ", ".join(f"{x:.2f}" for x in t))
+    return t.astype(np.float32)
+
+
+def _limb_colour(rgb: np.ndarray, weight: np.ndarray, white: Optional[Sequence[float]], saturation: float,
+                 strength: np.ndarray) -> np.ndarray:
+    """Colour (R, G, B ratios, mean 1) of the light in the stack, smoothed; grey where faint."""
+    wb = np.asarray(white if white is not None else (1.0, 1.0, 1.0), np.float32)
+    have = (weight > 0).astype(np.float32)
+    den = ndimage.gaussian_filter(have, 2.0)
+    ch = [ndimage.gaussian_filter(np.where(weight > 0, rgb[c] * wb[c], 0.0), 2.0) / np.maximum(den, 1e-6)
+          for c in range(3)]
+    m = (ch[0] + ch[1] + ch[2]) / 3.0
+    col = np.stack([np.clip(np.nan_to_num(c / np.where(m > 0, m, np.inf), nan=1.0), 0.3, 3.0) for c in ch], axis=-1)
+    col = np.where((m > 0)[..., None], col, 1.0)
+    fade = np.clip(strength / 0.15, 0.0, 1.0) * saturation  # colour only where the glow carries light
+    col = 1.0 + (col - 1.0) * fade[..., None]
+    return (col / np.maximum(col.mean(axis=2, keepdims=True), 1e-6)).astype(np.float32)
+
+
 def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: float, cy: float, moon_r: float,
                   p: "EarthshineParams", keep_from: Optional[float], linear: Optional[np.ndarray] = None,
-                  glare: Optional[np.ndarray] = None, seed: int = 1) -> np.ndarray:
+                  glare: Optional[np.ndarray] = None, seed: int = 1, rgb: Optional[np.ndarray] = None,
+                  white: Optional[Sequence[float]] = None, tint: Optional[np.ndarray] = None) -> np.ndarray:
     """The earthshine layer as a picture (0..1) over the Moon crop.
 
     * The lunar surface (``shown``) is stretched on the body of the disc, filled out over the
@@ -682,6 +740,10 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
       the edge has the Moon's own shape and softness and runs into the corona, instead of a
       drawn circle. ``limb_soften`` px of extra Gaussian softening on top.
     Without ``linear``/``glare`` (or with ``limb_reach`` 0) the old cut at the circle is used.
+
+    With ``rgb`` (the stack per channel) the result is in colour: the surface in the
+    earthshine's own ``tint``, and the glow and limb in their measured colour (after the corona's
+    ``white`` balance, ``saturation`` as for the corona), so a prominence at the limb stays red.
     """
     h, w = shown.shape
     yy, xx = np.mgrid[0:h, 0:w]
@@ -753,21 +815,34 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
     glow = np.clip(glow, 0.0, 1.0)
     # Strength: keep_glare inside, rising to full over the last few px so the real limb meets the corona.
     k = p.keep_glare + (1.0 - p.keep_glare) * np.clip((rr - (moon_r - 3)) / 4.0, 0.0, 1.0)
-    out = 1.0 - (1.0 - surf) * (1.0 - k * glow)
-    out = np.where(rr < edge, out, 0.0)
+    gl = k * glow
+    if rgb is not None and p.saturation > 0:
+        col = _limb_colour(rgb, weight, white, p.saturation, gl)
+        ts = np.ones(3, np.float32) if tint is None else 1.0 + (np.asarray(tint, np.float32) - 1.0) * p.saturation
+        out = 1.0 - (1.0 - surf[..., None] * ts) * (1.0 - gl[..., None] * col)
+        out = np.where((rr < edge)[..., None], out, 0.0)
+    else:
+        out = 1.0 - (1.0 - surf) * (1.0 - gl)
+        out = np.where(rr < edge, out, 0.0)
     if p.limb_soften > 0:
-        soft = ndimage.gaussian_filter(out, p.limb_soften)
+        sig = (p.limb_soften, p.limb_soften, 0) if out.ndim == 3 else p.limb_soften
+        soft = ndimage.gaussian_filter(out, sig)
         tb = np.clip(1.0 - np.abs(rr - moon_r) / (p.limb_reach + 3 * p.limb_soften), 0.0, 1.0)
+        if out.ndim == 3:
+            tb = tb[..., None]
         out = out * (1 - tb) + soft * tb
     # The stack ends limb_reach px out: fade over the last 2 px. Where this overlaps the corona
     # layers (past their black disc), the final composite keeps the brighter of the two.
     fade = np.clip((edge - rr) / 2.0, 0.0, 1.0)
+    if out.ndim == 3:
+        fade = fade[..., None]
     return np.clip(out * fade, 0.0, 1.0).astype(np.float32)
 
 
 def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, out_dir, name, fmt="tif",
            keep_from: Optional[float] = None, rgb: Optional[np.ndarray] = None,
-           img: Optional[np.ndarray] = None, glare: Optional[np.ndarray] = None) -> dict:
+           img: Optional[np.ndarray] = None, glare: Optional[np.ndarray] = None,
+           white: Optional[Sequence[float]] = None, tint: Optional[np.ndarray] = None) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     X0, Y0, w, h = crop
@@ -779,11 +854,12 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     write_fits(out / f"{name}_earthshine_weight.fit", weight.astype(np.float32), header)
     if rgb is not None:
         write_fits(out / f"{name}_earthshine_rgb.fit", rgb, header)
-    img = compose_layer(shown, good, weight, cx, cy, moon_r, p, keep_from, linear=img, glare=glare)
+    img = compose_layer(shown, good, weight, cx, cy, moon_r, p, keep_from, linear=img, glare=glare,
+                        rgb=rgb if p.colour else None, white=white, tint=tint)
     crop_tif = write_image(with_format(out / f"{name}_earthshine_crop.tif", fmt), img)
     # The layer on the HDR stack's canvas: black outside the disc, so it drops into the corona layers.
     cx0, cy0, cw, ch = canvas
-    layer = np.zeros((ch, cw), np.float32)
+    layer = np.zeros((ch, cw) + img.shape[2:], np.float32)
     ox, oy = X0 - cx0, Y0 - cy0
     sy0, sx0 = max(0, -oy), max(0, -ox)
     ty0, tx0 = max(0, oy), max(0, ox)

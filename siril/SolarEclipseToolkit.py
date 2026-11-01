@@ -1192,6 +1192,9 @@ class EarthshineTab(StepTab):
         self.limb_soften.setValue(1.5)
         self.limb_soften.setSuffix(" px")
         f.addRow("Soften the limb:", self.limb_soften)
+        self.colour = QCheckBox("Natural colour (prominences stay red across the limb)")
+        self.colour.setChecked(True)
+        f.addRow(self.colour)
         self.edge_grain = QCheckBox("Grain in the filled edge, like the rest of the surface")
         self.edge_grain.setChecked(True)
         f.addRow(self.edge_grain)
@@ -1331,6 +1334,9 @@ class EarthshineTab(StepTab):
              "softness, not a drawn circle.", f)
         _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "
              "has in your frames. 0 = none.", f)
+        _tip(self.colour, "Keep the colour of the light at the edge of the Moon, so a prominence or the pink "
+             "chromosphere stays red where it spills over the limb, and give the lunar surface the earthshine's "
+             "own measured tint (white balanced like the corona). Off: a grey layer.")
         _tip(self.edge_grain, "The last few pixels by the edge are only noise and are filled from just inside; "
              "this gives them grain like the rest of the surface, so they do not look smoother.")
         _tip(self.vignette_shape, "How the darkening is spread from the middle to the edge. 1 = a straight-line "
@@ -1445,7 +1451,7 @@ class EarthshineTab(StepTab):
                                   limb_glare=self.limb_glare.isChecked(), limb_darkening=self.limb_dark.value(),
                                   vignette_shape=self.vignette_shape.value(),
                                   keep_glare=self.keep_glare.value(), limb_soften=self.limb_soften.value(),
-                                  edge_grain=self.edge_grain.isChecked(),
+                                  edge_grain=self.edge_grain.isChecked(), colour=self.colour.isChecked(),
                                   edge_smooth=self.edge_smooth.value(), limb_shape=self.limb_shape.isChecked(),
                                   channel=self.channel.currentData(),
                                   albedo_map=self.albedo_path.text().strip(),
