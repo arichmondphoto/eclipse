@@ -76,8 +76,8 @@ except ImportError:
 
 from datetime import datetime  # noqa: E402
 
-from PyQt6.QtCore import QThread, QTimer, Qt, pyqtSignal  # noqa: E402
-from PyQt6.QtGui import QAction, QFont, QImage, QPixmap  # noqa: E402
+from PyQt6.QtCore import QRectF, QThread, QTimer, Qt, pyqtSignal  # noqa: E402
+from PyQt6.QtGui import QAction, QColor, QFont, QImage, QPainter, QPixmap  # noqa: E402
 from PyQt6.QtWidgets import (  # noqa: E402
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu,
@@ -88,6 +88,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
 from tse_core import workflow as W  # noqa: E402
 from tse_core.brackets import detect_brackets  # noqa: E402
 from tse_core import imageout as IO  # noqa: E402
+from tse_core.viewzoom import ViewZoom  # noqa: E402
 from tse_core.enhance import LAYERS, EnhanceParams  # noqa: E402
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
 from tse_core.frames import format_exposure, parse_duration  # noqa: E402
@@ -1768,17 +1769,31 @@ class ProminencesTab(StepTab):
 # ---------------------------------------------------------------------------
 
 
-class ImageView(QLabel):
-    """Shows an image scaled to fit, keeping its aspect ratio."""
+class ImageView(QWidget):
+    """Shows an image, fitted to the view, with zoom and pan.
+
+    Mouse wheel (or + and -): zoom about the pointer. Drag: move round. Double-click: 100% at
+    that point, or back to fit. 0: fit, 1: 100%. A refreshed preview of the same size keeps the
+    zoom and place, so settings can be compared on the same detail.
+    """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(320, 240)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setStyleSheet("background: #111; color: #888;")
-        self.setText("No image yet.")
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setMouseTracking(False)
+        self.setToolTip("Scroll to zoom, drag to move round, double-click for 100% (again to fit). "
+                        "Keys: + and - zoom, 0 fit, 1 100%.")
         self._pix: QPixmap | None = None
+        self._text = "No image yet."
+        self._zoom = ViewZoom()
+        self._drag = None
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt-style name, as before
+        self._text = text
+        self._pix = None
+        self.update()
 
     def show_array(self, img) -> None:
         import numpy as np
@@ -1789,27 +1804,103 @@ class ImageView(QLabel):
         h, w = a.shape[:2]
         qimg = QImage(a.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
         self._pix = QPixmap.fromImage(qimg)
-        self._rescale()
+        self._zoom.set_view(self.width(), self.height())
+        self._zoom.set_image(w, h)
+        self.update()
 
     def show_file(self, path: str) -> None:
         if not path or not Path(path).exists():
             return
         try:
-            import numpy as np
-
             w, h = IO.image_size(path)
-            self.show_array(IO.read_image(path, step=max(1, max(w, h) // 1600)))
+            # Read finely enough to zoom in on (a reduced copy above ~3200 px).
+            self.show_array(IO.read_image(path, step=max(1, max(w, h) // 3200)))
         except Exception as exc:  # a preview is a convenience; never fail a step over it
             self.setText(f"Could not show {Path(path).name}: {exc}")
 
+    # -- drawing -----------------------------------------------------------------------------
+
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().resizeEvent(event)
-        self._rescale()
+        self._zoom.set_view(self.width(), self.height())
 
-    def _rescale(self) -> None:
-        if self._pix is not None and not self._pix.isNull():
-            self.setPixmap(self._pix.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                            Qt.TransformationMode.SmoothTransformation))
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt override
+        p = QPainter(self)
+        try:
+            p.fillRect(self.rect(), QColor("#111111"))
+            if self._pix is None or self._pix.isNull():
+                p.setPen(QColor("#888888"))
+                p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter.value | Qt.TextFlag.TextWordWrap.value, self._text)
+                return
+            self._zoom.set_view(self.width(), self.height())
+            rects = self._zoom.rects()
+            if rects is None:
+                return
+            (tx, ty, tw, th), (sx, sy, sw, sh) = rects
+            # Smooth when shrinking; sharp pixels when enlarged well past 100%.
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, self._zoom.scale() < 2.0)
+            p.drawPixmap(QRectF(tx, ty, tw, th), self._pix, QRectF(sx, sy, sw, sh))
+            label = self._zoom.label()
+            p.setPen(QColor("#bbbbbb"))
+            box = QRectF(6, self.height() - 24, 70, 18)
+            p.fillRect(box, QColor(0, 0, 0, 150))
+            p.drawText(box, Qt.AlignmentFlag.AlignCenter, label)
+        finally:
+            p.end()
+
+    # -- mouse and keys ----------------------------------------------------------------------
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if self._pix is None:
+            return
+        steps = event.angleDelta().y() / 120.0
+        if steps:
+            pos = event.position()
+            self._zoom.zoom_at(1.25 ** steps, pos.x(), pos.y())
+            self.update()
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if event.button() == Qt.MouseButton.LeftButton and self._zoom.zoom is not None:
+            self._drag = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if self._drag is not None:
+            pos = event.position()
+            self._zoom.pan(pos.x() - self._drag.x(), pos.y() - self._drag.y())
+            self._drag = pos
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if self._drag is not None:
+            self._drag = None
+            self.unsetCursor()
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt override
+        if self._pix is not None:
+            pos = event.position()
+            self._zoom.toggle(pos.x(), pos.y())
+            self.update()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt override
+        key = event.key()
+        if self._pix is None:
+            return super().keyPressEvent(event)
+        if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self._zoom.zoom_at(1.25)
+        elif key == Qt.Key.Key_Minus:
+            self._zoom.zoom_at(0.8)
+        elif key == Qt.Key.Key_0:
+            self._zoom.fit()
+        elif key == Qt.Key.Key_1:
+            self._zoom.set_zoom(1.0)
+        else:
+            return super().keyPressEvent(event)
+        self.update()
 
 
 # ---------------------------------------------------------------------------

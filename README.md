@@ -106,6 +106,12 @@ The window has one tab per step, and each step saves into the project file:
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
 Every setting has hover help explaining what it does and when to change it.
+Every picture view zooms: scroll (or **+** / **-**) to zoom about the pointer,
+drag to move round, double-click for 100% at that point (again for fit),
+**0** fit, **1** 100%; the zoom shows in the corner. A preview run again with
+other settings keeps the zoom and place, so settings can be compared on the
+same detail. Previews are reduced copies (about 1400 px), so 100% there is a
+preview pixel, not a full-size one.
 Long steps run in the background: progress shows in the log under each tab
 and **Cancel** stops at the next step. **Open … in Siril** loads a result
 into Siril. **Project → New from folder…**, **Open…** and **Save** manage
@@ -236,6 +242,12 @@ give the correction with `--clock-offset` (added to camera time, for example
 Moon tracking only use time differences, so a wrong clock never affects them.
 
 ## HDR stacking (Phase 3)
+
+Each frame leaves out the corona just round its own Moon (the limb is
+blurred there and the Moon moves between frames). That margin is scaled to
+the Moon's size in the image: 0.7% of its radius, at least 2 px, so 3 px for
+the 2024 D850 at 400 mm and about 7.5 px at 1000 mm (`moon_margin_px` sets
+it by hand). The log names it.
 
 ```bash
 totality stack eclipse2024.json            # uses the alignment saved by 'totality align'

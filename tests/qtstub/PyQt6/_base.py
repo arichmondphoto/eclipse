@@ -63,6 +63,12 @@ class QWidget(Dummy):
     def size(self):
         return Dummy()
 
+    def width(self):
+        return 640
+
+    def height(self):
+        return 480
+
 
 class QThread(QObject):
     def start(self):

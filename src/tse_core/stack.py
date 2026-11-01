@@ -47,7 +47,10 @@ Say = Callable[[str], None]
 @dataclass
 class StackParams:
     crop_radii: Optional[float] = None  # None = full frame; else a square this many solar radii from the centre
-    moon_margin_px: float = 3.0  # drop pixels this far outside each frame's lunar limb, full-res px
+    # Drop pixels this far outside each frame's lunar limb (full-res px). None: scaled to the
+    # Moon's size in the image, 0.7% of its radius (3 px for a 436 px radius, 2024 D850 at
+    # 400 mm), at least 2 px, so a longer lens or smaller pixels get a wider margin.
+    moon_margin_px: Optional[float] = None
     saturation_taper: float = 0.15  # weights fall to zero over this range below the saturation level
     saturation_level: float = 0.95  # of full scale
     noise_floor: float = 0.002  # read-noise term in the weights, in full-scale units
@@ -154,6 +157,13 @@ def warp_region(img: np.ndarray, matrix, crop: tuple[int, int, int, int], origin
         out[..., ch] = ndimage.affine_transform(img[..., ch], mat, offset=offset, output_shape=shape,
                                                 order=order, mode="constant", cval=cval, prefilter=order > 1)
     return out
+
+
+def moon_margin(params: "StackParams", moon_r: float) -> float:
+    """The margin round each frame's Moon left out of the stack, in full-res px."""
+    if params.moon_margin_px is not None:
+        return float(params.moon_margin_px)
+    return max(2.0, round(0.007 * float(moon_r) * 2) / 2)
 
 
 def moon_mask(crop: tuple[int, int, int, int], fi: FrameInfo, margin: float, scale: int = 1) -> np.ndarray:
@@ -324,6 +334,9 @@ def stack_frames(
     infos = list(infos)
     by_index = {f.index: f for f in infos}
     moon_frame = params.moon_frame if params.moon_frame is not None else ref_index
+    margin = moon_margin(params, by_index.get(moon_frame, by_index[ref_index]).moon_r)
+    say(f"left out round each frame's Moon: {margin:.1f} px"
+        + (" (scaled to the Moon's size)" if params.moon_margin_px is None else ""))
     if moon_frame not in by_index:
         raise ValueError(f"Moon frame #{moon_frame} is not among the frames being stacked")
 
@@ -353,7 +366,7 @@ def stack_frames(
         nan = ~np.isfinite(v[: ny * sc, : nx * sc])
         v = np.nan_to_num(v[: ny * sc, : nx * sc], nan=0.0).reshape(ny, sc, nx, sc).mean(axis=(1, 3))
         bad = ((sat[: ny * sc, : nx * sc] > 0.01) | nan).reshape(ny, sc, nx, sc).any(axis=(1, 3))
-        ok = ~bad & ~moon_mask(crop, f, params.moon_margin_px + 2 * sc, sc)
+        ok = ~bad & ~moon_mask(crop, f, margin + 2 * sc, sc)
         reduced[f.index] = (v.astype(np.float32), ok)
         if len(cache) < 2:
             cache[f.index] = mos  # keep a couple to save one read; the rest are reloaded
@@ -369,7 +382,7 @@ def stack_frames(
     total = np.zeros((ch, cw, 3), np.float32)
     weight = np.zeros((ch, cw), np.float32)
     moon_rgb = None  # the Moon frame's data, kept only around its Moon
-    moon_slices = moon_box(crop, by_index[moon_frame], params.moon_margin_px)
+    moon_slices = moon_box(crop, by_index[moon_frame], margin)
     # Where no frame has usable data (all saturated or behind the Moon), fall back to the
     # shortest uncovered exposure: process frames from longest to shortest so it ends up on top.
     fallback = np.zeros((ch, cw, 3), np.float32)
@@ -397,7 +410,7 @@ def stack_frames(
         radiance = v  # converted in place to save memory on full frames
         radiance -= m.offset
         radiance /= m.gain
-        covered = moon_mask(crop, f, params.moon_margin_px)
+        covered = moon_mask(crop, f, margin)
         if f.index == moon_frame:
             moon_rgb = np.nan_to_num(radiance[moon_slices], nan=0.0).astype(np.float32)
         w[covered] = 0.0

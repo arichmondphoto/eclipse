@@ -256,3 +256,12 @@ def test_bad_edge_lines():
     lum[:, -2] *= 1.8
     lum[0, :] = 0.0003  # a dark masked row
     assert bad_edge_lines(lum, weight) == {"top": 1, "bottom": 0, "left": 0, "right": 2}
+
+
+def test_moon_margin_scales_with_the_moon():
+    from tse_core.stack import StackParams, moon_margin
+
+    assert moon_margin(StackParams(), 435.9) == 3.0  # 2024 D850 at 400 mm, as before
+    assert moon_margin(StackParams(), 1090.0) == 7.5  # 1000 mm
+    assert moon_margin(StackParams(), 150.0) == 2.0  # short lens: at least 2 px
+    assert moon_margin(StackParams(moon_margin_px=5.0), 435.9) == 5.0  # set by hand
