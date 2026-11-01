@@ -1,6 +1,6 @@
 # Plan: a final image like Bray Falls' blended eclipse
 
-Status: **steps 1 and 2 in the toolkit as options (not defaults); step 3 (the Moon) next** (1 Nov 2026).
+Status: **steps 1 and 2 in the toolkit as options; step 3 measured, waiting on Andy's decision (albedo texture or not)** (1 Nov 2026).
 Code at the time of writing: commit `38830ba` on `main`. Tick items off here as they are done.
 
 ## Goal
@@ -124,14 +124,33 @@ Still open:
 
 ### 3. The Moon in his style
 
-- [ ] Darker earthshine overall (lower `brightness`), `limb_darkening` near 0 or a new "flat"
-      look, neutral grey (`colour` off) as a preset.
-- [ ] Multi-scale local contrast on the lunar surface (MGN applied to the Moon) to bring out
-      rays and craters.
-- [ ] Edge-preserving noise reduction for the surface instead of the current Gaussian-based
-      smoothing, so it is not blotchy.
-- [ ] Detail near the limb: keep improving the glare removal there (now about 0.66 of the
-      middle's contrast 15–60 px in); the albedo map guide already helps.
+**Finding (1 Nov), on Andy's latest earthshine stack (`Eclipse 2024_earthshine_rgb/weight.fit`):**
+the lunar surface is noise-dominated at every scale up to ~35 px. Structure/noise, measured with
+a noise model independent of the Moon's own detail (correlated like a demosaiced stack, level from
+the weights): 1.1 px 1.02, 2 px 1.10, 4 px 1.13, 9 px 1.17, 17 px 1.22, 35 px 1.36. Pixel noise
+is 0.15 of the surface's 5–95% contrast. Only the maria (large scales) are really there; craters
+and rays like his are not in this data.
+
+- Noise-gated local contrast on the surface (`mgn_gated` on the glare-free detail) changes almost
+  nothing: the gate correctly finds little above the noise. A per-octave Wiener filter leaves
+  mid-scale blotches, because those bands are only 10–20% above the noise.
+- Pitfall: on the Moon, `correlated_noise` sampled from the Moon itself counts real detail as
+  noise (structure/noise came out at exactly 1.00). There is no noise-only region in the
+  earthshine crop, so use a fixed correlation model (Gaussian σ 0.45, as measured in the corona's
+  faint part) or the corona's measured spectrum.
+- What the settings already do (no code): `smooth 3, edge_smooth 4, brightness 0.35,
+  limb_darkening 0, colour off` gives a darker, flat, neutral, less blotchy Moon
+  (`moon_looks.png`), closer to his. It shows small beads at the limb with that smoothing; to
+  look at.
+
+Open decision for Andy (asked 1 Nov): his crater and ray detail can only come from outside
+this data, i.e. an albedo map blended in as visible texture (a composite, clearly labelled, off by
+default). Until now the map has only guided glare removal and never added to the picture.
+
+- [ ] Preset or documented settings for the dark, flat, neutral Moon; fix the limb beads at
+      high smoothing.
+- [ ] Only if Andy wants it: albedo-map texture as an explicit, labelled composite option.
+- [ ] Edge-preserving smoothing for the maria (instead of Gaussian) so their edges stay crisp.
 
 ### 4. A crisp limb
 
