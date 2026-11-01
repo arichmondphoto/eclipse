@@ -1138,13 +1138,31 @@ class EnhanceTab(StepTab):
 class EarthshineTab(StepTab):
     def __init__(self, window: "MainWindow") -> None:
         super().__init__(window)
-        box = QGroupBox("Earthshine")
+        def spin(lo, hi, step, val, suffix=""):
+            w = QDoubleSpinBox()
+            w.setRange(lo, hi)
+            w.setSingleStep(step)
+            w.setValue(val)
+            if suffix:
+                w.setSuffix(suffix)
+            return w
+
+        # 1. Which frames and channels make the Moon-aligned stack.
+        stack_box = QGroupBox("1  Stack the Moon")
+        fs = QFormLayout(stack_box)
+        self.stops = spin(0.5, 15.0, 0.5, 6.0, " stops")
+        fs.addRow("Use frames within:", self.stops)
+        self.channel = QComboBox()
+        for label, key in (("Automatic", "auto"), ("Green", "green"), ("Green + blue", "green+blue"),
+                           ("All (average)", "all"), ("Blue", "blue")):
+            self.channel.addItem(label, key)
+        fs.addRow("Colour channels:", self.channel)
+        self.include_rejected = QCheckBox("Include frames flagged as off the Moon's track")
+        fs.addRow(self.include_rejected)
+
+        # 2. The seas and highlands: glare taken away, then stretched and shaded.
+        box = QGroupBox("2  Lunar surface (seas and highlands)")
         f = QFormLayout(box)
-        self.stops = QDoubleSpinBox()
-        self.stops.setRange(0.5, 15.0)
-        self.stops.setValue(6.0)
-        self.stops.setSuffix(" stops")
-        f.addRow("Use frames within:", self.stops)
         self.glare = QSpinBox()
         self.glare.setRange(1, 6)
         self.glare.setValue(2)
@@ -1155,55 +1173,6 @@ class EarthshineTab(StepTab):
         self.limb_shape = QCheckBox("Keep maria by the limb (glare only fades inward)")
         self.limb_shape.setChecked(True)
         f.addRow(self.limb_shape)
-        self.channel = QComboBox()
-        for label, key in (("Automatic", "auto"), ("Green", "green"), ("Green + blue", "green+blue"),
-                           ("All (average)", "all"), ("Blue", "blue")):
-            self.channel.addItem(label, key)
-        f.addRow("Colour channels:", self.channel)
-        self.smooth = QDoubleSpinBox()
-        self.smooth.setRange(0.0, 5.0)
-        self.smooth.setSingleStep(0.5)
-        self.smooth.setValue(1.0)
-        self.smooth.setSuffix(" px")
-        f.addRow("Smoothing:", self.smooth)
-        self.brightness = QDoubleSpinBox()
-        self.brightness.setRange(0.1, 1.0)
-        self.brightness.setSingleStep(0.05)
-        self.brightness.setValue(0.6)
-        f.addRow("Brightness:", self.brightness)
-        self.limb_dark = QDoubleSpinBox()
-        self.limb_dark.setRange(0.0, 1.0)
-        self.limb_dark.setSingleStep(0.05)
-        self.limb_dark.setValue(0.6)
-        f.addRow("Darker towards the limb:", self.limb_dark)
-        self.vignette_shape = QDoubleSpinBox()
-        self.vignette_shape.setRange(1.0, 4.0)
-        self.vignette_shape.setSingleStep(0.25)
-        self.vignette_shape.setValue(1.5)
-        f.addRow("Gradient shape:", self.vignette_shape)
-        self.keep_glare = QDoubleSpinBox()
-        self.keep_glare.setRange(0.0, 1.0)
-        self.keep_glare.setSingleStep(0.05)
-        self.keep_glare.setValue(0.5)
-        f.addRow("Keep glare (glow):", self.keep_glare)
-        self.limb_soften = QDoubleSpinBox()
-        self.limb_soften.setRange(0.0, 6.0)
-        self.limb_soften.setSingleStep(0.5)
-        self.limb_soften.setValue(1.5)
-        self.limb_soften.setSuffix(" px")
-        f.addRow("Soften the limb:", self.limb_soften)
-        self.colour = QCheckBox("Natural colour (prominences stay red across the limb)")
-        self.colour.setChecked(True)
-        f.addRow(self.colour)
-        self.edge_grain = QCheckBox("Grain in the filled edge, like the rest of the surface")
-        self.edge_grain.setChecked(True)
-        f.addRow(self.edge_grain)
-        self.edge_smooth = QDoubleSpinBox()
-        self.edge_smooth.setRange(0.0, 12.0)
-        self.edge_smooth.setSingleStep(0.5)
-        self.edge_smooth.setValue(3.0)
-        self.edge_smooth.setSuffix(" px")
-        f.addRow("Smoothing near the limb:", self.edge_smooth)
         arow = QHBoxLayout()
         self.albedo_path = QLineEdit()
         self.albedo_path.setPlaceholderText("none (optional)")
@@ -1212,15 +1181,38 @@ class EarthshineTab(StepTab):
         arow.addWidget(self.albedo_path, 1)
         arow.addWidget(abrowse)
         f.addRow("Albedo map:", arow)
-        self.albedo_strength = QDoubleSpinBox()
-        self.albedo_strength.setRange(0.0, 1.0)
-        self.albedo_strength.setSingleStep(0.1)
-        self.albedo_strength.setValue(0.5)
+        self.albedo_strength = spin(0.0, 1.0, 0.1, 0.5)
         f.addRow("Map guidance:", self.albedo_strength)
-        self.include_rejected = QCheckBox("Include frames flagged as off the Moon's track")
-        f.addRow(self.include_rejected)
+        self.smooth = spin(0.0, 5.0, 0.5, 1.0, " px")
+        f.addRow("Smoothing:", self.smooth)
+        self.edge_smooth = spin(0.0, 12.0, 0.5, 3.0, " px")
+        f.addRow("Smoothing near the limb:", self.edge_smooth)
+        self.edge_grain = QCheckBox("Grain in the filled edge, like the rest of the surface")
+        self.edge_grain.setChecked(True)
+        f.addRow(self.edge_grain)
+        self.brightness = spin(0.1, 1.0, 0.05, 0.6)
+        f.addRow("Brightness:", self.brightness)
+        self.limb_dark = spin(0.0, 1.0, 0.05, 0.6)
+        f.addRow("Darker towards the limb:", self.limb_dark)
+        self.vignette_shape = spin(1.0, 4.0, 0.25, 1.5)
+        f.addRow("Gradient shape:", self.vignette_shape)
+        self.colour = QCheckBox("Natural colour (the earthshine's own tint)")
+        self.colour.setChecked(True)
+        f.addRow(self.colour)
+
+        # Only for the separate earthshine layer (pasting it in, or Photoshop).
+        layer_box = QGroupBox("Earthshine layer for Photoshop / pasting only")
+        fl = QFormLayout(layer_box)
+        self.keep_glare = spin(0.0, 1.0, 0.05, 0.5)
+        fl.addRow("Keep glare (glow):", self.keep_glare)
+        self.limb_soften = spin(0.0, 6.0, 0.5, 1.5, " px")
+        fl.addRow("Soften the limb:", self.limb_soften)
+        fl.addRow(QLabel("Not used by the final image below: there the limb is the stack's own."))
+        self.layer_box = layer_box
+
+        self.settings_layout.addWidget(stack_box)
         self.settings_layout.addWidget(box)
-        run = QPushButton("Stack earthshine")
+        run = QPushButton("Stack earthshine (makes the Moon and its surface)")
         run.clicked.connect(self.run)
         self.run_buttons.append(run)
         self.settings_layout.addWidget(run)
@@ -1228,7 +1220,7 @@ class EarthshineTab(StepTab):
         self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.layer_path))
         self.settings_layout.addWidget(self.open_btn)
 
-        final = QGroupBox("Final image: Moon and corona together")
+        final = QGroupBox("3  Final image: Moon and corona together")
         ff = QFormLayout(final)
         self.base = QComboBox()
         self.base.addItem("Blend (Enhance settings)", "blend")
@@ -1248,6 +1240,7 @@ class EarthshineTab(StepTab):
         self.mode = QComboBox()
         self.mode.addItems(["screen", "lighten", "add"])
         ff.addRow("Blend mode (pasting only):", self.mode)
+        self.mode.setEnabled(False)
         _tip(self.base, "Blend or Natural: the Moon-aligned stack goes into the HDR stack inside the lunar disc, "
              "and Moon and corona are stretched together with the settings of your last Enhance run, so the limb "
              "is the stack's own: one curve, one colour, no seam. The seas and highlands are then added inside. "
@@ -1267,6 +1260,7 @@ class EarthshineTab(StepTab):
         self.open_final_btn.clicked.connect(lambda: self.main.open_in_siril(self.final_path))
         ff.addRow(self.open_final_btn)
         self.settings_layout.addWidget(final)
+        self.settings_layout.addWidget(self.layer_box)
         self.run_buttons += [self.final_preview_btn, self.final_btn]
         self.final_path = ""
         self.final_timer = QTimer(self)
@@ -1303,7 +1297,7 @@ class EarthshineTab(StepTab):
              "corona layers: the lunar surface inside the disc, black outside. In Photoshop put it under the "
              "corona layers in Screen or Lighten mode, or paste it into the black disc.")
         _tip(self.stops, "Only the longer exposures show earthshine; shorter ones add noise only. Frames more than "
-             "this many stops below the longest exposure are skipped. Default 6.", f)
+             "this many stops below the longest exposure are skipped. Default 6.", fs)
         _tip(self.limb_glare, "Close to the edge of the Moon, light scattered from the bright inner corona rises "
              "steeply, far faster than the glare surface above can follow. Left in, it shows as a bright ring "
              "inside the limb and leaves the middle of the Moon dark. Leave this on unless you want to see that "
@@ -1324,7 +1318,7 @@ class EarthshineTab(StepTab):
              "quickly around the edge is deep red light from the pink chromosphere and prominences, and a colour "
              "camera has twice as many green pixels, so green usually gives a cleaner Moon than the average of all "
              "three. Automatic tries all, green and green + blue on your stack and picks the cleanest; the log "
-             "shows the scores.", f)
+             "shows the scores.", fs)
         _tip(self.glare, "How flexible the glare surface removed from the disc is (polynomial order). Glare from "
              "the corona is a gentle gradient, so 2 (default) is usually right. Higher removes uneven glare but "
              "also starts removing large maria; 1 removes a straight gradient only.", f)
@@ -1338,9 +1332,9 @@ class EarthshineTab(StepTab):
              "the edge of the Moon, fading inward: the inner corona's light spilling over the dark Moon, as the eye "
              "sees it at totality. 0 = none, 0.5 = a soft glow (default), 1 = all of it (compressed so it cannot "
              "clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
-             "softness, not a drawn circle.", f)
+             "softness, not a drawn circle.", fl)
         _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "
-             "has in your frames. 0 = none.", f)
+             "has in your frames. 0 = none.", fl)
         _tip(self.colour, "Keep the colour of the light at the edge of the Moon, so a prominence or the pink "
              "chromosphere stays red where it spills over the limb, and give the lunar surface the earthshine's "
              "own measured tint (white balanced like the corona). Off: a grey layer.")
@@ -1367,6 +1361,7 @@ class EarthshineTab(StepTab):
             elif not self.base_file:
                 self.base.setCurrentIndex(0)  # nothing chosen: back to the last-written blend
         self._show_base()
+        self.mode.setEnabled(self.base.currentData() == "file")  # the blend mode only matters when pasting
         self._final_changed()
 
     def _pick_albedo(self) -> None:
