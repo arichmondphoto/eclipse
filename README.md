@@ -473,9 +473,15 @@ puts the Moon-aligned earthshine stack, linear and in the same units, into
 the HDR stack inside the lunar disc (registered on the limb). Just outside
 the limb neither stack is used as it is: the earthshine stack's corona is
 smeared (it is aligned on the Moon) and the HDR stack's holds few frames
-there, so the earthshine stack's own limb edge hands over between 0.5 and
-2.5 px out to the HDR's corona continued inwards from 3 px out (switching
-from one stack to the other at 3 px showed as a line round the limb). By a bright
+there, so the earthshine stack's own limb edge hands over to the HDR's
+corona continued inwards from where the HDR stack is reliable (switching
+from one stack to the other showed as a line round the limb). That distance
+is measured from the HDR stack's weights, not fixed: the outermost ring
+where the weight is still rising sharply towards the corona (the Moon
+covering frames as it moves), at least 2 px, at most 10% of the radius;
+the log names it ("the HDR stack's corona is used from N px outside the
+limb"). It is wider at long focal lengths or small pixels. The fill inside
+the limb reaches 7% of the radius. By a bright
 prominence the long earthshine frames saturate, so towards it ever fewer
 frames are usable and the last are near full well: there (under 40% of the
 usual frames, fully below 10%) the light is interpolated along each radius in

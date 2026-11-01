@@ -1268,6 +1268,33 @@ def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: fl
     return out
 
 
+def hdr_reliable_from(weight: np.ndarray, rr: np.ndarray, r: float, default: float = 3.0) -> float:
+    """How far outside the limb (px) the HDR stack's corona is reliable, from its own weights.
+
+    Each frame gives no weight where its Moon (plus the stacking margin) covers the corona, and
+    the Moon moves during totality, so just outside the limb fewer frames go in: a sharp drop in
+    weight towards the limb, a few px wide at short focal lengths, more at long ones. Found as
+    the outermost 1 px ring whose median weight is under 80% of the most in the next few rings out
+    (the gentler fall from saturated long frames by the bright inner corona is not that sharp).
+    At least 2 px (the limb's own blur), at most 10% of the radius; ``default`` if it cannot tell.
+    """
+    reach = int(max(20, 0.1 * r))
+    k = int(max(5, round(0.01 * r)))
+    d = rr - r
+    m = (d >= 0) & (d < reach + k + 1) & np.isfinite(weight)
+    if m.sum() < 50 * (reach + k):
+        return float(default)
+    di = d[m].astype(int)
+    prof = np.asarray(ndimage.median(weight[m], di, index=np.arange(reach + k + 1)), np.float64)
+    prof = np.nan_to_num(prof, nan=0.0)
+    edge = 0
+    for i in range(reach):
+        ref = float(np.max(prof[i + 1: i + 1 + k]))
+        if ref > 0 and prof[i] < 0.8 * ref:
+            edge = i + 1
+    return float(np.clip(edge, 2.0, 0.1 * r))
+
+
 def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.ndarray, es_weight: np.ndarray,
                origin: tuple[int, int], es_centre: tuple[float, float], margin_px: float = 1.5,
                say: Optional[Say] = None):
@@ -1330,18 +1357,21 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
     from .enhance import noise_constant
 
     rs = rr[sy, sx]
-    c_hdr = noise_constant(sub.mean(axis=2), wsub, (wsub > 0) & (rs >= mr + 3.0) & (rs < mr + 0.5 * mr))
+    edge = hdr_reliable_from(wsub, rs, mr)
+    say(f"Moon: the HDR stack's corona is used from {edge:.1f} px outside the limb (where enough of its "
+        f"frames are not covered by the Moon)")
+    c_hdr = noise_constant(sub.mean(axis=2), wsub, (wsub > 0) & (rs >= mr + edge) & (rs < mr + 0.5 * mr))
     c_es = noise_constant(es_rgb.mean(axis=0), ew, es_ok & (rr < mr - 5.0))
     if c_hdr and c_es:
         w_es = ew * (c_hdr / c_es) ** 2
         say(f"Moon: earthshine noise matched to the stack's (weights x {(c_hdr / c_es) ** 2:.3g})")
     else:  # too few pixels to measure: as reliable as the corona just outside the limb
-        near = (wsub > 0) & (rs >= mr + 3.0) & (rs < mr + 10.0)
+        near = (wsub > 0) & (rs >= mr + edge) & (rs < mr + edge + 7.0)
         ref = float(np.median(wsub[near])) if near.any() else 1.0
         w_es = np.where(ew > 0, ref, 0.0)
     # The HDR stack's own pixels inside the Moon (out to 3 px past the limb) come from one
     # frame, saturated by a bright prominence: not used. Its corona further out is.
-    had = (weight[ys, xs] > 0) & np.isfinite(sub).all(axis=2) & (rr[sy, sx] >= mr + 3.0)
+    had = (weight[ys, xs] > 0) & np.isfinite(sub).all(axis=2) & (rs >= mr + edge)
     wm = wm.copy()
     wm[sy, sx] = np.where(~had & es_ok[sy, sx], 1.0, wm[sy, sx])
     sub[:] = np.where(had[..., None], sub, 0.0) * (1 - wm[sy, sx, None]) \
@@ -1357,7 +1387,7 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
         wmix = np.nan_to_num(1.0 / var, nan=0.0, posinf=0.0)
     have = had | (a > 0.5)
     wnew = np.where(have, wmix, 0.0).astype(np.float32)
-    band = rs < mr + 3.0
+    band = rs < mr + edge
     hole = band & ~have
     n_hole = int(hole.sum())
     if n_hole:
@@ -1385,9 +1415,10 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
     # it part of the time). Mixing them there (fading one out, the other in) left a darker line
     # just outside the limb; the corona is continued inwards instead, to meet the earthshine.
     # The earthshine stack still holds the limb's own edge (blurred by the optics) for a pixel
-    # or so outside it, so it hands over to the continued corona between 0.5 and 2.5 px out.
+    # or so outside it, so it hands over to the continued corona between 0.5 px out and 0.5 px
+    # short of where the HDR stack is used.
     outside = band & (rs >= mr)
-    tout = np.clip((mr + 2.5 - rs) / 2.0, 0.0, 1.0)
+    tout = np.clip((mr + edge - 0.5 - rs) / max(edge - 1.0, 0.5), 0.0, 1.0)
     tc = np.where(had, 1.0, trust[sy, sx] * np.where(outside, tout * tout * (3 - 2 * tout), 1.0))
     tc = tc.astype(np.float32)
     target = band & ~had & ((tc < 1.0) | outside)
@@ -1395,7 +1426,8 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
         es_c = np.moveaxis(es_rgb, 0, -1)[sy, sx]
         floor = max(float(np.median(es_c[(rs < 0.8 * mr) & es_ok[sy, sx]])) * 0.05, 1e-12) \
             if (es_ok[sy, sx] & (rs < 0.8 * mr)).any() else 1e-12
-        rad = _radial_fill(sub, tc, cx - sx.start, cy - sy.start, mr, floor)
+        rad = _radial_fill(sub, tc, cx - sx.start, cy - sy.start, mr, floor,
+                           inner=max(10.0, 0.07 * mr), outer=edge)
         if rad is not None:
             k = np.where(target, tc, 1.0)[..., None]
             sub[:] = np.where(target[..., None], k * es_c + (1 - k) * rad, sub)

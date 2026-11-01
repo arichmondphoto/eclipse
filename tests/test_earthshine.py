@@ -508,7 +508,8 @@ def _moon_project(tmp_path, holes=True):
     rgb = rgb + 3e-5 * rng.normal(0, 1, rgb.shape).astype(np.float32)  # the earthshine stack's noise
     # Real weights: many frames on the corona, one on the Moon; the earthshine stack's weights
     # are in units of their own.
-    weight = np.where(d > 0, 0.02, 1.0).astype(np.float32)
+    # Just outside the limb fewer frames go in (each frame's Moon covers some): over 3 px here.
+    weight = np.where(d > 0, 0.02, np.clip(0.1 + 0.9 * (-d) / 3.0, 0.1, 1.0)).astype(np.float32)
     if holes:
         hole = (np.abs(d - 0.5) < 1) & (np.sin(9 * phi) > 0.6)  # saturated in every frame, by the limb
         hdr[:, hole] = 0
@@ -616,7 +617,7 @@ def test_saturated_prominence_core_is_not_white(tmp_path):
     from tse_core.fits import read_fits, write_fits
 
     proj, rr, phi, r = _moon_project(tmp_path, holes=False)
-    core = (np.abs(phi) < 0.04) & (rr > r - 4) & (rr < r + 3)
+    core = (np.abs(phi) < 0.04) & (rr > r - 4) & (rr < r + 1.5)  # as on the 2024 data: white to +1 px
     hdr, head = read_fits(tmp_path / "e_hdr.fit")
     hdr[:, core] = 5.0  # clipped: equal in every channel, very bright
     write_fits(tmp_path / "e_hdr.fit", hdr, head)
@@ -740,3 +741,21 @@ def test_no_step_where_the_stacks_hand_over_outside_the_limb(tmp_path):
     assert max(steps) < 0.1, steps
     print(steps)  # a gradual hand-over; the old switch at 3 px: one 25% step
     assert ratio(2.5) > 0.9
+
+
+def test_hdr_reliable_zone_is_measured_from_the_weights():
+    """Where the HDR stack's corona is used from follows its weights (the Moon covering frames),
+    not a fixed number of pixels: 3 px at one scale, 8 px at a longer focal length."""
+    n, r = 600, 250.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - n / 2, yy - n / 2)
+    rng = np.random.default_rng(2)
+    for width in (3.0, 8.0):
+        d = rr - r
+        # Coverage: weight rising over ``width`` px; beyond it a gentle fall towards the limb
+        # from saturated long frames (not a sharp drop).
+        w = np.clip(d / width, 0, 1) ** 2 * (1 - 0.3 * np.exp(-np.clip(d, 0, None) / 30))
+        w = np.where(d > 0, w * rng.uniform(0.9, 1.1, w.shape), 0.0).astype(np.float32)
+        edge = ES.hdr_reliable_from(w, rr, r)
+        assert width - 1.5 <= edge <= width + 1.0, (width, edge)
+    assert ES.hdr_reliable_from(np.ones((n, n), np.float32), rr, r) == 2.0
