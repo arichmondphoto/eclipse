@@ -485,6 +485,23 @@ along the limb). On simulations a
 false mare 25 px inside the limb came through at about 15–20% of
 `--albedo-strength` (default 0.5), and not at all 45 px or more inside.
 
+**A dark, clean Moon; map texture (optional, a composite).** On the 2024
+D850 earthshine stack the lunar surface is mostly noise at every scale up to
+about 35 px (structure/noise 1.0-1.4 from 1 to 35 px): the maria are really
+there, craters and rays are not. `--surface-denoise 4` (**Edge-preserving
+smoothing**) smooths only across similar brightness (a joint bilateral
+filter judged on a lightly smoothed guide), so the noise inside the maria
+goes and their edges stay crisp; plain `--smooth` blurs the edges too, and
+large values of it spread leftover limb glare into beads by the limb. A
+darker, flat, neutral Moon: `--brightness 0.35 --limb-darkening 0
+--no-colour --surface-denoise 4`.
+`--albedo-texture 1` (**Map texture (composite)**, with an albedo map)
+adds the map's own fine detail (finer than 4% of the radius: craters, rays)
+to the surface, scaled to your Moon's contrast. That detail comes from the
+map, not your photographs, so it is off by default, only used when the map
+matches your Moon, and the log says "albedo texture ADDED (composite, from
+the map, not your data)".
+
 **How the Moon meets the corona.** A perfectly clean disc cut on a circle
 looks pasted in, so the layer is built like a photograph of the limb:
 
@@ -868,6 +885,8 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--no-colour` | make the earthshine layer grey (default: natural colour, so a prominence at the limb stays red on the Moon side too) |
 | `--no-edge-grain` | leave the filled last pixels by the limb smooth (default: grain like the rest) |
 | `--vignette-shape` | how the darkening falls from the centre: 1 = straight line, 1.5 (default) = gentle in the middle, 3 = the middle stays bright longer |
+| `--surface-denoise` | edge-preserving smoothing of the lunar surface, px (0 = off; e.g. 4): maria keep crisp edges |
+| `--albedo-texture` | COMPOSITE: add the albedo map's own craters and rays at this strength (0 = off, your data only; 1 = at your Moon's contrast); needs --albedo-map |
 | `--edge-smooth` | most smoothing of the noisier pixels near the limb, px (default 3) |
 | `--include-rejected` | also use frames marked as rejected |
 | `--output`, `-o` | output folder (default: next to the project) |

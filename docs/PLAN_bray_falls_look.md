@@ -1,6 +1,6 @@
 # Plan: a final image like Bray Falls' blended eclipse
 
-Status: **steps 1 and 2 in the toolkit as options; step 3 measured, waiting on Andy's decision (albedo texture or not)** (1 Nov 2026).
+Status: **steps 1-3 in the toolkit as options (not defaults); step 4 (crisp limb) next, after Andy tries the settings** (1 Nov 2026).
 Code at the time of writing: commit `38830ba` on `main`. Tick items off here as they are done.
 
 ## Goal
@@ -143,14 +143,26 @@ and rays like his are not in this data.
   (`moon_looks.png`), closer to his. It shows small beads at the limb with that smoothing; to
   look at.
 
-Open decision for Andy (asked 1 Nov): his crater and ray detail can only come from outside
-this data, i.e. an albedo map blended in as visible texture (a composite, clearly labelled, off by
-default). Until now the map has only guided glare removal and never added to the picture.
+Andy's decision (1 Nov): **both**. Do the data-only look, and add map texture as an explicit,
+labelled composite option.
 
-- [ ] Preset or documented settings for the dark, flat, neutral Moon; fix the limb beads at
-      high smoothing.
-- [ ] Only if Andy wants it: albedo-map texture as an explicit, labelled composite option.
-- [ ] Edge-preserving smoothing for the maria (instead of Gaussian) so their edges stay crisp.
+- [x] Edge-preserving smoothing: `surface_denoise` / `--surface-denoise` / **Edge-preserving
+      smoothing** (`earthshine.edge_preserving`, a joint bilateral on a lightly smoothed guide,
+      range 2.5x the guide's noise). Applied in `moon_surface` before the edge fill. Test: noise in
+      a flat area < 0.35x and a step edge stays within 3 px (a Gaussian of the same size spreads
+      it wider).
+- [x] Limb beads: they came from large `smooth` spreading leftover limb glare past the 1.15
+      "over" threshold. Use `surface_denoise` instead of large `smooth`; documented.
+- [x] Dark, flat, neutral recipe documented: `--brightness 0.35 --limb-darkening 0
+      --no-colour --surface-denoise 4`.
+- [x] Map texture: `albedo_texture` / `--albedo-texture` / **Map texture (composite)**
+      (`earthshine.albedo_texture`). The map's detail finer than 4% of R is rendered at the fitted
+      orientation, scaled by the guide's k (your Moon's contrast) and added to `shown` after
+      smoothing. Only when the match is ≥ `albedo_min_match`; the log says "albedo texture ADDED
+      (composite, from the map, not your data)". Test: added detail correlates > 0.5 with the
+      map's fine detail; a non-matching map adds nothing. On Andy's stack with his map (match
+      0.63) it gives craters and rays close to his look (`moon_looks2.png`, bottom right).
+- [ ] Check in Siril on the full final image (Andy).
 
 ### 4. A crisp limb
 

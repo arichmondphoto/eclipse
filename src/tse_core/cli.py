@@ -207,6 +207,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--vignette-shape", type=float, default=1.5,
                    help="how the darkening falls from the centre: 1 = straight line, 1.5 (default) = gentle in the "
                         "middle, 3 = the middle stays bright longer")
+    p.add_argument("--surface-denoise", type=float, default=0.0,
+                   help="edge-preserving smoothing of the lunar surface, px (0 = off; e.g. 4): maria keep crisp edges")
+    p.add_argument("--albedo-texture", type=float, default=0.0,
+                   help="COMPOSITE: add the albedo map's own craters and rays at this strength (0 = off, your data "
+                        "only; 1 = at your Moon's contrast); needs --albedo-map")
     p.add_argument("--edge-smooth", type=float, default=3.0,
                    help="most smoothing of the noisier pixels near the limb, px (default 3)")
     p.add_argument("--include-rejected", action="store_true", help="also use frames marked as rejected")
@@ -664,7 +669,8 @@ def cmd_earthshine(args) -> int:
                               limb_darkening=args.limb_darkening, vignette_shape=args.vignette_shape,
                               keep_glare=args.keep_glare, limb_soften=args.limb_soften,
                               edge_grain=not args.no_edge_grain, colour=not args.no_colour,
-                              edge_smooth=args.edge_smooth,
+                              edge_smooth=args.edge_smooth, surface_denoise=args.surface_denoise,
+                              albedo_texture=args.albedo_texture,
                               limb_shape=not args.no_limb_shape, channel=args.channel,
                               albedo_map=args.albedo_map, albedo_strength=args.albedo_strength)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,

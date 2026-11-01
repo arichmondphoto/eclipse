@@ -62,6 +62,12 @@ class EarthshineParams:
     keep_glare: float = 0.5  # how much of the removed glare is kept as a glow inside the limb, 0..1
     limb_reach: float = 6.0  # px past the limb the stack and layer reach: the real limb, from the data
     limb_soften: float = 1.5  # extra softening of the limb, px (Gaussian), on top of the real one
+    # Edge-preserving smoothing of the lunar surface (px, 0 = off): averages only across similar
+    # brightness, so the maria keep crisp edges while the noise inside them goes.
+    surface_denoise: float = 0.0
+    # Albedo map texture (0 = off): blends this much of the map's own craters and rays into the
+    # surface, scaled to your Moon's contrast. A COMPOSITE: that detail is the map's, not your data.
+    albedo_texture: float = 0.0
     edge_grain: bool = True  # put grain like the rest of the surface into the filled last pixels
     colour: bool = True  # natural colour: the glow and limb (prominences red) and the earthshine's own tint
     saturation: float = 1.0  # colour saturation, as for the corona layers (0 = grey)
@@ -611,6 +617,27 @@ def choose_channel(rgb: np.ndarray, good: np.ndarray, cx: float, cy: float, r: f
     return name, scores
 
 
+def albedo_texture(amap: np.ndarray, detail: np.ndarray, shown: np.ndarray, good: np.ndarray, cx: float,
+                   cy: float, r: float, p: "EarthshineParams", orientation=None):
+    """The albedo map's fine detail (craters, rays; finer than 4% of the radius, where a typical
+    earthshine stack is mostly noise) added to ``shown``, scaled to the Moon's own contrast.
+
+    A composite: the added detail is the map's, not the data's. Only used when the map matches
+    the Moon (``albedo_min_match``). Returns (shown, note)."""
+    from .moonmap import _masked_blur, fit_orientation, guide, render
+
+    o = orientation or fit_orientation(amap, detail, good, cx, cy, r)
+    if o.correlation < p.albedo_min_match:
+        return shown, (f"albedo texture not added: the map matches your Moon only {o.correlation:.2f} "
+                       f"(needs {p.albedo_min_match:.2f})")
+    _, _, k = guide(amap, detail, good, cx, cy, r, o)  # scale of the map's pattern in your data
+    sharp = render(amap, detail.shape, cx, cy, r, o)
+    fine = sharp - _masked_blur(sharp, good, max(2.0, 0.04 * r))
+    add = np.where(good, p.albedo_texture * k * fine, 0.0).astype(np.float32)
+    return (shown + add).astype(np.float32), (f"albedo texture ADDED (composite, from the map, not your data): "
+                                              f"strength {p.albedo_texture:g}")
+
+
 def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: float, cy: float, moon_r: float,
                  p: EarthshineParams, albedo: Optional[np.ndarray] = None, extras: Optional[dict] = None):
     """From the Moon-aligned stack to the picture: glare removed, smoothed by how certain it is.
@@ -662,6 +689,9 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
     # saturated), up to ``edge_smooth`` px; diffraction spikes and other real structure are left alone.
     shown = (adaptive_smooth(detail, good, factor, p.smooth, cap=max(p.edge_smooth, p.smooth))
              if p.smooth > 0 else detail)
+    if albedo is not None and p.albedo_texture > 0:
+        shown, note = albedo_texture(albedo, detail, shown, good, cx, cy, moon_r, p, orientation)
+        notes.append(note)
     # Nearer the limb than where the noise is still ~10x that of the middle, fill the edge from
     # just inside instead: only noise, and glare shaped by the bumpy real limb, is left in those
     # last pixels. At least the last 2.5% of the radius (11 px at 400 mm on a full-frame camera).
@@ -1124,6 +1154,33 @@ def match_limb(base: np.ndarray, e: np.ndarray, moon: tuple, limb_px: float = 1.
 # ---------------------------------------------------------------------------
 
 
+def edge_preserving(img: np.ndarray, mask: np.ndarray, sigma: float, range_k: float = 2.5) -> np.ndarray:
+    """Joint bilateral smoothing inside ``mask``: Gaussian in space (``sigma`` px), and each
+    neighbour counts as much as its brightness (on a lightly smoothed guide) is like this pixel's,
+    within ``range_k`` x the guide's own noise. Noise inside the maria goes; their edges stay."""
+    guide = ndimage.gaussian_filter(np.where(mask, img, 0.0), 1.5) / np.maximum(
+        ndimage.gaussian_filter(mask.astype(np.float32), 1.5), 1e-6)
+    hp = guide - ndimage.gaussian_filter(guide, 1.0)
+    noise = 1.4826 * float(np.median(np.abs(hp[mask]))) / 0.96 * 2.5 if mask.any() else 0.0
+    sr = max(range_k * noise, 1e-6)
+    rad = int(math.ceil(2 * sigma))
+    num = np.zeros(img.shape, np.float64)
+    den = np.zeros(img.shape, np.float64)
+    src = np.where(mask, img, 0.0)
+    for dy in range(-rad, rad + 1):
+        for dx in range(-rad, rad + 1):
+            ws = math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma))
+            if ws < 0.01:
+                continue
+            sh_img = np.roll(src, (dy, dx), axis=(0, 1))
+            sh_g = np.roll(guide, (dy, dx), axis=(0, 1))
+            sh_m = np.roll(mask, (dy, dx), axis=(0, 1))
+            wgt = ws * np.exp(-0.5 * ((sh_g - guide) / sr) ** 2) * sh_m
+            num += wgt * sh_img
+            den += wgt
+    return np.where(mask, num / np.maximum(den, 1e-12), img).astype(np.float32)
+
+
 def moon_surface(shown: np.ndarray, good: np.ndarray, glare: np.ndarray, cx: float, cy: float, moon_r: float,
                  p: "EarthshineParams", keep_from: float, tint: Optional[np.ndarray] = None):
     """The seas and highlands as a picture to add on top of the stretched Moon, and where to show them.
@@ -1152,6 +1209,8 @@ def moon_surface(shown: np.ndarray, good: np.ndarray, glare: np.ndarray, cx: flo
         wgt = ndimage.gaussian_filter(over.astype(np.float32), 1.5)
         surf = np.where(good, surf * (1 - wgt) + np.clip(fill, 0, 1) * wgt, surf)
     # Over the noisy last pixels, carry the surface out to the limb (with matching grain).
+    if p.surface_denoise > 0:
+        surf = edge_preserving(surf, good & (rr < moon_r - keep_from), p.surface_denoise)
     r_in = moon_r - keep_from
     known = good & (rr < r_in)
     surf = extend_to_limb(np.where(known, surf, 0.0), known, cx, cy, r_in, moon_r + 1.0)

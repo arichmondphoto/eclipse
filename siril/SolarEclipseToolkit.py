@@ -1258,6 +1258,10 @@ class EarthshineTab(StepTab):
         f.addRow("Smoothing:", self.smooth)
         self.edge_smooth = spin(0.0, 12.0, 0.5, 3.0, " px")
         f.addRow("Smoothing near the limb:", self.edge_smooth)
+        self.surface_denoise = spin(0.0, 10.0, 0.5, 0.0, " px")
+        f.addRow("Edge-preserving smoothing:", self.surface_denoise)
+        self.albedo_texture = spin(0.0, 1.5, 0.1, 0.0)
+        f.addRow("Map texture (composite):", self.albedo_texture)
         self.edge_grain = QCheckBox("Grain in the filled edge, like the rest of the surface")
         self.edge_grain.setChecked(True)
         f.addRow(self.edge_grain)
@@ -1418,6 +1422,14 @@ class EarthshineTab(StepTab):
         _tip(self.vignette_shape, "How the darkening is spread from the middle to the edge. 1 = a straight-line "
              "fall from the centre; 1.5 (the default) = gentle in the middle, steady further out; 3 = the middle "
              "stays bright longer and the darkening gathers towards the edge.", f)
+        _tip(self.surface_denoise, "Smooths the lunar surface only across similar brightness, so the noise inside "
+             "the maria goes while their edges stay crisp (unlike Smoothing, which blurs edges too). Size in pixels; "
+             "0 (default) = off. 3-5 suits a 400 mm frame. Needs Stack earthshine again.")
+        _tip(self.albedo_texture, "Adds the albedo map's own craters and rays to the lunar surface, scaled to your "
+             "Moon's contrast. This is a COMPOSITE: that fine detail comes from the map (a spacecraft mosaic), not "
+             "from your photographs; a typical earthshine stack is mostly noise at that scale. Needs an albedo map "
+             "above, and is only used if the map matches your Moon; the log says when it is added.\n\n"
+             "0 (default) = off, your data only. 1 = the map's detail at your Moon's own contrast.")
         _tip(self.edge_smooth, "The last pixels by the limb are much noisier (the long exposures are saturated "
              "there), so they get extra smoothing, up to this many pixels where the noise is highest. The rest "
              "of the Moon only gets the Smoothing above. Lower it to keep more grain at the edge.", f)
@@ -1534,7 +1546,9 @@ class EarthshineTab(StepTab):
                                   vignette_shape=self.vignette_shape.value(),
                                   keep_glare=self.keep_glare.value(), limb_soften=self.limb_soften.value(),
                                   edge_grain=self.edge_grain.isChecked(), colour=self.colour.isChecked(),
-                                  edge_smooth=self.edge_smooth.value(), limb_shape=self.limb_shape.isChecked(),
+                                  edge_smooth=self.edge_smooth.value(),
+                                  surface_denoise=self.surface_denoise.value(),
+                                  albedo_texture=self.albedo_texture.value(), limb_shape=self.limb_shape.isChecked(),
                                   channel=self.channel.currentData(),
                                   albedo_map=self.albedo_path.text().strip(),
                                   albedo_strength=self.albedo_strength.value())

@@ -786,3 +786,55 @@ def test_inner_margin_scales_with_the_moon():
     assert p.margin(1090.0) == 7.5  # 1000 mm
     assert p.margin(150.0) == 2.0
     assert EarthshineParams(margin_px=4.0).margin(435.9) == 4.0
+
+
+def test_edge_preserving_keeps_mare_edges_and_removes_noise():
+    """The surface smoothing averages only across similar brightness: noise inside a 'mare' goes
+    down about as much as a Gaussian of the same size would take it, but the mare's edge stays
+    sharp (a Gaussian of that size spreads it over several pixels)."""
+    n = 200
+    yy, xx = np.mgrid[0:n, 0:n]
+    truth = np.where(xx < 100, 0.3, 0.7).astype(np.float32)
+    rng = np.random.default_rng(0)
+    img = (truth + 0.03 * rng.normal(0, 1, truth.shape)).astype(np.float32)
+    mask = np.ones_like(img, bool)
+    out = ES.edge_preserving(img, mask, 4.0)
+    gauss = ndimage.gaussian_filter(img, 4.0)
+    flat = (xx > 20) & (xx < 80) & (yy > 20) & (yy < 180)
+    assert out[flat].std() < 0.35 * img[flat].std()
+
+    def edge_width(a):  # 10-90 % rise across the edge, mean over rows
+        row = a[20:180].mean(axis=0)
+        lo, hi = row[60:80].mean(), row[120:140].mean()
+        t = (row - lo) / (hi - lo)
+        return int(((t > 0.1) & (t < 0.9)).sum())
+
+    assert edge_width(out) <= 3 < edge_width(gauss)
+
+
+def test_albedo_texture_is_added_only_when_asked_and_matched():
+    """The map's fine detail goes into the surface only with albedo_texture > 0 and a map that
+    matches the Moon; the note says plainly that it is a composite."""
+    from test_moonmap import R as MR, TRUTH, make_map  # noqa: F401
+    from tse_core import moonmap as MM
+
+    amap = make_map()
+    n = 340
+    cx = cy = n / 2 - 0.3
+    surf = 1e-3 * MM.render(amap, (n, n), cx, cy, MR, TRUTH)
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - cx, yy - cy)
+    good = rr < MR - 3
+    rng = np.random.default_rng(3)
+    detail = np.where(good, ndimage.gaussian_filter(surf, 6) + 2e-4 * rng.normal(0, 1, (n, n)), 0).astype(np.float32)
+    shown = detail.copy()
+    p = ES.EarthshineParams(albedo_texture=1.0)
+    out, note = ES.albedo_texture(amap, detail, shown, good, cx, cy, MR, p, TRUTH)
+    assert "ADDED" in note and "not your data" in note
+    fine_truth = surf - ndimage.gaussian_filter(surf, 6)
+    added = out - shown
+    inner = good & (rr < 0.8 * MR)
+    assert np.corrcoef(added[inner], fine_truth[inner])[0, 1] > 0.5
+    other = make_map(seed=13)
+    out2, note2 = ES.albedo_texture(other, detail, shown, good, cx, cy, MR, p)
+    assert "not added" in note2 and np.array_equal(out2, shown)
