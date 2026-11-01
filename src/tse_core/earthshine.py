@@ -41,7 +41,9 @@ Say = Callable[[str], None]
 @dataclass
 class EarthshineParams:
     stops: float = 6.0  # use frames within this many stops of the longest exposure
-    margin_px: float = 3.0  # stay this far inside the lunar limb (limb glare, chromosphere), full-res px
+    # Stay this far inside the lunar limb (limb glare, chromosphere), full-res px. None: scaled to
+    # the Moon's size, 0.7% of its radius, at least 2 px (3 px for the 2024 D850 at 400 mm).
+    margin_px: Optional[float] = None
     glare_order: int = 2  # polynomial order of the glare (a gentle gradient); higher also eats large maria
     smooth: float = 1.0  # Gaussian smoothing of the shown layer, px (0 = none)
     brightness: float = 0.6  # brightest lunar surface in the layer, 0..1 (the corona stays brighter)
@@ -67,6 +69,12 @@ class EarthshineParams:
     saturation_taper: float = 0.15
     noise_floor: float = 0.002
     hot_pixels: bool = True
+
+    def margin(self, moon_r: float) -> float:
+        """``margin_px``, or when it is None, 0.7% of the Moon's radius (at least 2 px)."""
+        if self.margin_px is not None:
+            return float(self.margin_px)
+        return max(2.0, round(0.007 * float(moon_r) * 2) / 2)
 
 
 @dataclass
@@ -509,7 +517,7 @@ def remove_glare(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: flo
     if p.limb_glare:
         if p.limb_shape:
             glare = glare + limb_falloff(np.where(good, est - glare, 0.0).astype(np.float32), good, cx, cy, r,
-                                         d0=p.margin_px)
+                                         d0=p.margin(r))
         glare = glare * limb_background(est, glare, good, cx, cy, r)
     return np.where(good, img - glare, 0.0).astype(np.float32), glare
 
@@ -581,9 +589,9 @@ def choose_channel(rgb: np.ndarray, good: np.ndarray, cx: float, cy: float, r: f
     rr = np.hypot(xx - cx, yy - cy)
     phi = np.arctan2(yy - cy, xx - cx)
     d_in = r - rr
-    band = good & (d_in > max(0.03 * r, p.margin_px + 1)) & (d_in < max(0.06 * r, p.margin_px + 7))
+    band = good & (d_in > max(0.03 * r, p.margin(r) + 1)) & (d_in < max(0.06 * r, p.margin(r) + 7))
     body = good & (rr < r * 0.5)
-    quick = EarthshineParams(glare_order=p.glare_order, limb_shape=False, margin_px=p.margin_px)
+    quick = EarthshineParams(glare_order=p.glare_order, limb_shape=False, margin_px=p.margin(r))
     scores = {}
     for name in ("all", "green", "green+blue"):
         img = channel_image(rgb, name)
@@ -624,7 +632,7 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
         else:
             orientation = None
     if p.limb_glare and p.source_glare:
-        extra, angles = source_glare(detail, good, cx, cy, moon_r, p.margin_px)
+        extra, angles = source_glare(detail, good, cx, cy, moon_r, p.margin(moon_r))
         if angles:
             detail = np.where(good, detail - extra, 0.0).astype(np.float32)
             glare = glare + extra
@@ -657,8 +665,8 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
     # Nearer the limb than where the noise is still ~10x that of the middle, fill the edge from
     # just inside instead: only noise, and glare shaped by the bumpy real limb, is left in those
     # last pixels. At least the last 2.5% of the radius (11 px at 400 mm on a full-frame camera).
-    keep_from = max(p.margin_px, 0.025 * moon_r)
-    for d in range(int(math.ceil(p.margin_px)), min(nring, int(moon_r * 0.2))):
+    keep_from = max(p.margin(moon_r), 0.025 * moon_r)
+    for d in range(int(math.ceil(p.margin(moon_r))), min(nring, int(moon_r * 0.2))):
         if ring_ratio[d] > 0 and ring_ratio[d] < 10.0 and np.median(weight_ratio[good & (ri == d)]) < 10.0:
             keep_from = max(float(d), keep_from)
             break
@@ -709,7 +717,7 @@ def stack_earthshine(
     cx, cy = cx0 - X0, cy0 - Y0
     yy, xx = np.mgrid[0 : 2 * half, 0 : 2 * half]
     rr = np.hypot(xx - cx, yy - cy)
-    inside = rr < moon_r - p.margin_px  # used for fitting the glare and the surface
+    inside = rr < moon_r - p.margin(moon_r)  # used for fitting the glare and the surface
     stacked = rr < moon_r + max(p.limb_reach, 0.0) + 2  # stacked: also the real limb just outside
 
     total = np.zeros((2 * half, 2 * half), np.float64)
@@ -809,7 +817,7 @@ def surface_tint(rgb: np.ndarray, detail: np.ndarray, chan: str, good: np.ndarra
     h, w = good.shape
     yy, xx = np.mgrid[0:h, 0:w]
     body = good & (np.hypot(xx - cx, yy - cy) < 0.75 * r)
-    quick = EarthshineParams(glare_order=p.glare_order, limb_shape=False, margin_px=p.margin_px)
+    quick = EarthshineParams(glare_order=p.glare_order, limb_shape=False, margin_px=p.margin(r))
     sig = max(3.0, 0.015 * r)
     ref = ndimage.gaussian_filter(detail, sig)[body]
     ref = ref - ref.mean()
@@ -891,13 +899,13 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
             ndimage.gaussian_filter(ok.astype(np.float32), sig), 1e-6)
         wgt = ndimage.gaussian_filter(over.astype(np.float32), 1.5)
         surf = np.where(good, surf * (1 - wgt) + np.clip(fill, 0, 1) * wgt, surf).astype(np.float32)
-    keep_from = p.margin_px if keep_from is None else keep_from
+    keep_from = p.margin(moon_r) if keep_from is None else keep_from
     r_in = moon_r - keep_from
     shown_good = good & (rr < r_in)
     real_limb = linear is not None and glare is not None and p.limb_reach > 0
     edge = moon_r + (p.limb_reach if real_limb else p.limb_px)
     surf = extend_to_limb(surf, shown_good, cx, cy, r_in, min(edge, moon_r + p.limb_px))
-    if p.edge_grain and keep_from > p.margin_px:
+    if p.edge_grain and keep_from > p.margin(moon_r):
         # Grain like the surface just inside the fill, so the filled band is not smoother than the rest.
         ring = shown_good & (rr > r_in - 12)
         hp = surf - ndimage.gaussian_filter(surf, 2.0)
@@ -984,7 +992,7 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     moon_path = None
     if glare is not None:
         surface, vis = moon_surface(shown, good, glare, cx, cy, moon_r, p,
-                                    p.margin_px if keep_from is None else keep_from, tint)
+                                    p.margin(moon_r) if keep_from is None else keep_from, tint)
         moon_path = out / f"{name}_moon_surface.fit"
         write_fits(moon_path, np.concatenate([np.moveaxis(surface, -1, 0), vis[None]], axis=0).astype(np.float32),
                    {**header, "COMMENT": "planes: surface R, G, B (display 0..1), visibility"})

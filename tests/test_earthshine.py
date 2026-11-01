@@ -225,18 +225,20 @@ def test_limb_glare_removed_and_layer_meets_the_corona(run, tmp_path):
     from tse_core.earthshine import composite
 
     mos, infos, tex, matches, ref = run
-    p = EarthshineParams(limb_darkening=0.0)  # evenly lit, so a dark ring would stand out
+    # Evenly lit, so a dark ring would stand out. The scene's Moon is tiny (42 px radius) but its
+    # limb is blurred like a big one's, so the margin is set as for one (the scaled one is 2 px).
+    p = EarthshineParams(limb_darkening=0.0, margin_px=3.0)
     res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
                                         (0, 0, SIZE, SIZE), p, out_dir=tmp_path, name="t")
     X0, Y0, w, h = res.crop
     yy, xx = np.mgrid[0:h, 0:w]
     rr = np.hypot(xx - (ref.moon_x - X0), yy - (ref.moon_y - Y0))
     sm = ndimage.gaussian_filter(detail, 2.0)
-    edge = (rr > MOON_R - 7) & (rr < MOON_R - p.margin_px - 1)
+    edge = (rr > MOON_R - 7) & (rr < MOON_R - p.margin(MOON_R) - 1)
     middle = rr < MOON_R * 0.6
     assert abs(np.median(sm[edge]) - np.median(sm[middle])) < 3e-5
     _, _, plain = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
-                                   (0, 0, SIZE, SIZE), EarthshineParams(limb_glare=False))
+                                   (0, 0, SIZE, SIZE), EarthshineParams(limb_glare=False, margin_px=3.0))
     sp = ndimage.gaussian_filter(plain, 2.0)
     assert np.median(sp[edge]) - np.median(sp[middle]) > 6e-5  # the test does contain a rim to remove
     # The layer is filled right out to the corona's edge and soft only beyond it.
@@ -372,7 +374,7 @@ def test_layer_follows_the_real_limb_and_glows():
 
     lin, cx, cy, r, rr, phi, true_r = _limb_scene()
     p = EarthshineParams(keep_glare=0.5, limb_soften=0.0, limb_darkening=0.0)
-    good = rr < r - p.margin_px - 2
+    good = rr < r - p.margin(r) - 2
     weight = (rr < r + p.limb_reach + 2).astype(np.float32)
     detail, glare = remove_glare(lin, good, cx, cy, r, EarthshineParams(limb_shape=False))
     layer = compose_layer(detail, good, weight, cx, cy, r, p, keep_from=6.0, linear=lin, glare=glare)
@@ -776,3 +778,11 @@ def test_hdr_reliable_zone_on_the_2024_weights():
     w = np.interp(d, np.arange(len(prof)) + 0.5, prof, left=0.0, right=prof[-1])
     w = np.where(d > 0, w, 0.0).astype(np.float32)
     assert 2.5 <= ES.hdr_reliable_from(w, rr, r) <= 4.0
+
+
+def test_inner_margin_scales_with_the_moon():
+    p = EarthshineParams()
+    assert p.margin(435.9) == 3.0  # 2024 D850 at 400 mm, as before
+    assert p.margin(1090.0) == 7.5  # 1000 mm
+    assert p.margin(150.0) == 2.0
+    assert EarthshineParams(margin_px=4.0).margin(435.9) == 4.0

@@ -403,6 +403,11 @@ for the average, noise 0.15 against 0.19 (both relative to the lunar
 contrast). `<name>_earthshine_rgb.fit` holds the stack per channel. `--no-limb-glare` turns all of the limb glare
 handling off.
 
+The glare is fitted on the disc from a small margin inside the limb, which
+is scaled to the Moon's size like the stacking margin: 0.7% of its radius,
+at least 2 px (3 px for the 2024 D850 at 400 mm, about 7.5 px at 1000 mm).
+Most other limb widths are already fractions of the radius.
+
 **Glare round a bright prominence.** A bright prominence throws a fan of
 glare onto the Moon, with diffraction spikes, centred on the prominence
 rather than on the Moon, so the limb terms (smooth round the limb) leave a
@@ -501,7 +506,7 @@ prominence the long earthshine frames saturate, so towards it ever fewer
 frames are usable and the last are near full well: there (under 40% of the
 usual frames, fully below 10%) the light is interpolated along each radius in
 log brightness, from the last well-exposed earthshine pixel to the limb,
-where it takes the corona 3 px out times the drop across the limb seen in the
+where it takes the corona at the start of the HDR's reliable zone times the drop across the limb seen in the
 nearest good directions. Spreading it sideways from neighbours, as before,
 left a ragged dark-red fringe. The settings of
 your last Enhance run then stretch Moon and corona together, so the limb is
