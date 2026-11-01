@@ -548,6 +548,8 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         raise WorkflowError("Stack the earthshine again first: this needs the colour stack and the lunar surface "
                             "it now writes (_earthshine_rgb.fit, _moon_surface.fit).")
     info = json.loads(Path(info_path).read_text(encoding="utf-8"))
+    say(f"final image: the Moon put into the stack, stretched with the corona ({base_layer}); "
+        f"surface from {Path(mpath).name}")
     params = enhance_params_from_project(path, project) if enhance_params is None else enhance_params
     if base_layer == "natural":
         params = replace(params, layers=("natural",), blend={})
@@ -635,7 +637,7 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
     if preview_side:
         w, h = image_size(base_path)
         step = max(1, int(math.ceil(max(h, w) / preview_side)))
-    say("reading the layers")
+    say(f"final image, older way: pasting {Path(earth_path).name} into {Path(base_path).name}")
     base = read_image(base_path, step)
     earth = read_image(earth_path, step)
     if base.shape != earth.shape:

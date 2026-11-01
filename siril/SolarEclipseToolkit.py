@@ -33,6 +33,28 @@ from pathlib import Path
 
 VERSION = "0.1.0"
 
+
+def _git_version() -> str:
+    """The repository commit the script runs from (shown in the title and the log), or ''."""
+    try:
+        git = Path(__file__).resolve().parent.parent / ".git"
+        head = (git / "HEAD").read_text().strip()
+        if head.startswith("ref:"):
+            ref = head.split(" ", 1)[1]
+            p = git / ref
+            if p.exists():
+                return p.read_text().strip()[:7]
+            for line in (git / "packed-refs").read_text().splitlines():
+                if line.endswith(ref):
+                    return line[:7]
+            return ""
+        return head[:7]
+    except OSError:
+        return ""
+
+
+BUILD = _git_version()
+
 # The core package lives in ../src when the script runs from the repository.
 _SRC = Path(__file__).resolve().parent.parent / "src"
 if _SRC.is_dir() and str(_SRC) not in sys.path:
@@ -1791,7 +1813,8 @@ class MainWindow(QMainWindow):
     def __init__(self, link: SirilLink) -> None:
         super().__init__()
         self.link = link
-        self.setWindowTitle(f"Solar Eclipse Toolkit {VERSION}" + ("" if link.connected else " (not connected to Siril)"))
+        self.setWindowTitle(f"Solar Eclipse Toolkit {VERSION}" + (f" ({BUILD})" if BUILD else "")
+                            + ("" if link.connected else " (not connected to Siril)"))
         self.resize(1280, 820)
         self.tabs = QTabWidget()
         self.frames_tab = FramesTab(link)
@@ -1873,7 +1896,7 @@ class MainWindow(QMainWindow):
         self._title(path)
 
     def _title(self, path) -> None:
-        self.setWindowTitle(f"Solar Eclipse Toolkit {VERSION} – {Path(path).name}"
+        self.setWindowTitle(f"Solar Eclipse Toolkit {VERSION}" + (f" ({BUILD})" if BUILD else "") + f" – {Path(path).name}"
                             + ("" if self.link.connected else " (not connected to Siril)"))
 
     def open_in_siril(self, path: str) -> None:
