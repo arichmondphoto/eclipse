@@ -1,6 +1,6 @@
 # Plan: a final image like Bray Falls' blended eclipse
 
-Status: **step 1 done (option, not default); step 2 next** (1 Nov 2026).
+Status: **step 1 done (option, not default); step 2 prototyped, not yet in the toolkit** (1 Nov 2026).
 Code at the time of writing: commit `38830ba` on `main`. Tick items off here as they are done.
 
 ## Goal
@@ -82,6 +82,32 @@ signal (data), not stretch. Dust spots show as dark rings in the corona (no dust
 - [ ] Expose the adaptive filter's scales (now fixed at 0.6–20% of the Sun's radius) and its k.
 - [ ] Target: continuous filaments and loops like his, measured as fine-scale contrast against
       noise on Andy's crop.
+
+**Prototype (1 Nov), `docs/prototypes/strands_step2.py`, run on the crop only (not wired in):**
+
+- Measured on the crop: pixel noise 0.4% (bright) to 1% (faint) of the signal. After smoothing,
+  structure/noise per adaptive scale (1.05–1.8 Moon radii): 2.5 px 2.1, 5 px 3.6, 10 px 9,
+  21 px 21, 41 px 52, 83 px 258. The two finest scales are mostly noise in this data, which is why
+  the current adaptive layer looks grainy at 100%.
+- Smoothing along the strands (structure-tensor direction) plus a Wiener gain per scale gives
+  long, continuous strands much like his, in the inner corona.
+- Lessons:
+  - The direction must come from the mid-scale detail (b − blur 40 px, gradient σ 3, tensor
+    σ 10). From the raw log image, the radial fall-off made it tangential (streaks across the
+    strands).
+  - Fill the Moon from its surroundings first, or its edge sets the direction in a band about
+    40 px wide by the limb.
+- Open problems before wiring it in:
+  1. In the faint outer corona (beyond ~2 Moon radii) it paints a flow texture out of noise:
+     invented structure. A gain cap at 0.4× the median contrast did not help, and neither did the
+     Wiener gate (c 3). The suspicion is that the large scales normalize very low variance; try
+     limiting gain per scale against the measured noise at that scale, or fading the layer with
+     signal-to-noise.
+  2. Small speckles where the direction field has singularities (junctions, the dust rings).
+  3. It must never invent strands. Add a test: pure noise through the same pipeline must give
+     much less contrast than the real crop does.
+- Images sent to Andy: `cmp_p8.png` (100% by the limb, before and after the direction fix) and
+  `p9_small.png` (whole crop).
 
 ### 3. The Moon in his style
 
