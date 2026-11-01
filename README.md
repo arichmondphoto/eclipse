@@ -455,13 +455,26 @@ next to the linear stack.
 | `<name>_earthshine_crop.tif` | the same, cropped to the Moon |
 | `<name>_earthshine.fit` | the Moon-aligned linear stack before glare removal |
 
-To skip Photoshop, blend it in here: `totality final eclipse2024.json` (or the
-**Blend into the image** box on the Earthshine tab, with a preview) puts the
-earthshine into the lunar disc of the last-written blend (`--base natural`
-for the natural layer, `--base-file` any image the size of the stack, such
-as a blend saved earlier), at `--strength` (1 = as stacked) in `--mode` screen
-(default), lighten or add, and writes `<name>_final.tif` (or the file given
-with `-o`, in the format its extension names).
+**The final image: Moon and corona stretched together.** `totality final
+eclipse2024.json` (or **Final image** on the Earthshine tab, with a preview)
+puts the Moon-aligned earthshine stack, linear and in the same units, into
+the HDR stack inside the lunar disc (registered on the limb, crossing over in
+the 2 px just outside it, where both hold the same light; pixels by the limb
+that neither stack has are filled from their neighbours). The settings of
+your last Enhance run then stretch Moon and corona together, so the limb is
+the stack's own: one curve, one colour treatment, no seam. A prominence is
+the same red on both sides of the limb, and nothing at the limb is cut,
+pasted, softened or matched. The filter layers (NRGF, FNRGF, adaptive) have
+no data on the Moon, so in the blend they fade out over the 4 px outside
+the limb. The seas and highlands (glare removed, from
+`<name>_moon_surface.fit`) are added inside with screen at `--strength`
+(1 = as made by the earthshine step), so near the limb, where the Moon's own
+stretched light is brighter, that light wins. `--base natural` uses the
+natural layer instead of the blend. Writes `<name>_final.tif` (or `-o`).
+
+The older way, pasting the earthshine layer (`<name>_earthshine.tif`, still
+written for Photoshop) into any image with a blend mode, is `--paste` or
+`--base-file` (on the tab: **Paste into a file**).
 
 The report gives the lunar detail over the noise; below about 3 the layer
 is mostly noise (short exposures, low ISO or a bright sky).

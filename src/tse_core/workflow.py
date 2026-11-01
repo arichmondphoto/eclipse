@@ -499,6 +499,111 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
 from .imageout import image_size, read_image, with_format, write_image  # noqa: E402
 
 
+def enhance_params_from_project(path, project):
+    """The settings of the last full-size Enhance run (its json), or the defaults."""
+    from dataclasses import fields
+
+    from .enhance import EnhanceParams
+
+    info_path = resolve(path, project.parameters.get("enhance", {}).get("info"))
+    kw = {}
+    if info_path:
+        try:
+            saved = json.loads(Path(info_path).read_text(encoding="utf-8")).get("params", {})
+            names = {f.name for f in fields(EnhanceParams)}
+            kw = {k: (tuple(v) if k == "layers" else v) for k, v in saved.items() if k in names}
+        except (OSError, ValueError):
+            kw = {}
+    return EnhanceParams(**kw)
+
+
+def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1.0,
+                    preview_side: Optional[int] = None, name: Optional[str] = None, say: Optional[Say] = None,
+                    cancel=None, output_file: Optional[str] = None, enhance_params=None):
+    """The final picture with the Moon in it, drawn in one go with the corona.
+
+    The Moon-aligned earthshine stack (linear, same units) replaces the inside of the lunar disc
+    in the HDR stack, and the Enhance step's settings stretch Moon and corona together, so the
+    limb is the stack's own: same curve, same colour, no seam. The seas and highlands (glare
+    removed, from the earthshine step) are then added where the earthshine dominates, ``strength``
+    times their brightness. ``base_layer``: blend or natural.
+    With ``preview_side`` returns a reduced image (no file); otherwise writes ``output_file``
+    (default ``<name>_final.tif``) and returns its path.
+    """
+    from dataclasses import replace
+
+    from scipy import ndimage
+
+    from .earthshine import merge_moon
+    from .enhance import enhance
+    from .fits import read_fits
+
+    say = reporter(say, cancel)
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    es = project.parameters.get("earthshine", {})
+    info_path, rgb_path = resolve(path, es.get("info")), resolve(path, es.get("rgb"))
+    wpath, mpath = resolve(path, es.get("weight")), resolve(path, es.get("moon_surface"))
+    if not (info_path and rgb_path and wpath and mpath):
+        raise WorkflowError("Stack the earthshine again first: this needs the colour stack and the lunar surface "
+                            "it now writes (_earthshine_rgb.fit, _moon_surface.fit).")
+    info = json.loads(Path(info_path).read_text(encoding="utf-8"))
+    params = enhance_params_from_project(path, project) if enhance_params is None else enhance_params
+    if base_layer == "natural":
+        params = replace(params, layers=("natural",), blend={})
+    else:
+        params = replace(params, layers=())
+    say("reading the HDR stack")
+    data = load_hdr(path)
+    es_rgb, es_head = read_fits(rgb_path)
+    es_w, _ = read_fits(wpath)
+    moon_data, _ = read_fits(mpath)
+    X0, Y0 = int(info["crop"][0]), int(info["crop"][1])
+    cx0, cy0 = int(info["canvas"][0]), int(info["canvas"][1])
+    ox, oy = X0 - cx0, Y0 - cy0
+    centre = (float(es_head["MOONX"]), float(es_head["MOONY"]))
+    es_w = np.asarray(es_w, np.float32)
+    b = 1
+    if preview_side:
+        data = reduce_for_preview(data, max_side=preview_side)
+        b = data.binning
+        params = _scaled_params(params, 1.0 / b)
+    if b > 1:
+        def binned(a):
+            a = np.asarray(a, np.float32)
+            hh, ww = a.shape[-2] // b, a.shape[-1] // b
+            return a[..., : hh * b, : ww * b].reshape(a.shape[:-2] + (hh, b, ww, b)).mean(axis=(-3, -1))
+
+        # Bin the crop on the same grid as the HDR stack: start it on a multiple of b.
+        sx0, sy0 = (-ox) % b, (-oy) % b
+        es_rgb, es_w, moon_data = es_rgb[:, sy0:, sx0:], es_w[sy0:, sx0:], moon_data[:, sy0:, sx0:]
+        es_w = (binned(es_w > 0) > 0.5).astype(np.float32)
+        es_rgb, moon_data = binned(es_rgb), binned(moon_data)
+        ox, oy = (ox + sx0) // b, (oy + sy0) // b
+        centre = ((centre[0] - sx0 + 0.5) / b - 0.5, (centre[1] - sy0 + 0.5) / b - 0.5)
+    moon, shift = merge_moon(data.hdr, data.weight, data.header, es_rgb, es_w, (ox, oy), centre,
+                             params.moon_margin_px, say)
+    surface = np.moveaxis(np.asarray(moon_data[:3], np.float32), 0, -1) * float(strength)
+    vis = np.asarray(moon_data[3], np.float32)
+    if abs(shift[0]) + abs(shift[1]) > 1e-3:
+        surface = np.stack([ndimage.shift(surface[..., c], shift[::-1], order=1) for c in range(3)], axis=-1)
+        vis = ndimage.shift(vis, shift[::-1], order=1)
+    moon.surface, moon.visibility = surface.astype(np.float32), vis.astype(np.float32)
+    say("stretching Moon and corona together")
+    _, colour = enhance(data.hdr, data.weight, data.header, params, out_dir=None, progress=say, moon=moon,
+                        keep={base_layer})
+    out = colour[base_layer]
+    if preview_side:
+        return out
+    say("writing the final image")
+    final = Path(output_file) if output_file else path.parent / f"{name or path.stem}_final.tif"
+    final = write_image(final, out)
+    project.parameters["final"] = {"file": str(final), "base": base_layer, "strength": strength,
+                                   "mode": "moon in the stack"}
+    project.save(path)
+    return str(final)
+
+
 def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, mode: str = "screen",
                 preview_side: Optional[int] = None, name: Optional[str] = None,
                 say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None,

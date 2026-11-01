@@ -85,6 +85,14 @@ pp.save(path)
 win.reload_project()
 es = win.earthshine_tab
 es.strength.setValue(1.5)
+# Moon and corona together needs the new earthshine outputs: without them, a clear message.
+n = len(QMessageBox.log)
+es.preview_final()
+assert not es._final_shown and len(QMessageBox.log) == n + 1 and "Stack the earthshine again" in QMessageBox.log[-1][1]
+# The older way (pasting into a file) still works with just the layer.
+os.environ["STUB_OPEN"] = et.outputs["blend"]
+es.base.setCurrentIndex(es.base.findData("file"))
+es._base_chosen()
 es.preview_final()
 assert es._final_shown
 os.environ["STUB_SAVE"] = str(T / "out" / "my picture")
@@ -92,6 +100,7 @@ es.write_final()
 assert Path(es.final_path).name == "my picture.tif"
 assert Path(es.final_path).exists() and EventProject.load(path).parameters["final"]["strength"] == 1.5
 print("final image:", Path(es.final_path).name)
+es.base.setCurrentIndex(es.base.findData("blend"))
 # Albedo map: Browse fills the path, and the earthshine settings carry it.
 os.environ["STUB_OPEN"] = str(T / "moon_map.jpg")
 es.albedo_path.setText("")

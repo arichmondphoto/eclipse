@@ -198,12 +198,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lensfun-db")
     p.add_argument("--quiet", action="store_true")
 
-    p = sub.add_parser("final", help="blend the earthshine into an enhanced layer and write the finished image")
+    p = sub.add_parser("final", help="the finished image: Moon and corona stretched together from the stacks")
     p.add_argument("project")
+    p.add_argument("--paste", action="store_true",
+                   help="the older way: paste the earthshine layer into an enhanced layer with a blend mode "
+                        "(needed with --base-file)")
     p.add_argument("--base", default="blend", choices=["blend", "natural"],
                    help="enhanced layer to use as the corona (default: blend, the last one written)")
     p.add_argument("--base-file", help="use this image as the corona instead (the size of the HDR stack)")
-    p.add_argument("--strength", type=float, default=1.0, help="earthshine brightness, 1 = as stacked (default 1)")
+    p.add_argument("--strength", type=float, default=1.0, help="brightness of the lunar surface, 1 = as made by the "
+                   "earthshine step (default 1)")
     p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"], help="blend mode (default screen)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <name>_final.tif")
@@ -264,10 +268,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "earthshine":
         return cmd_earthshine(args)
     if args.command == "final":
-        from .workflow import final_image
+        from .workflow import final_image, final_with_moon
 
-        out, code = _run(final_image, args.project, args.base, args.strength, args.mode, name=args.name,
-                         base_file=args.base_file, output_file=args.output, quiet=args.quiet)
+        if args.paste or args.base_file:
+            out, code = _run(final_image, args.project, args.base, args.strength, args.mode, name=args.name,
+                             base_file=args.base_file, output_file=args.output, quiet=args.quiet)
+        else:
+            out, code = _run(final_with_moon, args.project, args.base, args.strength, name=args.name,
+                             output_file=args.output, quiet=args.quiet)
         if not code:
             print(f"Final image written to {out}")
         return code

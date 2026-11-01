@@ -85,6 +85,18 @@ class Geometry:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class MoonInput:
+    """The Moon put into the stack (see earthshine.merge_moon): which pixels carry it, and the
+    lunar surface to add on top after the stretch (a crop at ``x0``, ``y0`` of the canvas)."""
+
+    mask: np.ndarray  # (h, w) bool over the whole canvas: Moon pixels to render
+    x0: int = 0
+    y0: int = 0
+    surface: Optional[np.ndarray] = None  # (hc, wc, 3) display 0..1: the seas and highlands
+    visibility: Optional[np.ndarray] = None  # (hc, wc) 0..1: how much of the surface to show
+
+
 def geometry_from_header(header: dict) -> Geometry:
     mx, my, mr = float(header["MOONX"]), float(header["MOONY"]), float(header["MOONR"])
     if "SUNX" in header:
@@ -443,7 +455,7 @@ def radial_profile(x: np.ndarray, r: np.ndarray, valid: np.ndarray, smooth: floa
 
 
 def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
-            flatten: float, stats_valid: Optional[np.ndarray] = None) -> np.ndarray:
+            flatten: float, stats_valid: Optional[np.ndarray] = None, show: Optional[np.ndarray] = None) -> np.ndarray:
     """Log stretch with part of the radial fall-off removed.
 
     ``x`` has the sky removed. The flattening stops where the corona sinks
@@ -466,7 +478,7 @@ def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, no
     black = float(np.median(out[sky])) if sky.sum() > 1000 else float(np.percentile(out[valid], 0.5))
     white = float(np.percentile(out[valid], 99.9))
     out = np.clip((out - black) / ((white - black) or 1.0), 0.0, 1.0).astype(np.float32)
-    out[~valid] = 0.0
+    out[~(valid if show is None else show)] = 0.0
     return out
 
 
@@ -484,7 +496,8 @@ def overlay(base: np.ndarray, top: np.ndarray) -> np.ndarray:
 BLEND_MODES = {"soft light": soft_light, "overlay": overlay}
 
 
-def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Optional[dict] = None) -> np.ndarray:
+def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Optional[dict] = None,
+                     show: Optional[np.ndarray] = None, fade: Optional[np.ndarray] = None) -> np.ndarray:
     """The natural layer as the base, each filter layer applied at its weight (like layer opacity
     in Photoshop) in its mode, soft light unless ``modes`` says overlay. The filter layers are
     centred on mid-grey, which both modes treat as 'no change', so they add structure without
@@ -498,9 +511,13 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
         fn = BLEND_MODES.get(str(modes.get(k, "soft light")).lower().replace("_", " ").replace("softlight", "soft light"))
         if fn is None:
             raise ValueError(f"unknown blend mode {modes[k]!r} for {k}; use soft light or overlay")
-        base = (1 - w) * base + w * fn(base, layers[k])
+        if fade is not None:  # filter layers fade out towards the Moon, where they have no data
+            wf = w * fade
+            base = (1 - wf) * base + wf * fn(base, layers[k])
+        else:
+            base = (1 - w) * base + w * fn(base, layers[k])
     out = stretch(base, valid, 0.05, 99.95)
-    out[~valid] = 0.0
+    out[~(valid if show is None else show)] = 0.0
     return out
 
 
@@ -678,7 +695,7 @@ class EnhanceResult:
 
 def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[EnhanceParams] = None,
             out_dir=None, name: str = "corona", progress: Optional[Say] = None,
-            fmt: str = "tif") -> tuple[EnhanceResult, dict]:
+            fmt: str = "tif", moon: Optional[MoonInput] = None, keep: Optional[set] = None) -> tuple[EnhanceResult, dict]:
     """``hdr`` is (h, w, 3) linear. Writes one image per layer to ``out_dir`` (``fmt``: tif, png or
     jpg; see ``imageout``); without
     ``out_dir`` returns the layers instead as {name: (h, w, 3) float32 in 0..1}."""
@@ -702,6 +719,16 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     valid[-edge:] = False
     valid[:, :edge] = False
     valid[:, -edge:] = False
+    # With the Moon put into the stack: the statistics still come from the corona only (valid),
+    # but the natural layer and the blend are drawn over the Moon too, with the same curve.
+    show = valid if moon is None else (valid | moon.mask)
+    fade = None
+    if moon is not None:
+        dmoon = np.sqrt((np.arange(h, dtype=np.float32)[:, None] - np.float32(g.moon_y)) ** 2
+                        + (np.arange(w, dtype=np.float32)[None, :] - np.float32(g.moon_x)) ** 2) - g.moon_r
+        t = np.clip((dmoon - p.moon_margin_px) / 4.0, 0.0, 1.0)
+        fade = (t * t * (3 - 2 * t)).astype(np.float32)
+        del dmoon, t
 
     camera_wb = None
     if all(k in header for k in ("WBR", "WBG", "WBB")):
@@ -728,7 +755,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     nlev = float(np.median(noise[valid & (noise > 0)])) if (valid & (noise > 0)).any() else 0.0
     # Per-channel sky offsets are only known to about their own size; where the corona is no
     # brighter than that, its colour cannot be trusted and is shown grey.
-    col = chroma(rgb, lum, valid, noise, p.saturation, colour_floor=2.0 * float(np.abs(bg).max()))
+    col = chroma(rgb, lum, show, noise, p.saturation, colour_floor=2.0 * float(np.abs(bg).max()))
     del rgb
 
     order = p.order
@@ -747,7 +774,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             continue
         say(f"layer {name_l}")
         if name_l == "natural":
-            y = natural(lum, r, phi, valid, nlev, p.flatten, stats_valid)
+            y = natural(lum, r, phi, valid, nlev, p.flatten, stats_valid, show=show)
         elif name_l == "nrgf":
             y = to_unit(nrgf(lum, r, valid, stats), valid)
         elif name_l == "fnrgf":
@@ -756,16 +783,30 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             y = to_unit(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), valid)
         else:
             y = mgn(lum, valid, scales, p.mgn_k, nlev)
-        y[~valid] = 0.0
+        y[~(show if name_l == "natural" else valid)] = 0.0
         layers[name_l] = y
 
     notes = []
     blend_w = {k: float(v) for k, v in p.blend.items() if v and k in layers}
     if blend_w:
-        layers["blend"] = soft_light_blend(layers, blend_w, valid, p.blend_modes)
+        layers["blend"] = soft_light_blend(layers, blend_w, valid, p.blend_modes, show=show, fade=fade)
     unknown = set(p.blend) - set(LAYERS)
     if unknown:
         notes.append(f"unknown blend layer(s) ignored: {', '.join(sorted(unknown))}")
+
+    def coloured(k: str) -> np.ndarray:
+        img = np.clip(layers[k][..., None] * col, 0.0, 1.0)
+        if moon is not None and moon.surface is not None and k in ("natural", "blend"):
+            # The seas and highlands, added (screen) where the stretched light of the Moon itself
+            # leaves room for them: nothing is cut or pasted, so the limb is the stack's own.
+            hc, wc = moon.surface.shape[:2]
+            ys = slice(max(moon.y0, 0), min(moon.y0 + hc, h))
+            xs = slice(max(moon.x0, 0), min(moon.x0 + wc, w))
+            sy = slice(ys.start - moon.y0, ys.stop - moon.y0)
+            sx = slice(xs.start - moon.x0, xs.stop - moon.x0)
+            add = moon.surface[sy, sx] * (moon.visibility[sy, sx, None] if moon.visibility is not None else 1.0)
+            img[ys, xs] = 1.0 - (1.0 - img[ys, xs]) * (1.0 - np.clip(add, 0.0, 1.0))
+        return img.astype(np.float32)
 
     paths: dict = {}
     colour: dict = {}
@@ -773,8 +814,10 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
         for k in list(layers):
+            if keep is not None and k not in keep:
+                continue
             # One colour image at a time: a full 45 MP RGB layer is half a gigabyte.
-            img = np.clip(layers[k][..., None] * col, 0.0, 1.0)
+            img = coloured(k)
             paths[k] = str(write_image(with_format(out / f"{name}_{k}.tif", fmt), img))
             del img
             say(f"wrote {paths[k]}")
@@ -783,7 +826,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
         (out / f"{name}_enhance.json").write_text(json.dumps(info, indent=2, default=float), encoding="utf-8")
         paths["info"] = str(out / f"{name}_enhance.json")
     else:
-        colour = {k: np.clip(v[..., None] * col, 0.0, 1.0).astype(np.float32) for k, v in layers.items()}
+        colour = {k: coloured(k) for k in layers if keep is None or k in keep}
     return EnhanceResult(paths, wb.tolist(), nlev, bg.tolist(), scales, notes), colour
 
 

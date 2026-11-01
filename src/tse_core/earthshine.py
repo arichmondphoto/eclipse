@@ -856,6 +856,13 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
         write_fits(out / f"{name}_earthshine_rgb.fit", rgb, header)
     img = compose_layer(shown, good, weight, cx, cy, moon_r, p, keep_from, linear=img, glare=glare,
                         rgb=rgb if p.colour else None, white=white, tint=tint)
+    moon_path = None
+    if glare is not None:
+        surface, vis = moon_surface(shown, good, glare, cx, cy, moon_r, p,
+                                    p.margin_px if keep_from is None else keep_from, tint)
+        moon_path = out / f"{name}_moon_surface.fit"
+        write_fits(moon_path, np.concatenate([np.moveaxis(surface, -1, 0), vis[None]], axis=0).astype(np.float32),
+                   {**header, "COMMENT": "planes: surface R, G, B (display 0..1), visibility"})
     crop_tif = write_image(with_format(out / f"{name}_earthshine_crop.tif", fmt), img)
     # The layer on the HDR stack's canvas: black outside the disc, so it drops into the corona layers.
     cx0, cy0, cw, ch = canvas
@@ -872,7 +879,13 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     moon = [cx + X0 - canvas[0], cy + Y0 - canvas[1], moon_r]  # in the layer's (canvas) pixels
     info.write_text(json.dumps({"crop": crop, "canvas": canvas, "moon": moon, "params": asdict(p)}, indent=2),
                     encoding="utf-8")
-    return {"earthshine": str(layer_tif), "crop": str(crop_tif), "linear": str(lin_path), "info": str(info)}
+    outputs = {"earthshine": str(layer_tif), "crop": str(crop_tif), "linear": str(lin_path), "info": str(info)}
+    if rgb is not None:
+        outputs["rgb"] = str(out / f"{name}_earthshine_rgb.fit")
+        outputs["weight"] = str(out / f"{name}_earthshine_weight.fit")
+    if moon_path is not None:
+        outputs["moon_surface"] = str(moon_path)
+    return outputs
 
 
 from .imageout import with_format, write_image  # noqa: E402
@@ -971,3 +984,153 @@ def match_limb(base: np.ndarray, e: np.ndarray, moon: tuple, limb_px: float = 1.
     out = e.copy()
     out[y0:y1, x0:x1] = np.clip(el * (scale[..., None] if el.ndim == 3 else scale), 0.0, 1.0)
     return out
+
+
+# ---------------------------------------------------------------------------
+# The Moon in the stack: one stretch for Moon and corona
+# ---------------------------------------------------------------------------
+
+
+def moon_surface(shown: np.ndarray, good: np.ndarray, glare: np.ndarray, cx: float, cy: float, moon_r: float,
+                 p: "EarthshineParams", keep_from: float, tint: Optional[np.ndarray] = None):
+    """The seas and highlands as a picture to add on top of the stretched Moon, and where to show them.
+
+    Returns (surface (h, w, 3) in 0..1, visibility (h, w) in 0..1). The surface is the glare-free
+    detail, stretched on the body of the disc, with the vignette, ``brightness`` and the
+    earthshine's ``tint``. The visibility is 1 where the earthshine itself dominates and falls
+    smoothly to 0 towards the limb as the glare grows (1 / (1 + (glare / surface)^2)): near the
+    limb the stack's own light, stretched with the corona, is all there is, so nothing needs
+    cutting, filling or softening there.
+    """
+    h, w = shown.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - cx, yy - cy)
+    phi = np.arctan2(yy - cy, xx - cx)
+    body = good & (rr < moon_r * 0.9)
+    lo, hi = np.percentile(shown[body if body.sum() > 100 else good], [0.5, 99.5])
+    span = float(hi - lo) or 1.0
+    xs = (shown - lo) / span
+    surf = soft_shoulder(xs)
+    over = ndimage.binary_dilation(good & (xs > 1.15), iterations=2)  # glare by a bright prominence
+    if over.any():
+        ok = good & ~over
+        fill = ndimage.gaussian_filter(np.where(ok, surf, 0.0), 6.0) / np.maximum(
+            ndimage.gaussian_filter(ok.astype(np.float32), 6.0), 1e-6)
+        wgt = ndimage.gaussian_filter(over.astype(np.float32), 1.5)
+        surf = np.where(good, surf * (1 - wgt) + np.clip(fill, 0, 1) * wgt, surf)
+    # Over the noisy last pixels, carry the surface out to the limb (with matching grain).
+    r_in = moon_r - keep_from
+    known = good & (rr < r_in)
+    surf = extend_to_limb(np.where(known, surf, 0.0), known, cx, cy, r_in, moon_r + 1.0)
+    if p.edge_grain:
+        ring = known & (rr > r_in - 12)
+        hp = surf - ndimage.gaussian_filter(surf, 2.0)
+        grain = float(np.std(hp[ring])) if ring.sum() > 50 else 0.0
+        noise = ndimage.gaussian_filter(np.random.default_rng(1).normal(0, 1, (h, w)), max(p.smooth, 0.5))
+        noise *= grain / (float(np.std(noise)) + 1e-12)
+        t = np.clip((rr - (r_in - 3)) / 3, 0, 1)
+        surf = np.where(rr < moon_r + 1.0, np.clip(surf + noise * t, 0, 1), surf)
+    rho = np.minimum(rr / moon_r, 1.0)
+    surf = surf * limb_profile(rho, p.limb_darkening, p.vignette_shape) * p.brightness
+    # Shown over the whole disc, ending with a 1 px soft edge at the limb; added with screen, so
+    # near the limb, where the stretched light of the Moon itself is brighter, that light wins.
+    vis = np.clip(moon_r + 0.5 - rr, 0.0, 1.0)
+    ts = np.ones(3, np.float32) if tint is None else 1.0 + (np.asarray(tint, np.float32) - 1.0) * p.saturation
+    surface = np.clip(surf[..., None] * ts, 0.0, 1.0).astype(np.float32)
+    return surface, vis.astype(np.float32)
+
+
+def register_moon(hdr_lum: np.ndarray, es_lum: np.ndarray, es_good: np.ndarray, cx: float, cy: float, r: float,
+                  search: float = 3.0) -> tuple[float, float]:
+    """Shift (dx, dy) that puts the earthshine stack onto the HDR stack, from the limb itself.
+
+    Both hold the same light across the limb (the steep jump from Moon to corona), so the
+    shift is the one that best matches log brightness in a ring round the limb.
+    """
+    h, w = es_lum.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - cx, yy - cy)
+    ring = (rr > r - 6) & (rr < r + 4) & es_good & (hdr_lum > 0)
+    if ring.sum() < 200:
+        return 0.0, 0.0
+    a = np.log(np.maximum(hdr_lum, 1e-9))
+    b = np.log(np.maximum(np.where(es_good, es_lum, 1e-9), 1e-9))
+    ys, xs = np.nonzero(ring)
+    best = (np.inf, 0.0, 0.0)
+    for step, centre in ((0.5, (0.0, 0.0)), (0.125, None)):
+        c0 = centre if centre is not None else (best[1], best[2])
+        rng = np.arange(-search, search + 1e-9, step) if centre is not None else np.arange(-0.5, 0.5 + 1e-9, step)
+        for dy in rng + c0[1]:
+            for dx in rng + c0[0]:
+                v = ndimage.map_coordinates(b, [ys - dy, xs - dx], order=1, mode="nearest")
+                d = a[ys, xs] - v
+                cost = float(np.median(np.abs(d - np.median(d))))
+                if cost < best[0]:
+                    best = (cost, float(dx), float(dy))
+    return best[1], best[2]
+
+
+def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.ndarray, es_weight: np.ndarray,
+               origin: tuple[int, int], es_centre: tuple[float, float], margin_px: float = 1.5,
+               say: Optional[Say] = None):
+    """Put the Moon-aligned stack (linear, same units) into the HDR stack inside the lunar disc.
+
+    ``origin``: where the earthshine crop starts in the HDR's pixels; ``es_centre``: the Moon's
+    centre in the crop. The two are first registered on the limb. Inside the limb the earthshine
+    stack replaces the stack's one-frame Moon, crossing over in the 2 px just outside the limb,
+    where both hold the same light. Returns the MoonInput mask (the pixels to draw) and the shift applied.
+    """
+    from .enhance import MoonInput
+
+    say = say or (lambda _m: None)
+    mx, my, mr = float(header["MOONX"]), float(header["MOONY"]), float(header["MOONR"])
+    ox, oy = origin
+    hc, wc = es_rgb.shape[1:]
+    h, w = hdr.shape[:2]
+    ys = slice(max(oy, 0), min(oy + hc, h))
+    xs = slice(max(ox, 0), min(ox + wc, w))
+    sy = slice(ys.start - oy, ys.stop - oy)
+    sx = slice(xs.start - ox, xs.stop - ox)
+    cx, cy = mx - ox, my - oy  # the HDR's Moon in crop pixels
+    es_lum = es_rgb.mean(axis=0)
+    es_good = es_weight > 0
+    hdr_lum = np.zeros((hc, wc), np.float32)
+    hdr_lum[sy, sx] = hdr[ys, xs].mean(axis=2)
+    dx, dy = register_moon(hdr_lum, es_lum, es_good, cx, cy, mr)
+    dx0, dy0 = cx - es_centre[0], cy - es_centre[1]
+    say(f"Moon: earthshine stack moved by {dx:+.2f}, {dy:+.2f} px onto the HDR stack (centres differed by "
+        f"{dx0:+.2f}, {dy0:+.2f})")
+    if abs(dx) + abs(dy) > 1e-3:
+        es_rgb = np.stack([ndimage.shift(c, (dy, dx), order=1, mode="nearest") for c in es_rgb])
+        es_good = ndimage.shift(es_good.astype(np.float32), (dy, dx), order=1, mode="constant") > 0.99
+    yy, xx = np.mgrid[0:hc, 0:wc]
+    rr = np.hypot(xx - cx, yy - cy)
+    # Fully the earthshine stack out to the limb (the stack's own Moon is a single noisy frame),
+    # crossing over to the HDR stack's corona in the next 2 px, where both hold the same light.
+    t = np.clip((mr + 2.0 - rr) / 2.0, 0.0, 1.0)
+    wm = np.where(es_good, t * t * (3 - 2 * t), 0.0).astype(np.float32)
+    sub = hdr[ys, xs]
+    had = (weight[ys, xs] > 0) & np.isfinite(sub).all(axis=2)
+    # Where the HDR stack has nothing, the earthshine stack carries the pixel fully.
+    wm = wm.copy()
+    wm[sy, sx] = np.where(~had & es_good[sy, sx], 1.0, wm[sy, sx])
+    sub[:] = np.where(had[..., None], sub, 0.0) * (1 - wm[sy, sx, None]) \
+        + np.moveaxis(es_rgb, 0, -1)[sy, sx] * wm[sy, sx, None]
+    # Pixels by the limb that neither stack has (every frame saturated or covered there):
+    # filled from their neighbours, so they do not show as black specks.
+    have = had | (wm[sy, sx] > 0.5)
+    band = (rr[sy, sx] < mr + margin_px + 4.0)
+    hole = band & ~have
+    if hole.any():
+        m = have.astype(np.float32)
+        for c in range(3):
+            num = ndimage.gaussian_filter(np.where(have, sub[..., c], 0.0), 1.5)
+            den = ndimage.gaussian_filter(m, 1.5)
+            fill = num / np.maximum(den, 1e-6)
+            sub[..., c] = np.where(hole & (den > 1e-3), fill, sub[..., c])
+    wsub = weight[ys, xs]
+    wsub[:] = np.where((wm[sy, sx] > 0) | hole, np.maximum(wsub, 1e-6), wsub)
+    mask = np.zeros((h, w), bool)
+    inside = rr < mr + margin_px + 1.0  # overlaps the corona's own region: no gap between them
+    mask[ys, xs] = inside[sy, sx]
+    return MoonInput(mask=mask, x0=ox, y0=oy), (dx, dy)

@@ -478,3 +478,100 @@ def test_layer_keeps_the_colour_at_the_limb():
     assert rb == pytest.approx(1.1 / 0.9, rel=0.1)
     grey = compose_layer(detail, good, weight, cx, cy, r, p, keep_from=6.0, linear=lum, glare=glare)
     assert grey.ndim == 2
+
+
+def _moon_project(tmp_path, holes=True):
+    """A small HDR stack and earthshine outputs, as the Stack and Earthshine steps write them."""
+    import json
+
+    from tse_core.fits import write_fits
+    from tse_core.project import EventProject
+
+    n, r, c = 320, 80.0, 160.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - c, yy - c)
+    phi = np.arctan2(yy - c, xx - c)
+    d = r - rr
+    tex = ndimage.gaussian_filter(np.random.default_rng(3).normal(0, 1, (n, n)), 4)
+    light = np.where(d > 0, 1e-3 * (1 + 0.3 * tex / tex.std()) + 4e-3 * np.exp(-d / 4),
+                     0.06 * np.exp(-np.clip(-d, 0, None) / 25) * (1 + 0.3 * np.cos(4 * phi)))
+    light = ndimage.gaussian_filter(light, 0.7)
+    prom = np.exp(-(phi**2) / (2 * 0.05**2)) * np.exp(-np.abs(d) / 3)  # a red prominence at angle 0
+    rgb = np.stack([light * (1 + 3 * prom), light, light * 0.95]).astype(np.float32)
+    hdr = rgb.copy()
+    rng = np.random.default_rng(4)
+    hdr[:, d > 0] *= 1 + 0.5 * rng.normal(0, 1, (d > 0).sum())  # one noisy frame inside the disc
+    weight = np.ones((n, n), np.float32)
+    if holes:
+        hole = (np.abs(d - 0.5) < 1) & (np.sin(9 * phi) > 0.6)  # saturated in every frame, by the limb
+        hdr[:, hole] = 0
+        weight[hole] = 0
+    head = {"MOONX": c, "MOONY": c, "MOONR": r, "SUNX": c + 3, "SUNY": c - 2, "SUNR": r / 1.05}
+    write_fits(tmp_path / "e_hdr.fit", hdr, head)
+    write_fits(tmp_path / "e_weight.fit", weight)
+    # Earthshine crop at (40, 30): the Moon-aligned stack (clean), its weights and the surface.
+    X0, Y0, m = 40, 30, 240
+    crop = (slice(Y0, Y0 + m), slice(X0, X0 + m))
+    es_w = np.where(rr < r + 8, 1.0, 0.0)[crop].astype(np.float32)
+    write_fits(tmp_path / "e_earthshine_rgb.fit", rgb[(slice(None),) + crop],
+               {"MOONX": c - X0, "MOONY": c - Y0, "MOONR": r, "CROPX0": X0, "CROPY0": Y0})
+    write_fits(tmp_path / "e_earthshine_weight.fit", es_w)
+    surf = np.where(rr < r, 0.25 * (1 + 0.5 * tex / tex.std()), 0)[crop]
+    vis = np.clip(r + 0.5 - rr, 0, 1)[crop]
+    write_fits(tmp_path / "e_moon_surface.fit", np.stack([surf, surf, surf, vis]).astype(np.float32))
+    (tmp_path / "e_earthshine.json").write_text(json.dumps({"crop": [X0, Y0, m, m], "canvas": [0, 0, n, n]}))
+    p = EventProject(name="e")
+    p.parameters["stack"] = {"hdr": "e_hdr.fit", "weight": "e_weight.fit"}
+    p.parameters["earthshine"] = {"info": "e_earthshine.json", "rgb": "e_earthshine_rgb.fit",
+                                  "weight": "e_earthshine_weight.fit", "moon_surface": "e_moon_surface.fit"}
+    p.save(tmp_path / "e.json")
+    return tmp_path / "e.json", rr, phi, r
+
+
+def test_moon_and_corona_stretched_together_have_no_seam(tmp_path):
+    """The final picture with the Moon put into the stack: across the limb the brightness changes
+    smoothly (no line), there are no black specks where the stack had holes, and a red prominence
+    has the same colour on both sides of the limb."""
+    import tifffile
+
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams
+
+    proj, rr, phi, r = _moon_project(tmp_path)
+    params = EnhanceParams(layers=(), blend={"natural": 1.0})
+    out = W.final_with_moon(proj, "blend", 1.0, enhance_params=params, output_file=str(tmp_path / "f.tif"))
+    img = tifffile.imread(out).astype(np.float32) / 65535
+    lum = img.mean(axis=2)
+    # Reference: the same light stretched as one image (no join at all), same surface on top.
+    from tse_core.earthshine import merge_moon  # noqa: F401  (the path under test)
+    from tse_core.enhance import MoonInput, enhance
+    from tse_core.fits import read_fits
+
+    clean, head = read_fits(tmp_path / "e_earthshine_rgb.fit")
+    full = np.zeros((3,) + rr.shape, np.float32)
+    full[:, 30:270, 40:280] = clean
+    hdr_ref, h0 = read_fits(tmp_path / "e_hdr.fit")
+    outside = rr >= r + 8
+    full[:, outside] = hdr_ref[:, outside]
+    md, _ = read_fits(tmp_path / "e_moon_surface.fit")
+    mask = rr < r + params.moon_margin_px + 1.0
+    mi = MoonInput(mask=mask, x0=40, y0=30, surface=np.moveaxis(md[:3], 0, -1), visibility=md[3])
+    _, col = enhance(np.ascontiguousarray(np.moveaxis(full, 0, -1)), np.ones(rr.shape, np.float32), h0, params,
+                     moon=mi, keep={"blend"})
+    ref = col["blend"]
+    band = (rr > r - 4) & (rr < r + 5)
+    diff = np.abs(img - ref).mean(axis=2)
+    assert np.percentile(diff[band], 99) < 0.03, np.percentile(diff[band], 99)  # the join does not show
+    # No dark specks where the stack had holes by the limb.
+    ring = (rr > r - 1) & (rr < r + 2.5)
+    assert (ref.mean(axis=2) - lum)[ring].max() < 0.08
+    # The prominence: red on the Moon side as on the corona side.
+    def redness(m):
+        return np.median(img[m][:, 0] / np.maximum(img[m][:, 1], 1e-3))
+    at = np.abs(phi) < 0.03
+    inside, outside = at & (rr > r - 2) & (rr < r), at & (rr > r + 2) & (rr < r + 4)
+    assert redness(inside) > 1.05 and abs(redness(inside) - redness(outside)) < 0.25 * redness(outside)
+    # The lunar surface is in the middle.
+    assert np.median(lum[rr < 0.5 * r]) > 0.1
+    prev = W.final_with_moon(proj, "blend", 1.0, enhance_params=params, preview_side=160)
+    assert prev.shape[0] == 160

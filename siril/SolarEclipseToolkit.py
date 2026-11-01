@@ -1228,12 +1228,12 @@ class EarthshineTab(StepTab):
         self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.layer_path))
         self.settings_layout.addWidget(self.open_btn)
 
-        final = QGroupBox("Blend into the image (instead of Photoshop)")
+        final = QGroupBox("Final image: Moon and corona together")
         ff = QFormLayout(final)
         self.base = QComboBox()
-        self.base.addItem("Last-written blend", "blend")
-        self.base.addItem("Last-written Natural", "natural")
-        self.base.addItem("From file…", "file")
+        self.base.addItem("Blend (Enhance settings)", "blend")
+        self.base.addItem("Natural (Enhance settings)", "natural")
+        self.base.addItem("Paste into a file… (older way)", "file")
         self.base_file = ""
         self.base.activated.connect(self._base_chosen)
         ff.addRow("Corona image:", self.base)
@@ -1244,10 +1244,17 @@ class EarthshineTab(StepTab):
         self.strength.setRange(0.0, 3.0)
         self.strength.setSingleStep(0.1)
         self.strength.setValue(1.0)
-        ff.addRow("Earthshine strength:", self.strength)
+        ff.addRow("Lunar surface strength:", self.strength)
         self.mode = QComboBox()
         self.mode.addItems(["screen", "lighten", "add"])
-        ff.addRow("Blend mode:", self.mode)
+        ff.addRow("Blend mode (pasting only):", self.mode)
+        _tip(self.base, "Blend or Natural: the Moon-aligned stack goes into the HDR stack inside the lunar disc, "
+             "and Moon and corona are stretched together with the settings of your last Enhance run, so the limb "
+             "is the stack's own: one curve, one colour, no seam. The seas and highlands are then added inside. "
+             "'Paste into a file' is the older way: the earthshine layer pasted into any image with a blend mode.",
+             ff)
+        _tip(self.strength, "Brightness of the seas and highlands added inside the Moon, 1 = as made by the "
+             "earthshine step (its Brightness setting).", ff)
         fb = QHBoxLayout()
         self.final_preview_btn = QPushButton("Preview")
         self.final_preview_btn.clicked.connect(self.preview_final)
@@ -1385,10 +1392,12 @@ class EarthshineTab(StepTab):
         if self.worker is not None:
             return
         (base, bfile), k, mode = self._base_args(), self.strength.value(), self.mode.currentText()
-        self.start("Preview of the final image",
-                   lambda p, say, cancel: W.final_image(p, base, k, mode, preview_side=1400, say=say, cancel=cancel,
-                                                        base_file=bfile),
-                   self._final_preview_done, reload=False)
+        if bfile:  # an image from elsewhere: the older way, pasting the earthshine layer in
+            fn = lambda p, say, cancel: W.final_image(p, base, k, mode, preview_side=1400, say=say, cancel=cancel,
+                                                      base_file=bfile)
+        else:  # Moon and corona stretched together from the stacks
+            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, preview_side=1400, say=say, cancel=cancel)
+        self.start("Preview of the final image", fn, self._final_preview_done, reload=False)
 
     def _final_preview_done(self, img) -> None:
         self._final_shown = True
@@ -1404,10 +1413,12 @@ class EarthshineTab(StepTab):
         if not fname:
             return
         fname = str(_with_ext(fname, filt))
-        self.start("Writing the final image",
-                   lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname,
-                                                        base_file=bfile),
-                   self._final_done)
+        if bfile:
+            fn = lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname,
+                                                      base_file=bfile)
+        else:
+            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname)
+        self.start("Writing the final image", fn, self._final_done)
 
     def _final_done(self, path) -> None:
         self.final_path = path
