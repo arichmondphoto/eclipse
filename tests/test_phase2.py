@@ -352,3 +352,38 @@ def test_off_track_frames_are_rejected_and_reported():
     assert math.hypot(sc.x - H[0], sc.y - H[1]) < 0.5
     assert sc.track_rms_px < 0.7 and sc.speed_ratio == pytest.approx(1.0, abs=0.05)
     assert 0.1 < sc.px_per_clock_second < 0.3
+
+
+def test_nan_or_infinite_pixels_do_not_break_alignment():
+    """One NaN (or infinite) pixel made every Fourier transform of a frame NaN: no peak, every
+    shift 0, PSR nan, 'little usable overlap' (seen on real frames after a vignetting correction
+    divided by zero). Such pixels are now left out like hot pixels; the shifts match the clean run."""
+    sc = SyntheticScene(size=448, sun_radius=55)
+    c = 223.5
+    rng = np.random.default_rng(5)
+    exps = [1e-3 * 2 ** (k / 1.25) for k in range(5)]
+    clean, spoiled, truth = [], [], []
+    for i, e in enumerate(exps):
+        sx, sy = rng.uniform(-5, 5, 2)
+        img, _ = sc.frame(e, c + sx, c + sy, -12 + 6 * i, 0, seed=20 + i)
+        img = img.astype(np.float32)
+        clean.append(AlignFrame(i, img.copy(), e, time_s=8.0 * i))
+        bad = img.copy()
+        bad[3, 3] = np.nan
+        bad[400, 10] = np.inf
+        spoiled.append(AlignFrame(i, bad, e, time_s=8.0 * i))
+        truth.append((sx, sy))
+    a = align_sequence(clean, AlignParams(), expected_moon_radius=58)
+    b = align_sequence(spoiled, AlignParams(), expected_moon_radius=58)
+    for ra, rb in zip(a, b):
+        assert np.isfinite(rb.transform.dx) and (math.isinf(rb.psr) or rb.psr > 20)
+        assert abs(ra.transform.dx - rb.transform.dx) < 0.05 and abs(ra.transform.dy - rb.transform.dy) < 0.05
+
+
+def test_vignetting_map_never_reaches_zero():
+    """A profile used beyond its calibration's corner can fall to zero or below; dividing by it
+    made NaN pixels. The map stops at 5%."""
+    from tse_core.lensfun import MIN_ILLUMINATION, vignetting_map
+
+    m = vignetting_map(200, 150, (-2.0, 0.5, 0.0), image_crop=1.0, calib_crop=1.5)
+    assert np.isfinite(m).all() and m.min() >= MIN_ILLUMINATION

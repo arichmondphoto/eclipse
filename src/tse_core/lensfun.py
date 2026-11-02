@@ -390,6 +390,9 @@ def _is_lensfun_xml(data: bytes) -> bool:
 # ---------------------------------------------------------------------------
 
 
+MIN_ILLUMINATION = 0.05
+
+
 def relative_illumination(r: np.ndarray | float, terms: tuple[float, float, float]) -> np.ndarray | float:
     """Observed / true brightness at normalised radius r (pa model)."""
     k1, k2, k3 = terms
@@ -424,7 +427,10 @@ def vignetting_map(
     calib_half_diag_mm = FULL_FRAME_HALF_DIAGONAL_MM / calib_crop
     mm_per_pixel = image_half_diag_mm / pixel_half_diag
     r = np.hypot(xx - cx, yy - cy) * mm_per_pixel / calib_half_diag_mm
-    return relative_illumination(r, terms).astype(dtype)
+    # A polynomial fitted out to its calibration's corner can reach zero or go negative beyond it
+    # (a larger sensor, or a profile from a crop camera). Dividing by that made infinite or NaN
+    # pixels, which broke the alignment of every frame. No real lens is darker than 5% (-4.3 stops).
+    return np.clip(relative_illumination(r, terms), MIN_ILLUMINATION, None).astype(dtype)
 
 
 def corner_falloff(terms: tuple[float, float, float], image_crop: float = 1.0, calib_crop: float = 1.0) -> tuple[float, float]:

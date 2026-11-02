@@ -529,15 +529,29 @@ def align_sequence(
         return []
     h, w = frames[0].image.shape
     centre = ((w - 1) / 2.0, (h - 1) / 2.0)
+    nonfinite: dict[int, np.ndarray] = {}
     for f in frames:
         if f.image.shape != (h, w):
             raise ValueError("all frames must have the same size")
+        bad = ~np.isfinite(f.image)
+        if bad.any():
+            # One NaN pixel turns every Fourier transform of the frame into NaN: no peak, shift 0.
+            # Such pixels are left out like hot pixels (they say something upstream went wrong).
+            if bad.mean() > 0.5:
+                raise ValueError(f"frame {f.index}: {bad.mean():.0%} of its pixels are not numbers (NaN or "
+                                 "infinite). Check the lens profile / vignetting correction and calibration "
+                                 "frames on the Frames tab.")
+            say(f"frame {f.index}: {int(bad.sum())} pixels are not numbers (NaN or infinite); left out")
+            f.image = np.where(bad, 0.0, f.image).astype(np.float32)
+            nonfinite[id(f)] = bad
         if f.saturated is None:
             f.saturated = f.image >= params.saturation
         if f.moon is None:
             f.moon = find_moon(f.image, expected_moon_radius, saturation=None)
         if f.defects is None:
             f.defects = defect_mask(f.image, params.star_sigma)
+        if id(f) in nonfinite:
+            f.defects = f.defects | ndimage.binary_dilation(nonfinite[id(f)], iterations=2)
     params = scaled_params(params, sun_radius_from_moon(float(np.median([f.moon.radius for f in frames]))))
     say(f"settings: rho {params.rho:.1f} px, mask blur {params.mask_blur:.1f} px, window {w} px")
 
