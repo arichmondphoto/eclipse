@@ -387,3 +387,47 @@ def test_vignetting_map_never_reaches_zero():
 
     m = vignetting_map(200, 150, (-2.0, 0.5, 0.0), image_crop=1.0, calib_crop=1.5)
     assert np.isfinite(m).all() and m.min() >= MIN_ILLUMINATION
+
+
+def test_one_failed_frame_does_not_spoil_the_others(monkeypatch):
+    """Once, one frame (a 1/8000 s exposure) was placed ~850 px away with PSR 9; that grew the
+    reference's Moon mask over the whole window and every later frame failed (shift 0, PSR nan;
+    seen on the 2024 D850 set). A frame placed far from where its Moon says it must be is now
+    treated as failed: placed by its Moon and kept out of the reference; the others still align."""
+    from tse_core import align as A
+
+    sc = SyntheticScene(size=448, sun_radius=55)
+    c = 223.5
+    rng = np.random.default_rng(5)
+    exps = [1e-3 * 2 ** (k / 1.25) for k in range(7)]
+    frames, truth = [], []
+    for i, e in enumerate(exps):
+        sx, sy = rng.uniform(-5, 5, 2)
+        img, _ = sc.frame(e, c + sx, c + sy, -12 + 4 * i, 0, seed=20 + i)
+        frames.append(AlignFrame(i, img.astype(np.float32), e, time_s=8.0 * i))
+        truth.append((sx, sy))
+    real_pair = A.align_pair
+    victim = frames[1].image
+
+    def flaky(ref, ref_mask, img, img_mask, params, centre, **kw):
+        tf, pk, sig = real_pair(ref, ref_mask, img, img_mask, params, centre, **kw)
+        if img.shape == victim.shape and np.allclose(img, flaky.victim_prepared):
+            return A.Transform(170.0, -190.0, 0.0, 1.0, *centre), A.Peak(170.0, -190.0, 0.1, 9.2), sig
+        return tf, pk, sig
+
+    p0 = AlignParams()
+    m = A.find_moon(victim, 58)
+    from tse_core.align import defect_mask, scaled_params, sun_radius_from_moon
+    pp = scaled_params(p0, sun_radius_from_moon(m.radius))
+    flaky.victim_prepared = A.prepare(victim, m, pp, saturated=victim >= pp.saturation,
+                                      defects=defect_mask(victim, pp.star_sigma))[0]
+    monkeypatch.setattr(A, "align_pair", flaky)
+    res = align_sequence(frames, p0, expected_moon_radius=58)
+    anchor = next(r for r in res if math.isinf(r.psr)).index
+    for r, (sx, sy) in zip(res, truth):
+        if r.index == 1:
+            assert any("alignment failed" in n for n in r.notes)
+            continue
+        assert math.isinf(r.psr) or (np.isfinite(r.psr) and r.psr > 8), r.index
+        x, y = r.transform.apply_point(c + sx, c + sy)
+        assert math.hypot(x - (c + truth[anchor][0]), y - (c + truth[anchor][1])) < 0.35, r.index

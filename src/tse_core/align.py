@@ -294,9 +294,20 @@ def phase_correlation_surface(a: np.ndarray, b: np.ndarray, p_frac: float, sigma
     return np.real(sfft.ifft2(N * G, workers=-1))
 
 
-def find_peak(n: np.ndarray, epsilon: float) -> Peak:
+def find_peak(n: np.ndarray, epsilon: float, window: Optional[tuple[float, float, float]] = None) -> Peak:
+    """Sub-pixel peak of a correlation surface. ``window`` = (x, y, radius): only look for the
+    maximum within ``radius`` px of the shift (x, y) (the PSR is still judged on the whole surface)."""
     h, w = n.shape
-    iy, ix = np.unravel_index(int(np.argmax(n)), n.shape)
+    if not np.isfinite(n).all():
+        n = np.nan_to_num(n, nan=0.0, posinf=0.0, neginf=0.0)
+    if window is not None:
+        ex, ey, rad = window
+        ky_ = (np.arange(h) + h // 2) % h - h // 2  # signed shift of each row / column
+        kx_ = (np.arange(w) + w // 2) % w - w // 2
+        inside = (kx_[None, :] - ex) ** 2 + (ky_[:, None] - ey) ** 2 <= rad**2
+        iy, ix = np.unravel_index(int(np.argmax(np.where(inside, n, -np.inf))), n.shape)
+    else:
+        iy, ix = np.unravel_index(int(np.argmax(n)), n.shape)
     e = int(math.ceil(epsilon))
     ky, kx = np.mgrid[-e : e + 1, -e : e + 1]
     sel = kx**2 + ky**2 < epsilon**2
@@ -325,14 +336,17 @@ def find_peak(n: np.ndarray, epsilon: float) -> Peak:
     return Peak(x, y, float(n[iy, ix]), (float(n[iy, ix]) - mu) / sd)
 
 
-def measure_shift(a: np.ndarray, b: np.ndarray, params: AlignParams) -> tuple[Peak, float]:
-    """Shift of b relative to a (features at p in a are at p + shift in b)."""
+def measure_shift(a: np.ndarray, b: np.ndarray, params: AlignParams,
+                  window: Optional[tuple[float, float, float]] = None) -> tuple[Peak, float]:
+    """Shift of b relative to a (features at p in a are at p + shift in b); ``window`` limits
+    where the peak may be (see :func:`find_peak`)."""
     if params.sigma_frac is not None:
-        return find_peak(phase_correlation_surface(a, b, params.p_frac, params.sigma_frac), params.epsilon), params.sigma_frac
+        return (find_peak(phase_correlation_surface(a, b, params.p_frac, params.sigma_frac), params.epsilon, window),
+                params.sigma_frac)
     # Automatic sigma. Small sigma gives a broad, safe but imprecise peak; large sigma a sharp,
     # precise one that can be fooled by noise. Take the largest sigma whose peak is confident
     # and agrees with the consensus position of all candidates.
-    peaks = [(s, find_peak(phase_correlation_surface(a, b, params.p_frac, s), params.epsilon))
+    peaks = [(s, find_peak(phase_correlation_surface(a, b, params.p_frac, s), params.epsilon, window))
              for s in sorted(params.sigma_candidates)]
     xs = np.array([p.x for _, p in peaks])
     ys = np.array([p.y for _, p in peaks])
@@ -453,7 +467,8 @@ def _rotate_about(tf: Transform, delta_deg: float, cx: float, cy: float) -> Tran
 def align_pair(ref: np.ndarray, ref_mask: np.ndarray, img: np.ndarray, img_mask: np.ndarray,
                params: AlignParams, centre: tuple[float, float],
                corona_centre: Optional[tuple[float, float]] = None,
-               angle_deg: Optional[float] = None, refine: bool = False) -> tuple[Transform, Peak, float]:
+               angle_deg: Optional[float] = None, refine: bool = False,
+               expected: Optional[tuple[float, float, float]] = None) -> tuple[Transform, Peak, float]:
     """Transform taking ``img`` (prepared) onto ``ref`` (prepared).
 
     The rotation is either given (``angle_deg``, about ``corona_centre``),
@@ -474,7 +489,9 @@ def align_pair(ref: np.ndarray, ref_mask: np.ndarray, img: np.ndarray, img_mask:
 
     def shift_step(t: Transform) -> tuple[Transform, Peak, float]:
         moved = warp(img, t, order=1) if (t.angle_deg or t.scale != 1.0 or t.dx or t.dy) else img
-        pk, sig = measure_shift(ref, moved, params)
+        # ``expected`` = (dx, dy, tolerance) of the whole transform: the peak must lie near it.
+        win = None if expected is None else (t.dx - expected[0], t.dy - expected[1], expected[2])
+        pk, sig = measure_shift(ref, moved, params, win)
         # Features of ``moved`` sit at ref position + shift; move them back.
         return Transform(t.dx - pk.x, t.dy - pk.y, t.angle_deg, t.scale, t.centre_x, t.centre_y), pk, sig
 
@@ -580,21 +597,42 @@ def align_sequence(
     rotation: dict[int, float] = {i: 0.0 for i in order}
     rot_notes: list[str] = []
 
+    # Where the corona can be: the Moons' offset from the anchor, give or take how far the Moon moves
+    # against the Sun during totality (well under a quarter of its radius in any sequence).
+    anchor_moon = frames[mid].moon
+    tol = max(10.0, 0.25 * anchor_moon.radius)
+    in_acc: set[int] = {mid}
+
     def align_one(i: int, pass_label: str, refine: bool) -> None:
         f = frames[i]
+        if i in in_acc:
+            acc.remove(f, results[i].transform)
+            in_acc.discard(i)
         ref_img, ref_valid, ref_moon = acc.reference(frames[mid].moon)
         ref_p, ref_m = prepare(ref_img, ref_moon, params, valid=ref_valid)
         img_p, img_m = prepared(f)
+        expected = (anchor_moon.x - f.moon.x, anchor_moon.y - f.moon.y, tol)
         tf, pk, sig = align_pair(ref_p, ref_m, img_p, img_m, params, centre, corona_centre=corona_centre,
-                                 angle_deg=rotation[i], refine=refine)
+                                 angle_deg=rotation[i], refine=refine, expected=expected)
         overlap = float(((ref_m > 0.5) & (warp(img_m, tf, order=1) > 0.5)).mean())
         notes = []
-        if pk.psr < 8:
-            notes.append("weak correlation peak; check this frame")
-        if overlap < 0.02:
+        near = math.hypot(tf.dx - expected[0], tf.dy - expected[1]) <= 1.5 * tol
+        ok = np.isfinite(pk.psr) and pk.psr >= 5 and overlap >= 0.02 and near
+        if not np.isfinite(pk.psr) or overlap < 0.02:
             notes.append("little usable overlap with the reference")
+        elif pk.psr < 8:
+            notes.append("weak correlation peak; check this frame")
+        if not ok:
+            # A failed frame must not spoil the reference for all the others (one frame placed
+            # hundreds of px away once grew the reference's Moon mask over the whole window,
+            # and every later frame failed). Use the Moon's offset instead, and leave it out.
+            tf = Transform(expected[0], expected[1], tf.angle_deg, 1.0, tf.centre_x, tf.centre_y)
+            notes.append("alignment failed: placed by its Moon only and left out of the reference; "
+                         "exclude it if it is a partial-phase or poor frame")
         results[i] = FrameAlignment(f.index, tf, pk.height, pk.psr, sig, overlap, f.moon.as_dict(), notes)
-        acc.add(f, tf)
+        if ok:
+            acc.add(f, tf)
+            in_acc.add(i)
         say(f"{pass_label}: frame {f.index} shift ({tf.dx:+.2f}, {tf.dy:+.2f}) rot {tf.angle_deg:+.3f} deg, psr {pk.psr:.1f}")
 
     # Pass 1: translation only, growing the reference outwards from the anchor.
@@ -639,14 +677,12 @@ def align_sequence(
                 rotation[i] += dlt
             say("rotation: " + ", ".join(f"{frames[i].index}:{rotation[i]:+.3f}" for i in sequence))
             for i in sequence[1:]:
-                acc.remove(frames[i], results[i].transform)
                 align_one(i, f"rotation round {rnd + 1}", refine=False)
             if not update or max(abs(v) for v in update.values()) < 0.002:
                 break
     # Final passes: every frame against the composite of all the others.
     for pass_no in range(1, max(2, params.passes)):
         for i in sequence[1:]:
-            acc.remove(frames[i], results[i].transform)
             align_one(i, f"pass {pass_no + 1}", refine=False)
     # Re-anchor. Every frame was last measured against the composite of all the others, so the
     # non-anchor frames can agree with each other yet drift together away from the anchor (it is
