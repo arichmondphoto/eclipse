@@ -200,7 +200,9 @@ applies the calibration plan, and then:
      whole set is re-anchored to the middle exposure at the end.
 3. **Field rotation** is measured against the middle exposure and modelled
    as a smooth drift over time; it is applied only when statistically
-   significant. Use `--rotation per-frame` or `--any-angle` for mounts that
+   significant. Measuring and correcting repeat until nothing significant is
+   left; each frame's note gives the total rotation applied (deg/min and over
+   the sequence) and what was left afterwards. Use `--rotation per-frame` or `--any-angle` for mounts that
    do not track.
 4. **Finds the Sun's centre** (Druckmüllerová et al. 2011, appendix): the
    Moon's track across the aligned frames is fitted to the eclipse
@@ -208,7 +210,9 @@ applies the calibration plan, and then:
    gives the image scale and where celestial north points. If the camera
    clock was wrong, the clock error is bounded by requiring every frame to
    fall inside totality and the remaining along-track uncertainty is
-   reported; pass `--clock-error` if you know it.
+   reported; pass `--clock-error` if you know it. Without it, the clock
+   error used is the middle of that allowed range: it comes from the frames'
+   times and the eclipse's times at your site, not from the Moon's track.
 
 Results go to `<project>_align.json`: a full-resolution 2x3 transform per
 frame, the Moon in each frame, and the Sun's centre and radius.

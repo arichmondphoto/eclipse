@@ -672,7 +672,7 @@ def align_sequence(
             else:
                 notes_round: list[str] = []
                 update = _drift_model(frames, mid, meas, notes_round)
-                rot_notes = notes_round
+                rot_notes = notes_round  # the last round's verdict; see _rotation_summary below
             for i, dlt in update.items():
                 rotation[i] += dlt
             say("rotation: " + ", ".join(f"{frames[i].index}:{rotation[i]:+.3f}" for i in sequence))
@@ -701,9 +701,42 @@ def align_sequence(
             say(f"re-anchored: composite offset from the anchor ({tf_a.dx:+.3f}, {tf_a.dy:+.3f}) px, "
                 f"{tf_a.angle_deg:+.4f} deg")
         acc.add(frames[mid], results[mid].transform)
+    if model == "drift":
+        rot_notes = _rotation_summary(frames, mid, rotation, rot_notes)
+        if rot_notes:
+            say(rot_notes[0])
     for i in sequence[1:]:
         results[i].notes += rot_notes
     return [results[i] for i in range(len(frames))]
+
+
+def _rotation_summary(frames, mid: int, rotation: dict[int, float], last: list[str]) -> list[str]:
+    """The note for the rotation the frames actually carry.
+
+    Each round measures what is left after the previous rounds' correction, so the last round
+    usually finds nothing significant; its note alone ("not applied") would hide a rotation
+    applied earlier (seen on the 2024 set).
+    """
+    if not any(abs(v) > 1e-9 for v in rotation.values()):
+        return last
+    times = {i: frames[i].time_s for i in rotation}
+    pairs = [(times[i] - times[mid], v) for i, v in rotation.items()
+             if times[i] is not None and times[mid] is not None and i != mid]
+    if not pairs:
+        return last
+    t = np.array([p[0] for p in pairs], dtype=float)
+    v = np.array([p[1] for p in pairs], dtype=float)
+    if float(np.sum(t * t)) <= 0:
+        return last
+    slope = float(np.sum(t * v) / np.sum(t * t))
+    span = float(np.ptp([x for x in times.values() if x is not None]))
+    note = f"field rotation {slope * 60:+.4f} deg/min applied ({slope * span:+.4f} deg over the sequence)"
+    rest = [n for n in last if "not significant" in n]
+    if rest:
+        m = rest[0]
+        inner = m[m.find("(") + 1:m.find(")")] if "(" in m else ""
+        note += f"; what was left after correcting it is not significant ({inner})"
+    return [note]
 
 
 def _drift_model(frames, mid: int, meas: dict, notes: list[str]) -> dict[int, float]:

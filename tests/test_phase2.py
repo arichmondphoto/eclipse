@@ -431,3 +431,29 @@ def test_one_failed_frame_does_not_spoil_the_others(monkeypatch):
         assert math.isinf(r.psr) or (np.isfinite(r.psr) and r.psr > 8), r.index
         x, y = r.transform.apply_point(c + sx, c + sy)
         assert math.hypot(x - (c + truth[anchor][0]), y - (c + truth[anchor][1])) < 0.35, r.index
+
+
+def test_rotation_note_matches_the_rotation_applied():
+    """On the 2024 set every frame's note said "field rotation not significant ...; not applied"
+    while the frames carried rotations of -0.028 to +0.033 deg: round 1 found the drift and applied
+    it, round 2 measured what was left (nothing) and its note replaced round 1's. The note must
+    describe the rotation the frames actually carry."""
+    sc = SyntheticScene(size=448, sun_radius=55)
+    c = 223.5
+    rng = np.random.default_rng(5)
+    rate = 0.3  # deg per frame, 8 s apart
+    frames = []
+    for i, e in enumerate([1e-3 * 2 ** (k / 1.25) for k in range(7)]):
+        sx, sy = rng.uniform(-5, 5, 2)
+        img, _ = sc.frame(e, c + sx, c + sy, -12 + 4 * i, 0, angle_deg=rate * (i - 3), seed=20 + i)
+        frames.append(AlignFrame(i, img.astype(np.float32), e, time_s=8.0 * i))
+    res = align_sequence(frames, AlignParams(), expected_moon_radius=58)
+    assert max(abs(r.transform.angle_deg) for r in res) > 0.8  # the drift was found and applied
+    for r in res:
+        if math.isinf(r.psr):
+            continue
+        text = " ".join(r.notes)
+        assert "not applied" not in text, text
+        import re
+        total = re.search(r"applied \(([-+][0-9.]+) deg over the sequence", text)
+        assert total and abs(abs(float(total.group(1))) - 6 * rate) < 0.05, text
