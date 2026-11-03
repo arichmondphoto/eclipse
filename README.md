@@ -34,8 +34,12 @@ systems before sharing the tool more widely.
 
 ## Workflow
 
-1. **Frames:** make a project from the event folder (see *Project folders*).
-2. **Align:** enter the site; the frames are aligned and the Sun's centre found.
+1. **Frames:** make a project from the event folder (see *Project folders*),
+   and enter the event once: the eclipse, your site, the camera's time zone
+   and clock error. **Compute contacts** works out second and third contact
+   and marks the frames taken outside totality.
+2. **Align:** the frames are aligned and the Sun's centre found (from the
+   event entered on the Frames tab).
 3. **Stack:** the frames are merged into one linear 32-bit HDR image.
 4. **Enhance:** tune the layers in a live preview, then write them full size.
 5. **Earthshine:** stack the Moon, then write the final image: the Moon put
@@ -103,8 +107,8 @@ The window has one tab per step, and each step saves into the project file:
 
 | Tab | What you do | What you see |
 | --- | --- | --- |
-| 1 Frames | Read the RAW folder, check the frames and brackets, choose the lens profile, add calibration folders | Frame table (right-click to exclude a frame), bracket and calibration report |
-| 2 Align | Enter the site (latitude, longitude, elevation), the camera time zone and clock error if known; choose the rotation model | Per-frame shift, rotation and peak strength; the Sun centre report |
+| 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
+| 2 Align | Whether the optics mirror the image; the rotation model (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
 | 4 Enhance | Layers to write; each layer's blend strength and Soft Light or Overlay; flatten, saturation, white balance, sky removal; FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
@@ -168,7 +172,8 @@ totality final-prominences "$P" -o "Eclipse 2024/finished.png"
 
 ```bash
 totality inventory "D:/Eclipse 2024/RAW" --project eclipse2024.json --csv frames.csv
-totality inventory RAW --c2 2024-04-08T13:47:30 --c3 2024-04-08T13:51:45   # mark frames outside totality
+totality inventory RAW --lat 36.9422 --lon -90.3343 --elev 110 --camera-utc-offset -6   # contacts computed, frames outside totality marked
+totality inventory RAW --c2 2024-04-08T12:56:37 --c3 2024-04-08T13:00:48   # or type the contacts (camera clock)
 totality inventory RAW --flats FLATS --darks DARKS --bias BIAS              # optional calibration frames
 totality inventory RAW --lens "Nikon AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" # force a lens profile
 totality lens "AF-S Nikkor 80-400mm f/4.5-5.6G ED VR" --focal 400 --aperture 8
@@ -177,7 +182,7 @@ totality inventory RAW --profile my_profile.json  # use one profile for every fr
 totality frame DSC_4100.NEF                       # show everything read from one file
 totality frames eclipse2024.json --exclude DSC_9108.nef   # leave a frame out (--include to undo)
 totality eclipse --date 2024-04-08 --lat 36.9422 --lon -90.3343 --utc-offset -5   # contacts and duration
-totality align eclipse2024.json --lat 36.9422 --lon -90.3343 --elev 110           # align and find the Sun
+totality align eclipse2024.json                    # align and find the Sun (site from the project)
 ```
 
 ## Alignment (Phase 2)
@@ -246,10 +251,24 @@ tool reports both answers and warns when the difference matters.
 missing shutter speeds), and the calibration plan: which vignetting source
 each frame uses, how darks and bias are matched, and the corner falloff.
 
-Contact times are compared with the camera's clock. If the clock was wrong,
-give the correction with `--clock-offset` (added to camera time, for example
-`+1:04:08`) and enter the contact times in true time. Bracket detection and
-Moon tracking only use time differences, so a wrong clock never affects them.
+**Contact times** are computed for your site from NASA's Besselian elements
+(bundled for recent eclipses; NASA's catalogue of every eclipse from 1600 to
+2400 is downloaded once when needed) and kept in the camera's own clock, the
+one the RAW files record:
+
+    camera clock = UT + camera time zone - clock error
+
+The camera time zone comes from the files when they record one, otherwise
+from the setting; an unknown clock error counts as 0. A wrong clock or time
+zone would mark frames taken in totality as partial, so before marking, the
+toolkit checks your exposure brackets against the contacts. A bracket is shot
+in one go, so if one is cut in two by a contact (or no frame falls inside
+totality), nothing is marked without asking, and it says which clock error
+would put every bracket inside. You can also type the contacts, in the
+camera's clock. Projects from before November 2026 kept typed contacts with a
+separate clock offset; they are converted on opening (same frames inside).
+Bracket detection and Moon tracking only use time differences, so a wrong
+clock never affects them.
 
 ## HDR stacking (Phase 3)
 
@@ -735,9 +754,15 @@ read every RAW file in a folder and report brackets and calibration.
 | `--project` | create or update this project file (.json) |
 | `--lens` | force this lensfun lens profile |
 | `--no-exiftool` | do not use exiftool even if installed |
-| `--c2` | second contact, e.g. 2024-04-08T13:47:33 (camera time, or true time with --clock-offset) |
-| `--c3` | third contact |
-| `--clock-offset` | add this to the camera clock to get true time, e.g. +1:04:08, -45s, 1h |
+| `--eclipse` | the eclipse, by its date, e.g. 2024-04-08 (default: the frames' date) |
+| `--lat` | site latitude in degrees, north positive (saved in the project) |
+| `--lon` | site longitude in degrees, east positive (west is negative) |
+| `--elev` | site elevation in metres |
+| `--camera-utc-offset` | the camera clock's time zone in hours, e.g. -6, when the files do not record one |
+| `--clock-error` | seconds the camera clock was behind true time (true minus camera), when known |
+| `--c2` | second contact typed in, e.g. 2024-04-08T13:47:33, in the camera's clock (or in true time with --clock-offset); default: computed from the eclipse and site |
+| `--c3` | third contact typed in (with --c2) |
+| `--clock-offset` | with --c2/--c3 typed in another clock: add this to the camera clock to get that clock, e.g. +1:04:08, -45s, 1h |
 | `--bias` | folder of bias frames |
 | `--darks` | folder of dark frames |
 | `--flats` | folder of flat frames |

@@ -152,22 +152,62 @@ fp.save(root / "Folder project.json")
 win4 = G.MainWindow(G.SirilLink())
 os.environ["STUB_DIR"] = str(root)
 win4.frames_tab._pick_folder(win4.frames_tab.folder)
-at = win4.align_tab
-print("Browse... on a project folder: site", at.lat.text(), at.lon.text(), at.elev.text(), at.tz.text(),
+at, ft4 = win4.align_tab, win4.frames_tab
+print("Browse... on a project folder: site", ft4.lat.text(), ft4.lon.text(), ft4.elev.text(), ft4.tz.text(),
       "| alignment rows", at.table.rowCount())
-assert (at.lat.text(), at.lon.text(), at.elev.text(), at.tz.text()) == ("36.942202", "-90.334287", "110", "-5")
+assert (ft4.lat.text(), ft4.lon.text(), ft4.elev.text(), ft4.tz.text()) == ("36.942202", "-90.334287", "110", "-5")
+assert "36.942202, -90.334287" in at.event_label.text()  # the Align tab shows the event from the Frames tab
 assert at.table.rowCount() == 2 and at.rotation.currentText() == "per-frame"
 os.environ.pop("STUB_DIR")
 
 # Every control on the Frames tab has hover help (CLAUDE.md: settings shown in the GUI need it).
 ft = win4.frames_tab
 controls = {"RAW folder": ft.folder, "Browse": ft.browse_btn, "exiftool": ft.use_exiftool, "Read frames": ft.scan_btn,
-            "frame table": ft.table, "Lens profile": ft.lens_combo, "Clock offset": ft.clock,
+            "frame table": ft.table, "Lens profile": ft.lens_combo, "Eclipse": ft.eclipse_combo,
+            "Latitude": ft.lat, "Longitude": ft.lon, "Elevation": ft.elev, "Camera time zone": ft.tz,
+            "Clock error": ft.clock_error, "Compute contacts": ft.compute_btn,
             "Second contact": ft.c2, "Third contact": ft.c3, "Bias": ft.bias_dir, "Darks": ft.dark_dir,
             "Flats": ft.flat_dir, "report": ft.report, **{f"{k} button": b for k, b in ft.setting_buttons.items()},
             **{f"folder button {i}": b for i, b in enumerate(ft.calib_browse)}}
 missing = [k for k, w in controls.items() if len(w.toolTip()) < 30]
 print("Frames tab controls without hover help:", missing or "none")
 assert not missing
+
+# Event: contacts computed from the eclipse and site (2024, at the site above, camera on UTC-5).
+from datetime import datetime as _dt
+QMessageBox.log.clear()
+inside = make_frames(["1/250", "1/60", "1/15"], start=_dt(2024, 4, 8, 13, 58, 0), first_index=10)
+early = make_frames(["1/250", "1/60"], start=_dt(2024, 4, 8, 13, 40, 0), first_index=20)  # partial phase
+ft4.inventory = Inventory(early + inside)
+ft4.project.set_inventory(ft4.inventory)
+ft4.inventory = ft4.project.inventory
+ft4.c2.setText(""); ft4.c3.setText("")
+ft4.compute_contacts()
+print("computed contacts:", ft4.c2.text(), ft4.c3.text())
+assert ft4.c2.text() == "2024-04-08T13:56:37" and ft4.c3.text() == "2024-04-08T14:00:48"
+roles = {f.index: f.role for f in ft4.inventory.frames}
+assert [roles[i] for i in (20, 21)] == ["partial", "partial"] and all(roles[i] == "light" for i in (10, 11, 12))
+assert not any(k == "question" for k, _ in QMessageBox.log)  # fits: nothing to ask
+# A bracket cut by second contact (clock 30 s fast): asked first, nothing marked when the answer is No.
+cut = make_frames(["1/250", "1/60", "1/15", "1/4", "1"], start=_dt(2024, 4, 8, 13, 56, 33), first_index=30)
+ft4.inventory = Inventory(cut)
+ft4.project.set_inventory(ft4.inventory)
+ft4.inventory = ft4.project.inventory
+ft4.compute_contacts()
+asked = [t for k, t in QMessageBox.log if k == "question"]
+print("asked:", asked[-1].splitlines()[0][:100] if asked else None)
+assert asked and "clock error" in asked[-1] and all(f.role == "light" for f in ft4.inventory.frames)
+assert "no frames were marked" in ft4.report.toPlainText()
+# Saved for the steps, and shown on the Align tab.
+win4.ensure_saved()
+saved = EventProject.load(root / "Folder project.json")
+assert saved.latitude == 36.942202 and saved.second_contact == "2024-04-08T13:56:37"
+
+# An older project: contacts typed in true time plus a clock offset move into the camera clock.
+old = EventProject(name="old", second_contact="2024-04-08T13:56:37", third_contact="2024-04-08T14:00:48",
+                   camera_clock_offset_s=3600.0)
+old.save(T / "old.json")
+o = EventProject.load(T / "old.json")
+assert (o.second_contact, o.camera_clock_offset_s) == ("2024-04-08T12:56:37", 0.0)
 
 print("GUI SMOKE OK")

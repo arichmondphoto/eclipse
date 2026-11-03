@@ -91,6 +91,7 @@ def run_alignment(
     crop_factor: float = 1.0,
     utc_offset_h: Optional[float] = None,
     mirrored: bool = False,
+    eclipse_date: str = "",
     progress: Optional[Callable[[str], None]] = None,
 ) -> AlignmentResult:
     """Align the light frames; ``utc_offset_h`` is the camera's time zone when EXIF has none."""
@@ -174,7 +175,7 @@ def run_alignment(
     notes: list[str] = []
     if site is not None and t0 is not None:
         try:
-            el = elements_for(t0.astimezone(timezone.utc).date())
+            el = elements_for(eclipse_date or t0.astimezone(timezone.utc).date())
             ecl = LocalEclipse(el, site)
             times = [_aware(f) for f in frames]
             sc = solve_sun_centre(times, [fr.moon_ref for fr in out_frames], moon_r_full, ecl,

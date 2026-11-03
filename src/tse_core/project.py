@@ -25,9 +25,14 @@ class EventProject:
     toolkit_version: str = __version__
     format: int = PROJECT_FORMAT
 
-    # Optional, in camera clock time (ISO 8601).
+    # Which eclipse (its date, as in NASA's catalogue); empty = the one on the frames' date.
+    eclipse_date: str = ""
+    # In the camera's clock (ISO 8601), as the RAW files record time: computed from the eclipse, the
+    # site, the camera time zone and the clock error (event.compute_contacts), or typed in.
     second_contact: str = ""
     third_contact: str = ""
+    # Older projects: time added to the camera clock to compare with contacts typed in another clock.
+    # Converted on loading (the contacts are moved into the camera clock) and then always 0.
     camera_clock_offset_s: float = 0.0
 
     # Observing site (for the eclipse circumstances and the Sun's centre).
@@ -82,7 +87,27 @@ class EventProject:
         if data.get("format", 1) > PROJECT_FORMAT:
             raise ValueError("This project was saved by a newer version of the toolkit")
         known = set(cls.__dataclass_fields__)
-        return cls(**{k: v for k, v in data.items() if k in known})
+        project = cls(**{k: v for k, v in data.items() if k in known})
+        project._contacts_to_camera_clock()
+        return project
+
+    def _contacts_to_camera_clock(self) -> None:
+        """Older projects kept typed contacts plus a clock offset (frames were compared after adding
+        it); the same comparison is: contact minus offset, in the camera's own clock."""
+        off = float(self.camera_clock_offset_s or 0.0)
+        if not off:
+            return
+        from datetime import timedelta
+
+        for name in ("second_contact", "third_contact"):
+            text = getattr(self, name)
+            try:
+                t = datetime.fromisoformat(text) if text else None
+            except ValueError:
+                t = None
+            if t is not None:
+                setattr(self, name, (t - timedelta(seconds=off)).isoformat())
+        self.camera_clock_offset_s = 0.0
 
     def contact_times(self) -> tuple[Optional[datetime], Optional[datetime]]:
         def parse(text: str) -> Optional[datetime]:

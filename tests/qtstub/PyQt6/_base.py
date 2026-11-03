@@ -211,6 +211,9 @@ class QPlainTextEdit(QWidget):
     def setPlainText(self, t):
         self.lines = [t]
 
+    def toPlainText(self):
+        return "\n".join(self.lines)
+
 
 class QLabel(QWidget):
     def __init__(self, *a):
@@ -218,6 +221,9 @@ class QLabel(QWidget):
 
     def setText(self, t):
         self._t = t
+
+    def text(self):
+        return self._t
 
 
 class QTableWidget(QWidget):
@@ -242,6 +248,15 @@ class QTableWidgetItem(Dummy):
 
 class QMessageBox(Dummy):
     log = []
+
+    class StandardButton:
+        Yes = 16384
+        No = 65536
+
+    @staticmethod
+    def question(parent, title, text, *a, **k):
+        QMessageBox.log.append(("question", text))
+        return QMessageBox.StandardButton.Yes if os.environ.get("STUB_YES") else QMessageBox.StandardButton.No
 
     @staticmethod
     def information(parent, title, text):

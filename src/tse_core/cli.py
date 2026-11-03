@@ -33,9 +33,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--project", help="create or update this project file (.json)")
     p.add_argument("--lens", help="force this lensfun lens profile")
     p.add_argument("--no-exiftool", action="store_true", help="do not use exiftool even if installed")
-    p.add_argument("--c2", help="second contact, e.g. 2024-04-08T13:47:33 (camera time, or true time with --clock-offset)")
-    p.add_argument("--c3", help="third contact")
-    p.add_argument("--clock-offset", help="add this to the camera clock to get true time, e.g. +1:04:08, -45s, 1h")
+    p.add_argument("--eclipse", help="the eclipse, by its date, e.g. 2024-04-08 (default: the frames' date)")
+    p.add_argument("--lat", type=float, help="site latitude in degrees, north positive (saved in the project)")
+    p.add_argument("--lon", type=float, help="site longitude in degrees, east positive (west is negative)")
+    p.add_argument("--elev", type=float, help="site elevation in metres")
+    p.add_argument("--camera-utc-offset", type=float,
+                   help="the camera clock's time zone in hours, e.g. -6, when the files do not record one")
+    p.add_argument("--clock-error", type=float,
+                   help="seconds the camera clock was behind true time (true minus camera), when known")
+    p.add_argument("--c2", help="second contact typed in, e.g. 2024-04-08T13:47:33, in the camera's clock "
+                                "(or in true time with --clock-offset); default: computed from the eclipse and site")
+    p.add_argument("--c3", help="third contact typed in (with --c2)")
+    p.add_argument("--clock-offset", help="with --c2/--c3 typed in another clock: add this to the camera clock to "
+                                          "get that clock, e.g. +1:04:08, -45s, 1h")
     p.add_argument("--bias", help="folder of bias frames")
     p.add_argument("--darks", help="folder of dark frames")
     p.add_argument("--flats", help="folder of flat frames")
@@ -347,17 +357,14 @@ def cmd_inventory(args) -> int:
     print(f"Reading {len(files)} RAW file(s)...")
     inv = Inventory.from_paths(files, use_exiftool=not args.no_exiftool)
 
-    offset = parse_duration(args.clock_offset) if args.clock_offset else None
-    if args.project and offset is None and Path(args.project).exists():
-        offset = EventProject.load(args.project).camera_clock_offset_s
-    if offset:
-        print(f"Camera clock offset: {offset:+.0f} s")
-    if args.c2 and args.c3:
-        changed = inv.mark_outside(
-            datetime.fromisoformat(args.c2), datetime.fromisoformat(args.c3), clock_offset_s=offset or 0.0
-        )
-        print(f"{changed} frame(s) marked as outside totality")
-
+    path = Path(args.project) if args.project else None
+    project = EventProject.load(path) if path and path.exists() else EventProject(name=Path(args.folder).name)
+    for attr, value in (("eclipse_date", args.eclipse), ("latitude", args.lat), ("longitude", args.lon),
+                        ("elevation_m", args.elev), ("camera_utc_offset_h", args.camera_utc_offset),
+                        ("clock_error_s", args.clock_error)):
+        if value is not None:
+            setattr(project, attr, value)
+    _contacts(inv, project, args)
     report = detect_brackets(inv.frames)
     _print_table(inv)
     print()
@@ -380,17 +387,9 @@ def cmd_inventory(args) -> int:
     if args.csv:
         inv.to_csv(args.csv)
         print(f"\nFrame table written to {args.csv}")
-    if args.project:
-        path = Path(args.project)
-        project = EventProject.load(path) if path.exists() else EventProject(name=Path(args.folder).name)
+    if path is not None:
         project.raw_folder = str(Path(args.folder).resolve())
         project.lens_profile = args.lens or project.lens_profile
-        if args.c2:
-            project.second_contact = args.c2
-        if args.c3:
-            project.third_contact = args.c3
-        if args.clock_offset:
-            project.camera_clock_offset_s = offset
         project.bias_files = find_raw_files(args.bias) if args.bias else project.bias_files
         project.dark_files = find_raw_files(args.darks) if args.darks else project.dark_files
         project.flat_files = find_raw_files(args.flats) if args.flats else project.flat_files
@@ -398,6 +397,44 @@ def cmd_inventory(args) -> int:
         project.save(path)
         print(f"Project saved to {path}")
     return 0
+
+
+def _contacts(inv, project, args) -> None:
+    """Mark frames outside totality: contacts typed in, else computed from the eclipse and the site,
+    else the ones saved in the project. All are kept in the camera's clock."""
+    from datetime import timedelta
+
+    from .event import check_fit, compute_contacts
+
+    c2 = c3 = None
+    if args.c2 and args.c3:
+        offset = parse_duration(args.clock_offset) if args.clock_offset else 0.0
+        c2 = datetime.fromisoformat(args.c2) - timedelta(seconds=offset)
+        c3 = datetime.fromisoformat(args.c3) - timedelta(seconds=offset)
+        if offset:
+            print(f"Contacts moved into the camera's clock ({-offset:+.0f} s): {c2:%H:%M:%S} to {c3:%H:%M:%S}")
+    elif project.latitude is not None and project.longitude is not None:
+        try:
+            con = compute_contacts(inv.frames, project.latitude, project.longitude, project.elevation_m,
+                                   project.camera_utc_offset_h, project.clock_error_s, project.eclipse_date, print)
+        except ValueError as exc:
+            print(f"Contact times not computed: {exc}")
+            return
+        print(con.describe())
+        fit = check_fit(inv.frames, con.c2_camera, con.c3_camera, con.clock_error_s)
+        if not fit.ok:
+            for w in fit.warnings:
+                print(f"Warning: {w}")
+            print("No frames were marked as outside totality; fix the above, or type the contacts with --c2/--c3.")
+            return
+        c2, c3 = con.c2_camera, con.c3_camera
+    else:
+        c2, c3 = project.contact_times()
+    if c2 is None or c3 is None:
+        return
+    project.second_contact, project.third_contact = c2.isoformat(timespec="seconds"), c3.isoformat(timespec="seconds")
+    changed = inv.mark_outside(c2, c3)
+    print(f"{changed} frame(s) marked as outside totality")
 
 
 def cmd_flat_profile(args) -> int:

@@ -91,7 +91,7 @@ from tse_core import imageout as IO  # noqa: E402
 from tse_core.viewzoom import ViewZoom  # noqa: E402
 from tse_core.enhance import LAYERS, EnhanceParams  # noqa: E402
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
-from tse_core.frames import format_exposure, parse_duration  # noqa: E402
+from tse_core.frames import format_exposure  # noqa: E402
 from tse_core.inventory import Inventory, ProjectFolder, find_raw_files  # noqa: E402
 from tse_core.lensfun import LensfunDatabase, download_database  # noqa: E402
 from tse_core.metadata import read_frames  # noqa: E402
@@ -188,21 +188,41 @@ class FramesTab(QWidget):
         bl = QHBoxLayout(bottom)
         bl.setContentsMargins(0, 0, 0, 0)
 
-        options = QGroupBox("Event settings")
+        left = QVBoxLayout()
+        event = QGroupBox("Event")
+        ef = QFormLayout(event)
+        self.eclipse_combo = QComboBox()
+        ef.addRow("Eclipse:", self.eclipse_combo)
+        self.lat, self.lon, self.elev = QLineEdit(), QLineEdit(), QLineEdit()
+        self.lat.setPlaceholderText("e.g. 36.942202 (north positive)")
+        self.lon.setPlaceholderText("e.g. -90.334287 (west negative)")
+        self.elev.setPlaceholderText("metres, e.g. 110")
+        self.tz = QLineEdit()
+        self.tz.setPlaceholderText("hours, e.g. -6 (only if the files carry no time zone)")
+        self.clock_error = QLineEdit()
+        self.clock_error.setPlaceholderText("seconds, true minus camera; blank = not known")
+        ef.addRow("Latitude:", self.lat)
+        ef.addRow("Longitude:", self.lon)
+        ef.addRow("Elevation:", self.elev)
+        ef.addRow("Camera time zone:", self.tz)
+        ef.addRow("Camera clock error:", self.clock_error)
+        self.c2 = QLineEdit()
+        self.c2.setPlaceholderText("camera clock, e.g. 2024-04-08T12:56:37")
+        self.c3 = QLineEdit()
+        self.c3.setPlaceholderText("camera clock, e.g. 2024-04-08T13:00:48")
+        ef.addRow("Second contact:", self.c2)
+        ef.addRow("Third contact:", self.c3)
+        self.compute_btn = QPushButton("Compute contacts")
+        self.compute_btn.clicked.connect(self.compute_contacts)
+        ef.addRow(self.compute_btn)
+        left.addWidget(event)
+
+        options = QGroupBox("Calibration")
         form = QFormLayout(options)
         self.lens_combo = QComboBox()
         self.lens_combo.addItems([AUTOMATIC, NO_PROFILE])
         self.lens_combo.currentIndexChanged.connect(lambda _: self.replan())
         form.addRow("Lens profile:", self.lens_combo)
-        self.c2 = QLineEdit()
-        self.c2.setPlaceholderText("e.g. 2024-04-08T13:47:33")
-        self.c3 = QLineEdit()
-        self.c3.setPlaceholderText("needed with second contact, e.g. 2024-04-08T13:51:21")
-        self.clock = QLineEdit()
-        self.clock.setPlaceholderText("added to camera time, e.g. +1:04:08 (blank = clock was right)")
-        form.addRow("Clock offset:", self.clock)
-        form.addRow("Second contact:", self.c2)
-        form.addRow("Third contact:", self.c3)
         self.bias_dir, self.dark_dir, self.flat_dir = QLineEdit(), QLineEdit(), QLineEdit()
         calib_tips = {
             "Bias folder:": "Optional. A folder of bias frames: the shortest exposures with the lens cap on, at "
@@ -247,8 +267,11 @@ class FramesTab(QWidget):
             buttons.addWidget(b)
             self.setting_buttons[text] = b
         form.addRow(buttons)
-        bl.addWidget(options, 0)
+        left.addWidget(options)
+        bl.addLayout(left, 0)
         self._settings_form = form
+        self._event_form = ef
+        self._fill_eclipses()
 
         self.report = QPlainTextEdit()
         self.report.setReadOnly(True)
@@ -290,19 +313,35 @@ class FramesTab(QWidget):
              "fitted from your own flats earlier. Choose a lens by name if Automatic picks none or the wrong one, "
              "or 'None' to switch the correction off. Flats in the Flats folder are used instead whenever they "
              "match the frames' aperture and focal length.", form)
-        _tip(self.clock, "Only for comparing frame times with the contact times below. Time added to the "
-             "camera's clock so it reads the same clock as your contact times: +1:00:00 (or 1h) when the camera "
-             "showed 12:56 at a contact you entered as 13:56; -45s when it was 45 s fast. Leave blank if you enter "
-             "the contacts as the camera showed them, or if the camera clock was right. It does not change the "
-             "alignment: the camera's time zone and clock error for the Sun's centre are set on the Align tab.",
-             form)
-        _tip(self.c2, "Second contact (start of totality) as date and time, for example 2024-04-08T13:47:33, in "
-             "the same clock as the Clock offset above. Frames taken before it are marked 'partial' and left out. "
-             "Needs the third contact too; both are applied when you click Apply.", form)
-        _tip(self.c3, "Third contact (end of totality), for example 2024-04-08T13:51:21. Frames taken after it "
-             "are marked 'partial' and left out. The contact times are only used when both are filled in. A "
-             "few seconds' margin either way does no harm; frames marked by hand as excluded stay excluded.",
-             form)
+        ef = self._event_form
+        _tip(self.eclipse_combo, "Which eclipse the frames are of. Automatic uses the eclipse on the date the frames "
+             "were taken. The list holds the total and hybrid eclipses on this computer; the first time an "
+             "eclipse outside the bundled set is needed, NASA's catalogue of every eclipse from 1600 to 2400 is "
+             "downloaded once.", ef)
+        _tip(self.lat, "Observing site latitude in degrees, north positive. With the longitude and elevation it "
+             "gives the contact times here, and the Moon's path across the Sun, which locates the Sun's true "
+             "centre (needed by the enhancement filters).", ef)
+        _tip(self.lon, "Observing site longitude in degrees, east positive (west of Greenwich, as in the "
+             "Americas, is negative).", ef)
+        _tip(self.elev, "Site elevation above sea level in metres. A rough value is fine.", ef)
+        _tip(self.tz, "The time zone the camera's clock was set to, in hours (for example -6 if it was on CST, "
+             "-5 for CDT), used only when the RAW files do not record it. If the camera was on standard time "
+             "while the eclipse was on daylight time, enter the zone the CAMERA was on.", ef)
+        _tip(self.clock_error, "Seconds the camera's clock was behind true time (true minus camera), if you know "
+             "it: 117 if it ran 117 s slow, -45 if it ran 45 s fast. A wrong time zone setting is not a clock "
+             "error: fix the time zone instead. Leave blank if you do not know: the contacts are then computed "
+             "as if the clock were right, and the Align step works the error out within the range that keeps "
+             "every frame inside totality. Used for the contacts and for the Sun's centre.", ef)
+        _tip(self.c2, "Second contact (start of totality) in the CAMERA's clock, as the RAW files record time, "
+             "for example 2024-04-08T12:56:37. Compute contacts fills it in; you can also type it. Frames taken "
+             "before it are marked 'partial' and left out when you click Apply. Needs the third contact too.", ef)
+        _tip(self.c3, "Third contact (end of totality) in the camera's clock. Frames taken after it are marked "
+             "'partial' and left out. Frames marked by hand as excluded stay excluded.", ef)
+        _tip(self.compute_btn, "Work out second and third contact for the eclipse and site above from NASA's "
+             "Besselian elements, convert them to the camera's clock (time zone and clock error), fill them in "
+             "and mark the frames outside them. First it checks that your exposure brackets fit: a bracket cut in "
+             "two by a contact usually means the clock or time zone is wrong, and you are asked before any frame "
+             "is marked, with the clock error that would fit.")
         b = self.setting_buttons
         _tip(b["Apply"], "Use the settings above: mark frames outside the contact times, read the calibration "
              "folders and update the calibration plan in the report. The project is saved.")
@@ -325,6 +364,16 @@ class FramesTab(QWidget):
             return
         edit.setText(folder)
 
+    def _show_event(self) -> None:
+        p = self.project
+        self._fill_eclipses(p.eclipse_date)
+        self.lat.setText(_txt(p.latitude))
+        self.lon.setText(_txt(p.longitude))
+        self.elev.setText(_txt(p.elevation_m))
+        self.tz.setText(_txt(p.camera_utc_offset_h))
+        self.clock_error.setText(_txt(p.clock_error_s))
+        self.event_report = self.fit_report = ""
+
     def use_project_folder(self, folder: str) -> bool:
         """Set up from a project folder (lights/ and optional darks/, flats/, bias/); returns False if it
         has no lights/ subfolder. An existing project file in the folder is opened."""
@@ -336,6 +385,7 @@ class FramesTab(QWidget):
         else:
             self.project = EventProject(name=layout.root.name)
             self.project_path = layout.project_file
+            self._show_event()
         self.folder.setText(str(layout.lights))
         for edit, sub in ((self.bias_dir, layout.bias), (self.dark_dir, layout.darks), (self.flat_dir, layout.flats)):
             edit.setText(str(sub) if sub else "")
@@ -372,21 +422,102 @@ class FramesTab(QWidget):
         self._refresh_lens_choices()
         self.apply_settings()
 
+    def _fill_eclipses(self, selected: str = "") -> None:
+        from tse_core.event import known_eclipses
+
+        self.eclipse_combo.blockSignals(True)
+        self.eclipse_combo.clear()
+        self.eclipse_combo.addItem("Automatic (the date of your frames)", "")
+        try:
+            items = known_eclipses()
+        except Exception:  # a damaged catalogue must not stop the window opening
+            items = []
+        for day, label in items:
+            self.eclipse_combo.addItem(label, day)
+        if selected and self.eclipse_combo.findData(selected) < 0:
+            self.eclipse_combo.addItem(selected, selected)
+        i = self.eclipse_combo.findData(selected)
+        self.eclipse_combo.setCurrentIndex(max(i, 0))
+        self.eclipse_combo.blockSignals(False)
+
+    def _store_event(self) -> bool:
+        """Copy the Event box into the project; False (after a message) if a number is not readable."""
+        try:
+            lat, lon, elev = _float(self.lat), _float(self.lon), _float(self.elev)
+            tz, ce = _float(self.tz), _float(self.clock_error)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Event", str(exc))
+            return False
+        p = self.project
+        p.eclipse_date = self.eclipse_combo.currentData() or ""
+        p.latitude, p.longitude, p.elevation_m = lat, lon, elev if elev is not None else 0.0
+        p.camera_utc_offset_h, p.clock_error_s = tz, ce
+        return True
+
+    def compute_contacts(self) -> None:
+        """Fill in the contacts from the eclipse and the site, then mark frames (after the fit check)."""
+        from tse_core.event import compute_contacts
+
+        if not self.inventory.frames:
+            QMessageBox.information(self, "Compute contacts", "Read the frames first: their date and time zone "
+                                                              "are needed.")
+            return
+        if not self._store_event():
+            return
+        p = self.project
+        if p.latitude is None or p.longitude is None:
+            QMessageBox.warning(self, "Compute contacts", "Enter the site's latitude and longitude first.")
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            con = compute_contacts(self.inventory.frames, p.latitude, p.longitude, p.elevation_m,
+                                   p.camera_utc_offset_h, p.clock_error_s, p.eclipse_date,
+                                   say=lambda m: self.link.log("Solar Eclipse Toolkit: " + m))
+        except ValueError as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Compute contacts", str(exc))
+            return
+        QApplication.restoreOverrideCursor()
+        self.c2.setText(con.c2_camera.isoformat(timespec="seconds"))
+        self.c3.setText(con.c3_camera.isoformat(timespec="seconds"))
+        self.event_report = con.describe()
+        self.link.log("Solar Eclipse Toolkit: " + con.describe().replace("\n", "\n  "))
+        self.apply_settings()
+
     def apply_settings(self) -> None:
+        from tse_core.event import check_fit
+
         if not self.inventory.frames:
             return
+        if not self._store_event():
+            return
         c2, c3 = self.c2.text().strip(), self.c3.text().strip()
-        try:
-            self.project.camera_clock_offset_s = parse_duration(self.clock.text()) if self.clock.text().strip() else 0.0
-        except ValueError:
-            QMessageBox.warning(self, "Clock offset", "Use a form like +1:04:08, -45s or 1h.")
         if c2 and c3:
             try:
-                self.inventory.mark_outside(datetime.fromisoformat(c2), datetime.fromisoformat(c3),
-                                            clock_offset_s=self.project.camera_clock_offset_s)
+                t2, t3 = datetime.fromisoformat(c2), datetime.fromisoformat(c3)
             except ValueError:
-                QMessageBox.warning(self, "Contact times", "Use the form 2024-04-08T13:48:10 for contact times.")
+                QMessageBox.warning(self, "Contact times", "Use the form 2024-04-08T12:56:37 for contact times.")
+                return
+            t2, t3 = t2.replace(tzinfo=None), t3.replace(tzinfo=None)
+            fit = check_fit(self.inventory.frames, t2, t3, self.project.clock_error_s or 0.0)
+            mark = fit.ok
+            if not fit.ok:
+                answer = QMessageBox.question(
+                    self, "Contact times", "\n\n".join(w[:1].upper() + w[1:] for w in fit.warnings)
+                    + "\n\nMark the frames outside these contact times as partial anyway?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                mark = answer == QMessageBox.StandardButton.Yes
+            self.fit_report = "" if fit.ok else "Contact check:\n" + "\n".join(f"  {w}" for w in fit.warnings) + (
+                "\n  (frames were marked anyway)" if mark else "\n  (no frames were marked)")
+            if mark:
+                self.inventory.mark_outside(t2, t3)
+        elif c2 or c3:
+            QMessageBox.warning(self, "Contact times", "Enter both second and third contact (or neither).")
+            return
+        else:
+            self.fit_report = ""
         self.project.second_contact, self.project.third_contact = c2, c3
+        self.project.camera_clock_offset_s = 0.0
         self.project.bias_files = find_raw_files(self.bias_dir.text()) if self.bias_dir.text() else []
         self.project.dark_files = find_raw_files(self.dark_dir.text()) if self.dark_dir.text() else []
         self.project.flat_files = find_raw_files(self.flat_dir.text()) if self.flat_dir.text() else []
@@ -414,7 +545,9 @@ class FramesTab(QWidget):
         self.project.use_lensfun = choice != NO_PROFILE
         self.project.store_inventory(self.inventory)
         self._fill_table()
-        self.report.setPlainText(self.bracket_report.describe() + "\n\n" + self.plan.describe())
+        event = "\n\n".join(t for t in (getattr(self, "event_report", ""), getattr(self, "fit_report", "")) if t)
+        self.report.setPlainText((event + "\n\n" if event else "") + self.bracket_report.describe() + "\n\n"
+                                 + self.plan.describe())
 
     def _refresh_lens_choices(self) -> None:
         current = self.project.lens_profile
@@ -518,6 +651,7 @@ class FramesTab(QWidget):
             if not name:
                 return
             path = Path(name)
+        self._store_event()  # typed into the Event box but not applied yet: the steps need it too
         self.project.store_inventory(self.inventory)
         self.project.save(path)
         self.project_path = path
@@ -536,8 +670,7 @@ class FramesTab(QWidget):
         self.folder.setText(self.project.raw_folder)
         self.c2.setText(self.project.second_contact)
         self.c3.setText(self.project.third_contact)
-        offset = self.project.camera_clock_offset_s
-        self.clock.setText(f"{offset:+.0f}s" if offset else "")
+        self._show_event()
         for edit, files in ((self.bias_dir, self.project.bias_files), (self.dark_dir, self.project.dark_files),
                             (self.flat_dir, self.project.flat_files)):
             edit.setText(str(Path(files[0]).parent) if files else "")
@@ -686,23 +819,13 @@ class StepTab(QWidget):
 class AlignTab(StepTab):
     def __init__(self, window: "MainWindow") -> None:
         super().__init__(window)
-        site = QGroupBox("Where and when")
-        form = QFormLayout(site)
-        self.lat, self.lon, self.elev = QLineEdit(), QLineEdit(), QLineEdit()
-        self.lat.setPlaceholderText("e.g. 36.942202 (north positive)")
-        self.lon.setPlaceholderText("e.g. -90.334287 (east positive)")
-        self.elev.setPlaceholderText("metres, e.g. 110")
-        self.tz = QLineEdit()
-        self.tz.setPlaceholderText("hours, e.g. -6 (only if the files carry no time zone)")
-        self.clock = QLineEdit()
-        self.clock.setPlaceholderText("seconds to add to camera time, blank = work it out")
-        form.addRow("Latitude:", self.lat)
-        form.addRow("Longitude:", self.lon)
-        form.addRow("Elevation:", self.elev)
-        form.addRow("Camera time zone:", self.tz)
-        form.addRow("Camera clock error:", self.clock)
+        site = QGroupBox("Event (set on the Frames tab)")
+        sl = QVBoxLayout(site)
+        self.event_label = QLabel("")
+        self.event_label.setWordWrap(True)
+        sl.addWidget(self.event_label)
         self.mirrored = QCheckBox("Optics mirror the image (telescope with a star diagonal)")
-        form.addRow(self.mirrored)
+        sl.addWidget(self.mirrored)
         self.settings_layout.addWidget(site)
 
         opts = QGroupBox("Alignment")
@@ -716,15 +839,8 @@ class AlignTab(StepTab):
         f2.addRow(self.any_angle)
         self.settings_layout.addWidget(opts)
 
-        _tip(self.lat, "Observing site latitude in degrees, north positive. With the longitude, elevation and "
-             "time, it gives the Moon's path across the Sun, which locates the Sun's true centre (needed by the "
-             "enhancement filters).", form)
-        _tip(self.lon, "Observing site longitude in degrees, east positive (west of Greenwich is negative).", form)
-        _tip(self.elev, "Site elevation above sea level in metres. A rough value is fine.", form)
-        _tip(self.tz, "The camera's time zone in hours (for example -6 for CST), used only when the RAW files do "
-             "not record it.", form)
-        _tip(self.clock, "Seconds to add to the camera's clock to get true time, if you know it (for example 117 "
-             "when the camera ran 117 s slow). Leave blank to have it worked out from the Moon's motion.", form)
+        _tip(self.event_label, "The eclipse, site, camera time zone and clock error used to find the Sun's "
+             "true centre. They are entered once, on the Frames tab, where they also give the contact times.")
         _tip(self.mirrored, "Tick for telescopes used with a star diagonal, which mirror the image. Camera lenses "
              "do not. It changes where the Sun's centre is computed to be.")
         _tip(self.rotation, "Field rotation between frames. drift (default): a smooth change over time, right "
@@ -752,11 +868,7 @@ class AlignTab(StepTab):
         self.results_layout.addWidget(rs)
 
     def load_project(self, project: EventProject, path: Path) -> None:
-        self.lat.setText(_txt(project.latitude))
-        self.lon.setText(_txt(project.longitude))
-        self.elev.setText(_txt(project.elevation_m))
-        self.tz.setText(_txt(project.camera_utc_offset_h))
-        self.clock.setText(_txt(project.clock_error_s))
+        self.event_label.setText(_event_summary(project))
         self.mirrored.setChecked(bool(project.mirrored))
         a = project.parameters.get("align", {})
         if a.get("rotation"):
@@ -770,9 +882,7 @@ class AlignTab(StepTab):
 
     def run(self) -> None:
         try:
-            opts = W.AlignOptions(latitude=_float(self.lat), longitude=_float(self.lon), elevation_m=_float(self.elev),
-                                  camera_utc_offset_h=_float(self.tz), clock_error_s=_float(self.clock),
-                                  mirrored=self.mirrored.isChecked(), rotation=self.rotation.currentText(),
+            opts = W.AlignOptions(mirrored=self.mirrored.isChecked(), rotation=self.rotation.currentText(),
                                   any_angle=self.any_angle.isChecked())
         except ValueError as exc:
             QMessageBox.warning(self, "Align", str(exc))
@@ -2196,6 +2306,18 @@ def _mono() -> QFont:
     font = QFont("Monospace")
     font.setStyleHint(QFont.StyleHint.TypeWriter)
     return font
+
+
+def _event_summary(p: EventProject) -> str:
+    """One look at the event settings, for the Align tab."""
+    if p.latitude is None or p.longitude is None:
+        return ("No site entered: enter the latitude and longitude in the Event box on the Frames tab. Without "
+                "them the frames are still aligned, but the Sun's true centre is not found.")
+    eclipse = p.eclipse_date or "the eclipse on the frames' date"
+    zone = f"UTC{p.camera_utc_offset_h:+g} h" if p.camera_utc_offset_h is not None else "from the files"
+    clock = f"{p.clock_error_s:+g} s" if p.clock_error_s is not None else "not known (worked out)"
+    return (f"Eclipse: {eclipse}\nSite: {p.latitude:.6f}, {p.longitude:.6f}, {p.elevation_m:g} m\n"
+            f"Camera time zone: {zone}; clock error: {clock}")
 
 
 def _txt(x) -> str:

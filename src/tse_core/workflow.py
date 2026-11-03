@@ -81,17 +81,9 @@ def _db(path: Optional[str]) -> LensfunDatabase:
 
 def ensure_elements(day: str, say: Say) -> None:
     """Besselian elements for this date, fetching NASA's catalogue once if the eclipse is not bundled."""
-    from .eclipse import CANON_CACHE, elements_for, update_canon
+    from .event import ensure_elements as _ensure
 
-    try:
-        elements_for(day)
-        return
-    except KeyError:
-        if CANON_CACHE.is_file():
-            raise
-    say("This eclipse is not in the bundled set; fetching NASA's full catalogue once.")
-    update_canon()
-    elements_for(day)
+    _ensure(day, say)
 
 
 def _plan(project: EventProject, lights, lensfun_db, profile_dir, calib=None):
@@ -194,7 +186,7 @@ def align(project_path, opts: AlignOptions, say: Optional[Say] = None, cancel=No
         site = Site(project.latitude, project.longitude, project.elevation_m)
     if site is not None and lights[0].timestamp:
         try:
-            ensure_elements(lights[0].timestamp[:10], say)
+            ensure_elements(project.eclipse_date or lights[0].timestamp[:10], say)
         except KeyError as exc:
             say(str(exc.args[0]))
         except OSError as exc:
@@ -205,7 +197,8 @@ def align(project_path, opts: AlignOptions, say: Optional[Say] = None, cancel=No
     try:
         result = run_alignment(lights, default_loader(plan, crop), params, window=opts.window, site=site,
                                clock_error_s=project.clock_error_s, crop_factor=crop,
-                               utc_offset_h=project.camera_utc_offset_h, mirrored=project.mirrored, progress=say)
+                               utc_offset_h=project.camera_utc_offset_h, mirrored=project.mirrored,
+                               eclipse_date=project.eclipse_date, progress=say)
     except (RuntimeError, ValueError) as exc:
         raise WorkflowError(str(exc)) from exc
     out = Path(opts.output) if opts.output else path.with_name(path.stem + "_align.json")
