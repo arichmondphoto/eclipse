@@ -681,15 +681,20 @@ sRGB. In the GUI the Save dialog's file type chooses; on the command line
        with its own bias or black level removed and scaled to 1.0 in the
        middle, per CFA position) and every frame is divided by that, pixel by
        pixel. This corrects vignetting *and* dust shadows, provided nothing
-       was changed or cleaned between the eclipse and the flats.
+       was changed or cleaned between the eclipse and the flats. A straight
+       brightness slope across the whole frame (a light panel or sky
+       brighter on one side) comes from the light, not the lens: it is
+       measured against the smooth profile, taken out of the master flat and
+       named in the log ("brighter on the right (3.2% at the edge)").
      - **Smooth profile from the flats** (`profile`): a smooth, radially
        symmetric profile is fitted to the master flat (as `totality
        flat-profile` does) and used instead. Vignetting only; dust in the
        flats is ignored, so dust that moved cannot add dark rings.
      - **Master flat + compare** (`compare`): the master flat, and the log
-       reports how far it differs from the smooth profile (rms, share of
-       pixels more than 2% darker, the deepest spot), with a warning when
-       the difference is large. The ratio is saved as
+       reports how far it differs from the smooth profile (rms; the share of
+       pixels in dark spots more than 2% deep, judged against the
+       surrounding level so a broad difference is not counted as dust; the
+       deepest spot), with a warning when the difference is large. The ratio is saved as
        `<name>_flat_vs_profile_<settings>.fit` next to the stack: 1.0 where
        they agree, dark spots where there is dust.
 

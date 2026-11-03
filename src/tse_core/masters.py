@@ -109,7 +109,8 @@ def _flat_label(key: str) -> str:
         return key
 
 
-def _profile_of(flat: np.ndarray, pattern: str, image_crop: float, meta: Optional[FrameMeta] = None):
+def _profile_of(flat: np.ndarray, pattern: str, image_crop: float, meta: Optional[FrameMeta] = None,
+                with_map: bool = True):
     """A smooth profile fitted to a master flat, and its map on the sensor."""
     from .vignetting_profile import fit_profile_from_planes, profile_map
 
@@ -122,7 +123,44 @@ def _profile_of(flat: np.ndarray, pattern: str, image_crop: float, meta: Optiona
                                    lens_model=meta.lens_model if meta else "",
                                    focal_length_mm=float(meta.focal_length_mm or 0) if meta else 0.0,
                                    aperture_f=float(meta.aperture_f or 0) if meta else 0.0)
-    return prof, profile_map(prof, w, h, image_crop, pattern)
+    return prof, (profile_map(prof, w, h, image_crop, pattern) if with_map else None)
+
+
+def _light_slope(flat: np.ndarray, prof, image_crop: float, step: int = 16) -> tuple[float, float]:
+    """The straight slope of the light across a master flat, beyond the lens's smooth profile:
+    (bx, by) = relative change from the middle to the right and the bottom edge."""
+    from .lensfun import vignetting_map
+
+    h, w = flat.shape
+    hh, ww = h // step * step, w // step * step
+    small = flat[:hh, :ww].reshape(hh // step, step, ww // step, step).mean(axis=(1, 3)).astype(np.float64)
+    sh, sw = small.shape
+    pm = vignetting_map(sw, sh, tuple(prof.terms), image_crop, prof.crop_factor).astype(np.float64)
+    ratio = (small / np.maximum(pm, MIN_ILLUMINATION)).ravel()
+    yy, xx = np.mgrid[0:sh, 0:sw]
+    xn = ((xx - (sw - 1) / 2) / max((sw - 1) / 2, 1)).ravel()
+    yn = ((yy - (sh - 1) / 2) / max((sh - 1) / 2, 1)).ravel()
+    design = np.column_stack([np.ones_like(xn), xn, yn])
+    keep = np.isfinite(ratio)
+    coef = np.array([1.0, 0.0, 0.0])
+    for _ in range(6):  # dust and hot spots are left out of the fit
+        coef, *_ = np.linalg.lstsq(design[keep], ratio[keep], rcond=None)
+        res = ratio - design @ coef
+        sigma = 1.4826 * float(np.median(np.abs(res[keep]))) + 1e-6
+        new = np.isfinite(ratio) & (np.abs(res) < 3 * sigma)
+        if np.array_equal(new, keep):
+            break
+        keep = new
+    return float(coef[1] / coef[0]), float(coef[2] / coef[0])
+
+
+def _slope_words(bx: float, by: float) -> str:
+    parts = []
+    if abs(bx) > 0.002:
+        parts.append(f"brighter on the {'right' if bx > 0 else 'left'} ({abs(bx) * 100:.1f}% at the edge)")
+    if abs(by) > 0.002:
+        parts.append(f"brighter at the {'bottom' if by > 0 else 'top'} ({abs(by) * 100:.1f}% at the edge)")
+    return " and ".join(parts)
 
 
 def attach_masters(
@@ -184,26 +222,40 @@ def attach_masters(
         flat, n = _mean(paths, load, offset_of=offset, normalise=True)
         pattern = load(paths[0]).pattern
         label = _flat_label(key)
-        if flat_mode in ("profile", "compare"):
-            prof, pmap = _profile_of(flat, pattern, image_crop, flat_meta.get(paths[0]))
-            profiles[key] = prof  # the map itself is only needed for the comparison below
+        prof, _ = _profile_of(flat, pattern, image_crop, flat_meta.get(paths[0]), with_map=False)
+        profiles[key] = prof
         if flat_mode == "profile":
             corner = prof.corner(image_crop)[0]
             say(f"flats {label}: smooth profile fitted to {n} flat(s) (corners at {corner:.0%} of the middle); "
                 "dust in the flats is ignored")
         else:
+            # A brightness slope straight across the frame comes from the light source (a panel or the
+            # sky brighter on one side), not the lens: take it out, keeping vignetting and dust.
+            bx, by = _light_slope(flat, prof, image_crop)
+            if max(abs(bx), abs(by)) > 0.002:
+                h, w = flat.shape
+                xn = ((np.arange(w, dtype=np.float32) - (w - 1) / 2) / ((w - 1) / 2))[None, :]
+                yn = ((np.arange(h, dtype=np.float32) - (h - 1) / 2) / ((h - 1) / 2))[:, None]
+                flat /= 1 + bx * xn + by * yn
+                say(f"flats {label}: the light on the flats was uneven: " + _slope_words(bx, by)
+                    + "; taken out of the master flat (it is the light, not the lens)")
             np.maximum(flat, MIN_ILLUMINATION, out=flat)
             flats[key] = flat
             say(f"flats {label}: master flat, mean of {n} flat(s) ({how} removed); corrects vignetting and dust")
         if flat_mode == "compare":
-            ratio = flat / np.maximum(pmap, MIN_ILLUMINATION)
-            dev = ratio - 1.0
-            rms = float(np.sqrt(np.mean(dev**2))) * 100
-            dark = float(np.mean(dev < -0.02)) * 100
-            # The deepest spot, judged on a slightly smoothed ratio so single noisy pixels do not count.
             from scipy import ndimage
 
-            sm = ndimage.uniform_filter(ratio, 5)
+            from .vignetting_profile import profile_map
+
+            h, w = flat.shape
+            ratio = flat / np.maximum(profile_map(prof, w, h, image_crop, pattern), MIN_ILLUMINATION)
+            rms = float(np.sqrt(np.mean((ratio - 1.0) ** 2))) * 100
+            # Dust: small dark spots, judged against the ratio's own large-scale level (so a broad
+            # difference from the profile is not counted as dust).
+            size = max(31, min(h, w) // 10)
+            local = ndimage.uniform_filter(ratio, size)
+            sm = ndimage.uniform_filter(ratio, 5) / np.maximum(local, 1e-3)
+            dark = float(np.mean(sm < 0.98)) * 100
             deepest = float(max(0.0, 1.0 - sm.min())) * 100
             path = None
             if out_dir is not None:
@@ -214,9 +266,9 @@ def attach_masters(
                                          "COMMENT": "1.0 = as the smooth profile; dark spots are dust"})
                 out["flat_vs_profile"] = path
             say(f"flats {label}: the master flat differs from the smooth profile by {rms:.2f}% rms; "
-                f"{dark:.2f}% of pixels are more than 2% darker (dust); the deepest spot is {deepest:.0f}% darker"
-                + (f"; saved as {Path(path).name}" if path else ""))
-            del ratio, dev, sm, pmap
+                f"{dark:.2f}% of pixels are in dark spots more than 2% deep (dust); the deepest is {deepest:.0f}% "
+                "darker" + (f"; saved as {Path(path).name}" if path else ""))
+            del ratio, local, sm
             if deepest > 30 or rms > 3:
                 say("  warning: that is a large difference; check the flats (dust moved, uneven light, "
                     "or a different lens setting) before trusting the master flat")

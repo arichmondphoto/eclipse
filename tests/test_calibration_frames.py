@@ -51,7 +51,7 @@ def _mosaic(raw):
                      WHITE, (2.0, 1.0, 1.5))
 
 
-def _project(tmp_path, monkeypatch, sensor=True, flats=True, darks=True, bias=True):
+def _project(tmp_path, monkeypatch, sensor=True, flats=True, darks=True, bias=True, panel_tilt=0.0):
     """A project of three light frames (and calibration frames); returns its path."""
     scene = SyntheticScene(size=SIZE, sun_radius=30.0, seed=2)
     lights = make_frames(["1/250", "1/60", "1/15"], aperture=8.0, iso=200)
@@ -86,7 +86,11 @@ def _project(tmp_path, monkeypatch, sensor=True, flats=True, darks=True, bias=Tr
         return paths
 
     if flats:
-        project.flat_files = calib("flat", 6, "1/100", lambda m: BLACK + pattern + 0.5 * field * (WHITE - BLACK))
+        # panel_tilt: the light source is that much brighter on the right than in the middle
+        xx = np.arange(SIZE, dtype=np.float32)
+        panel = 1 + panel_tilt * (xx - SIZE / 2) / (SIZE / 2)
+        project.flat_files = calib("flat", 6, "1/100",
+                                   lambda m: BLACK + pattern + 0.5 * field * panel[None, :] * (WHITE - BLACK))
     if darks:
         project.dark_files = calib("dark", 4, "1/15", lambda m: BLACK + pattern + glow)
     if bias:
@@ -174,3 +178,23 @@ def test_flats_that_do_not_match_are_reported(tmp_path, monkeypatch):
     _, log = _stack(path, tmp_path, flat_mode="master")
     assert "f/5.6" in log and "f/8" in log  # says why they were not used
     assert "NONE applied" in log  # and that nothing took their place (lensfun is off here)
+
+
+def test_an_uneven_light_source_is_not_copied_into_the_stack(tmp_path, monkeypatch, truth):
+    """Flats from a light panel 3% brighter on one side (simulated at quarter D850 size through the
+    window, Nov 2026): the master flat put that slope into the stack, left edge +2.4%, right -2.8%,
+    and compare called 12.7% of the pixels dust. A slope straight across the frame comes from the
+    light, not the lens: it is taken out of the master flat; vignetting and dust stay."""
+    corona, dust = _zones()
+    yy, xx = np.mgrid[0:SIZE, 0:SIZE]
+    band = (np.abs(yy - 160) < 40) & ((xx < 30) | (xx > SIZE - 30))
+    left, right = band & (xx < 30), band & (xx > SIZE - 30)
+    path = _project(tmp_path, monkeypatch, panel_tilt=0.03)
+    got, log = _stack(path, tmp_path, flat_mode="compare")
+    ratio = got / truth
+    assert abs(float(np.median(ratio[left])) - float(np.median(ratio[right]))) < 0.006, log
+    assert _err(got, truth, corona) < 0.01, log
+    assert abs(float(np.median(got[dust] / truth[dust])) - 1) < 0.02, log  # the dust is still corrected
+    assert "brighter on the right" in log, log  # the slope is reported, not called dust
+    share = float(log.split("% of pixels")[0].split(";")[-1].strip())
+    assert share < 1.0, log
