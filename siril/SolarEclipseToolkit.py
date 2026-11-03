@@ -762,6 +762,11 @@ class StackTab(StepTab):
         self.hot.setChecked(True)
         f.addRow(self.include_rejected)
         f.addRow(self.hot)
+        self.flat_mode = QComboBox()
+        self.flat_mode.addItem("Master flat", "master")
+        self.flat_mode.addItem("Smooth profile from the flats", "profile")
+        self.flat_mode.addItem("Master flat + compare with profile", "compare")
+        f.addRow("Flat frames:", self.flat_mode)
         self.settings_layout.addWidget(opts)
 
         _tip(self.full, "The output is the same size as the RAW files, so it lines up with your originals in "
@@ -773,6 +778,16 @@ class StackTab(StepTab):
              "in one place. Default: the alignment reference. A longer exposure shows more earthshine.", f)
         _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken or "
              "doubled and are left out. Tick to stack them anyway.")
+        _tip(self.flat_mode, "How the flat frames chosen on the Frames tab are used (only flats taken at the same "
+             "aperture and focal length as the light frames are used; the log says which correction each frame "
+             "got). Master flat: divide by the average of your flats, pixel by pixel, which corrects vignetting "
+             "AND dust shadows; best when the flats were taken the same day without changing or cleaning "
+             "anything. Smooth profile: fit only the lens's smooth vignetting to the flats and ignore dust; use it "
+             "if the dust may have moved since (it can then add dark rings instead of removing them). Master flat "
+             "+ compare: the master flat, and the log reports how much it differs from the smooth profile; "
+             "a FITS image of the difference is saved next to the stack (dark spots in it are dust). Darks and "
+             "bias frames from the Frames tab are always used when they match. Changing this needs a re-stack.",
+             f)
         _tip(self.hot, "Replace single hot or dead pixels with their neighbours' median. Real stars and "
              "prominences, which cover several pixels, are left alone.")
         run = QPushButton("Stack frames")
@@ -805,6 +820,9 @@ class StackTab(StepTab):
         if st.get("radii"):
             self.square.setChecked(True)
             self.radii.setValue(float(st["radii"]))
+        i = self.flat_mode.findData(st.get("flat_mode", "master"))
+        if i >= 0:
+            self.flat_mode.setCurrentIndex(i)
         if st.get("moon_frame") is not None:
             i = self.moon_frame.findData(st["moon_frame"])
             if i >= 0:
@@ -821,7 +839,8 @@ class StackTab(StepTab):
     def run(self) -> None:
         opts = W.StackOptions(radii=self.radii.value() if self.square.isChecked() else None,
                               moon_frame=self.moon_frame.currentData(),
-                              include_rejected=self.include_rejected.isChecked(), hot_pixels=self.hot.isChecked())
+                              include_rejected=self.include_rejected.isChecked(), hot_pixels=self.hot.isChecked(),
+                              flat_mode=self.flat_mode.currentData())
         self.start("Stacking frames", lambda p, say, cancel: W.stack(p, opts, say, cancel), self._done)
 
     def _done(self, out) -> None:

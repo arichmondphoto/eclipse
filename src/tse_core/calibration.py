@@ -62,6 +62,10 @@ class FrameCalibration:
     synthetic_bias_adu: Optional[float] = None
     cosmetic: str = "find hot pixels"  # or "from dark"
     notes: list[str] = field(default_factory=list)
+    # Set by masters.attach_masters for Stack and the earthshine stack (raw ADU, frame-sized):
+    offset_map: Optional[np.ndarray] = field(default=None, repr=False, compare=False)  # dark or bias
+    offset_label: str = ""
+    flat_map: Optional[np.ndarray] = field(default=None, repr=False, compare=False)  # 1.0 in the middle
 
 
 @dataclass

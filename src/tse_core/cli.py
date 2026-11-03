@@ -122,6 +122,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--include-rejected", action="store_true",
                    help="also stack frames the Sun-centre fit flagged as off the Moon's track")
     p.add_argument("--no-hot-pixels", action="store_true", help="skip the hot-pixel correction")
+    p.add_argument("--flat-mode", choices=["master", "profile", "compare"], default="master",
+                   help="how the project's flat frames are used: master = divide by the master flat (vignetting "
+                        "and dust; default), profile = a smooth profile fitted to them (vignetting only), "
+                        "compare = master flat and report how it differs from the profile")
     p.add_argument("--profile-dir", help="folder of saved own-flats profiles")
     p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
@@ -611,7 +615,8 @@ def cmd_stack(args) -> int:
     radii = args.radii if args.radii is not None else (5.0 if args.square else None)
     opts = StackOptions(align=args.align, output=args.output, name=args.name, radii=radii,
                         moon_frame=args.moon_frame, include_rejected=args.include_rejected,
-                        hot_pixels=not args.no_hot_pixels, profile_dir=args.profile_dir, lensfun_db=args.lensfun_db)
+                        hot_pixels=not args.no_hot_pixels, profile_dir=args.profile_dir, lensfun_db=args.lensfun_db,
+                        flat_mode=args.flat_mode)
     out, code = _run(stack, args.project, opts, quiet=args.quiet)
     if code:
         return code

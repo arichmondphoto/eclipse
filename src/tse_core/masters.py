@@ -1,0 +1,281 @@
+"""Master bias, dark and flat frames for Stack and the earthshine stack.
+
+The calibration plan (``calibration.plan_calibration``) decides which bias, dark and flat
+group each light frame uses; this module reads those frames, averages them into masters and
+attaches them to each frame's :class:`~tse_core.calibration.FrameCalibration`, where
+``rawio.region`` applies them to the sensor data:
+
+* **Offset** (subtracted in raw ADU): the matching master dark (it contains the bias), else the
+  master bias for the ISO, else the black level from the RAW file.
+* **Flat**, one of three ways (``FLAT_MODES``):
+
+  - ``master``: divide by the master flat, pixel by pixel. Corrects vignetting, dust shadows
+    and pixel-to-pixel response, provided the dust has not moved since the flats were taken.
+  - ``profile``: fit a smooth vignetting profile to the flats and divide by that. Corrects
+    vignetting only; dust in the flats is ignored.
+  - ``compare``: as ``master``, and also report (and save as a FITS image) how far the master
+    flat differs from the smooth profile, so dust or a bad flat can be seen.
+
+Each master is the mean of its frames (bias, darks and flats here are fixed patterns, so a mean
+gives the lowest noise). Every flat has its own offset removed and is scaled to 1.0 in the
+middle of the frame, per CFA position, before averaging, so flats of slightly different
+brightness combine correctly and the colour balance of the lights is unchanged.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Optional
+
+import numpy as np
+
+from .calibration import CalibrationFrames, CalibrationPlan, describe_dark_key
+from .frames import FrameMeta
+from .lensfun import MIN_ILLUMINATION
+
+FLAT_MODES = ("master", "profile", "compare")
+FLAT_MODE_HELP = {
+    "master": "divide by the master flat (vignetting, dust and pixel response)",
+    "profile": "divide by a smooth profile fitted to the flats (vignetting only; dust ignored)",
+    "compare": "master flat, and report how it differs from the smooth profile",
+}
+
+Say = Callable[[str], None]
+
+
+@dataclass
+class FlatReport:
+    """How the master flat of one group compares with its smooth profile."""
+
+    rms_pct: float  # rms of (master / profile - 1), in %
+    dark_pct: float  # share of pixels more than 2% darker than the profile (dust shadows)
+    deepest_pct: float  # how much darker the deepest spot is, in %
+    path: Optional[str] = None  # FITS image of master / profile
+
+
+def _cfa_positions():
+    return ((0, 0), (0, 1), (1, 0), (1, 1))
+
+
+def _centre_norm(plane: np.ndarray) -> float:
+    """Level in the middle of a CFA sub-plane (median within 10% of the half-diagonal)."""
+    h, w = plane.shape
+    yy, xx = np.ogrid[0:h, 0:w]
+    near = np.hypot(xx - (w - 1) / 2, yy - (h - 1) / 2) < 0.1 * math.hypot(w, h) / 2
+    vals = plane[near] if near.sum() >= 4 else plane
+    return float(np.median(vals))
+
+
+def _mean(paths: list[str], load, offset_of=None, normalise=False) -> tuple[np.ndarray, int]:
+    """Mean of the frames' raw data (minus each one's offset; scaled to 1 in the middle)."""
+    total, shape, n = None, None, 0
+    for p in paths:
+        mos = load(p)
+        data = mos.bayer.astype(np.float64)
+        if shape is None:
+            shape = data.shape
+        elif data.shape != shape:
+            raise ValueError(f"{Path(p).name} is {data.shape[1]} x {data.shape[0]} px, the others "
+                             f"{shape[1]} x {shape[0]}; calibration frames must all be the same size")
+        if offset_of is not None:
+            data = data - offset_of(mos)
+        if normalise:
+            for dy, dx in _cfa_positions():
+                c = _centre_norm(data[dy::2, dx::2])
+                if not c > 0:
+                    raise ValueError(f"{Path(p).name} is black in the middle; it cannot be used as a flat")
+                data[dy::2, dx::2] /= c
+        total = data if total is None else total + data
+        n += 1
+    return (total / max(n, 1)).astype(np.float32), n
+
+
+def _black_array(mos) -> np.ndarray:
+    """The RAW file's black level per CFA position, as an array the size of the frame."""
+    out = np.empty(mos.bayer.shape, np.float32)
+    for i, (dy, dx) in enumerate(_cfa_positions()):
+        out[dy::2, dx::2] = mos.black.get(mos.pattern[i], 0.0)
+    return out
+
+
+def _flat_label(key: str) -> str:
+    # "f8.0_fl400" -> "f/8, 400 mm"
+    try:
+        f, fl = key[1:].split("_fl")
+        return f"f/{float(f):g}, {fl} mm"
+    except ValueError:
+        return key
+
+
+def _profile_of(flat: np.ndarray, pattern: str, image_crop: float, meta: Optional[FrameMeta] = None):
+    """A smooth profile fitted to a master flat, and its map on the sensor."""
+    from .vignetting_profile import fit_profile_from_planes, profile_map
+
+    h, w = flat.shape
+    planes = {}
+    for i, (dy, dx) in enumerate(_cfa_positions()):
+        name = pattern[i] if pattern[i] not in planes else pattern[i] + "2"
+        planes[name] = (flat[dy::2, dx::2], 2.0)
+    prof = fit_profile_from_planes([planes], w, h, crop_factor=image_crop,
+                                   lens_model=meta.lens_model if meta else "",
+                                   focal_length_mm=float(meta.focal_length_mm or 0) if meta else 0.0,
+                                   aperture_f=float(meta.aperture_f or 0) if meta else 0.0)
+    return prof, profile_map(prof, w, h, image_crop, pattern)
+
+
+def attach_masters(
+    plan: CalibrationPlan,
+    calib: CalibrationFrames,
+    load: Callable,
+    lights: list[FrameMeta],
+    flat_mode: str = "master",
+    image_crop: float = 1.0,
+    say: Optional[Say] = None,
+    out_dir: Optional[str | Path] = None,
+    name: str = "stack",
+) -> dict:
+    """Build the masters the plan calls for and attach them to its frames.
+
+    Returns what was done, for the project file: ``{"flat_mode", "flat_vs_profile"?}``.
+    """
+    say = say or (lambda _m: None)
+    if flat_mode not in FLAT_MODES:
+        raise ValueError(f"flat mode must be one of {', '.join(FLAT_MODES)}")
+    from .calibration import _dark_key, _flat_key, _iso_key
+
+    by_index = {fc.frame_index: fc for fc in plan.frames}
+    meta_by_index = {f.index: f for f in lights}
+    used_iso = {_iso_key(meta_by_index[fc.frame_index]) for fc in plan.frames
+                if fc.bias == "frames" and not fc.dark_group and fc.frame_index in meta_by_index}
+    out: dict = {"flat_mode": flat_mode}
+
+    # Bias: needed for lights without darks, and for the flats.
+    bias: dict[str, np.ndarray] = {}
+    flat_isos = {_iso_key(f) for f in calib.flats}
+    for key, paths in plan.bias_groups.items():
+        if key in used_iso or key in flat_isos:
+            bias[key], n = _mean(paths, load)
+            say(f"master bias {key.replace('iso', 'ISO ')}: mean of {n} bias frame(s)")
+
+    # Darks.
+    darks: dict[str, np.ndarray] = {}
+    for key in sorted({fc.dark_group for fc in plan.frames if fc.dark_group}):
+        darks[key], n = _mean(plan.dark_groups[key], load)
+        say(f"master dark {describe_dark_key(key)}: mean of {n} dark frame(s)")
+
+    # Flats: each one's own offset (its ISO's master bias, else its black level) removed.
+    flat_meta = {f.path: f for f in calib.flats}
+
+    flats: dict[str, np.ndarray] = {}
+    profiles: dict[str, tuple] = {}
+    for key in sorted({fc.flat_group for fc in plan.frames if fc.flat_group}):
+        paths = plan.flat_groups[key]
+        isos = {_iso_key(flat_meta[p]) for p in paths if p in flat_meta}
+        biased = [k for k in isos if k in bias]
+        if biased and len(isos) == 1:
+            b = bias[biased[0]]
+            offset = lambda mos, b=b: b  # noqa: E731
+            how = "master bias"
+        else:
+            offset = _black_array
+            how = "black level"
+        flat, n = _mean(paths, load, offset_of=offset, normalise=True)
+        pattern = load(paths[0]).pattern
+        label = _flat_label(key)
+        if flat_mode in ("profile", "compare"):
+            prof, pmap = _profile_of(flat, pattern, image_crop, flat_meta.get(paths[0]))
+            profiles[key] = prof  # the map itself is only needed for the comparison below
+        if flat_mode == "profile":
+            corner = prof.corner(image_crop)[0]
+            say(f"flats {label}: smooth profile fitted to {n} flat(s) (corners at {corner:.0%} of the middle); "
+                "dust in the flats is ignored")
+        else:
+            np.maximum(flat, MIN_ILLUMINATION, out=flat)
+            flats[key] = flat
+            say(f"flats {label}: master flat, mean of {n} flat(s) ({how} removed); corrects vignetting and dust")
+        if flat_mode == "compare":
+            ratio = flat / np.maximum(pmap, MIN_ILLUMINATION)
+            dev = ratio - 1.0
+            rms = float(np.sqrt(np.mean(dev**2))) * 100
+            dark = float(np.mean(dev < -0.02)) * 100
+            # The deepest spot, judged on a slightly smoothed ratio so single noisy pixels do not count.
+            from scipy import ndimage
+
+            sm = ndimage.uniform_filter(ratio, 5)
+            deepest = float(max(0.0, 1.0 - sm.min())) * 100
+            path = None
+            if out_dir is not None:
+                from .fits import write_fits
+
+                path = str(Path(out_dir) / f"{name}_flat_vs_profile_{key}.fit")
+                write_fits(path, ratio, {"IMAGETYP": "Flat / smooth profile",
+                                         "COMMENT": "1.0 = as the smooth profile; dark spots are dust"})
+                out["flat_vs_profile"] = path
+            say(f"flats {label}: the master flat differs from the smooth profile by {rms:.2f}% rms; "
+                f"{dark:.2f}% of pixels are more than 2% darker (dust); the deepest spot is {deepest:.0f}% darker"
+                + (f"; saved as {Path(path).name}" if path else ""))
+            del ratio, dev, sm, pmap
+            if deepest > 30 or rms > 3:
+                say("  warning: that is a large difference; check the flats (dust moved, uneven light, "
+                    "or a different lens setting) before trusting the master flat")
+
+    # Attach.
+    for fc in plan.frames:
+        f = meta_by_index.get(fc.frame_index)
+        if fc.dark_group and fc.dark_group in darks:
+            fc.offset_map = darks[fc.dark_group]
+            fc.offset_label = f"master dark {describe_dark_key(fc.dark_group)}"
+        elif fc.bias == "frames" and f is not None and _iso_key(f) in bias:
+            fc.offset_map = bias[_iso_key(f)]
+            fc.offset_label = "master bias"
+        if fc.flat_group:
+            if fc.flat_group in flats:
+                fc.flat_map = flats[fc.flat_group]
+                fc.lens_label = f"master flat ({_flat_label(fc.flat_group)})"
+            else:
+                prof = profiles[fc.flat_group]
+                fc.vignetting = "profile"
+                fc.lens_label = f"smooth profile from flats ({_flat_label(fc.flat_group)})"
+                fc.lens_terms = prof.terms
+                fc.channel_terms = dict(prof.channel_terms) or None
+                fc.profile_crop = image_crop
+    return out
+
+
+def describe_frames(plan: CalibrationPlan) -> list[str]:
+    """Log lines: which correction the frames got."""
+    from collections import Counter
+
+    vign = Counter()
+    offs = Counter()
+    for fc in plan.frames:
+        if fc.vignetting == "flat" and fc.flat_map is not None:
+            vign[fc.lens_label] += 1
+        elif fc.vignetting == "profile":
+            label = fc.lens_label
+            vign[label if label.startswith("smooth profile") else f"saved own-flats profile {label}"] += 1
+        elif fc.vignetting == "lensfun":
+            vign[f"lensfun profile {fc.lens_label}"] += 1
+        else:
+            vign["NO vignetting correction"] += 1
+        offs[fc.offset_label or "black level from the RAW file"] += 1
+    lines = ["vignetting: " + "; ".join(f"{n} frame(s) by {k}" for k, n in vign.items()),
+             "dark/bias: " + "; ".join(f"{n} frame(s) by {k}" for k, n in offs.items())]
+    return lines
+
+
+def flat_mismatch(lights: list[FrameMeta], calib: CalibrationFrames) -> Optional[str]:
+    """Why flats were given but no light frame can use them, or None."""
+    from .calibration import _flat_key
+
+    if not calib.flats:
+        return None
+    fk = {_flat_key(f) for f in calib.flats}
+    lk = {_flat_key(f) for f in lights}
+    if fk & lk:
+        return None
+    return (f"your flats ({', '.join(sorted(_flat_label(k) for k in fk if k))}) do not match the light frames "
+            f"({', '.join(sorted(_flat_label(k) for k in lk if k))}): flats must be taken at the same aperture "
+            "and focal length; they were not used")

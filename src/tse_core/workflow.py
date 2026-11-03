@@ -94,14 +94,59 @@ def ensure_elements(day: str, say: Say) -> None:
     elements_for(day)
 
 
-def _plan(project: EventProject, lights, lensfun_db, profile_dir):
+def _plan(project: EventProject, lights, lensfun_db, profile_dir, calib=None):
     from .calibration import plan_calibration
 
     db = _db(lensfun_db)
-    plan = plan_calibration(lights, db, None, lens_name=project.lens_profile or None,
+    plan = plan_calibration(lights, db, calib, lens_name=project.lens_profile or None,
                             use_lensfun=project.use_lensfun, profiles=load_profile_library(profile_dir))
     cam = db.find_camera(lights[0].camera_make, lights[0].camera_model) if lights and not db.empty else None
     return plan, (cam.crop_factor if cam else 1.0)
+
+
+def _calibration_frames(project_path, project: EventProject, say):
+    """The bias, dark and flat frames chosen on the Frames tab (or with --flats etc.), read."""
+    from . import metadata
+    from .calibration import CalibrationFrames
+
+    groups = {}
+    for kind, files in (("bias", project.bias_files), ("darks", project.dark_files), ("flats", project.flat_files)):
+        found = [resolve(project_path, f) for f in files]
+        missing = [Path(f).name for f, g in zip(files, found) if not g]
+        if missing:
+            say(f"warning: {len(missing)} {kind} file(s) not found (for example {missing[0]}); "
+                f"choose the {kind} folder again on the Frames tab")
+        found = [g for g in found if g]
+        groups[kind] = metadata.read_frames(found) if found else []
+    return CalibrationFrames(**groups)
+
+
+def _calibrated_plan(project_path, project: EventProject, lights, lensfun_db, profile_dir, flat_mode, say,
+                     out_dir=None, name="stack"):
+    """The calibration plan for Stack and the earthshine stack, with the master frames attached.
+
+    ``flat_mode`` None means the calibration frames are not used (a stack made before they were),
+    so that the earthshine stack stays in the same units as that HDR stack.
+    """
+    from .masters import attach_masters, describe_frames, flat_mismatch
+    from . import rawio
+
+    if flat_mode is None:
+        plan, crop = _plan(project, lights, lensfun_db, profile_dir)
+        info = {}
+    else:
+        calib = _calibration_frames(project_path, project, say)
+        plan, crop = _plan(project, lights, lensfun_db, profile_dir, calib)
+        why = flat_mismatch(lights, calib)
+        if why:
+            say("warning: " + why)
+        info = attach_masters(plan, calib, lambda p: rawio.read_mosaic(p), lights, flat_mode, crop, say,
+                              out_dir=out_dir, name=name)
+    for w in plan.warnings:
+        say("warning: " + w)
+    for line in describe_frames(plan):
+        say(line)
+    return plan, crop, info
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +242,7 @@ class StackOptions:
     hot_pixels: bool = True
     profile_dir: Optional[str] = None
     lensfun_db: Optional[str] = None
+    flat_mode: str = "master"  # how flat frames are used: master | profile | compare (see masters.FLAT_MODES)
 
 
 def _frame_infos(project: EventProject, alignment: dict, include_rejected: bool):
@@ -253,11 +299,15 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
         raise WorkflowError("Nothing to stack: no aligned light frames.")
     lights = [frames[f.index] for f in infos]
     _locate_frames(path, lights)
-    plan, crop_factor = _plan(project, lights, opts.lensfun_db, opts.profile_dir)
-    calibs = {fc.frame_index: fc for fc in plan.frames}
-    params = StackParams(crop_radii=opts.radii, moon_frame=opts.moon_frame, hot_pixels=opts.hot_pixels)
     out_dir = Path(opts.output) if opts.output else path.parent
     name = opts.name or path.stem
+    try:
+        plan, crop_factor, calib_info = _calibrated_plan(path, project, lights, opts.lensfun_db, opts.profile_dir,
+                                                         opts.flat_mode, say, out_dir=out_dir, name=name)
+    except ValueError as exc:
+        raise WorkflowError(str(exc)) from exc
+    calibs = {fc.frame_index: fc for fc in plan.frames}
+    params = StackParams(crop_radii=opts.radii, moon_frame=opts.moon_frame, hot_pixels=opts.hot_pixels)
     try:
         result, _hdr, _w = stack_frames(infos, lambda f: read_mosaic(frames[f.index].path), calibs,
                                         tuple(alignment["image_size"]), ref, alignment.get("sun"), params,
@@ -265,7 +315,7 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
     except (RuntimeError, ValueError) as exc:
         raise WorkflowError(str(exc)) from exc
     project.parameters["stack"] = {"align": str(align_path), "radii": opts.radii, "moon_frame": result.moon_frame,
-                                   **result.outputs}
+                                   **calib_info, **result.outputs}
     project.save(path)
     return result, skipped
 
@@ -479,7 +529,15 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
         raise WorkflowError("No frames to use for earthshine.")
     lights = [frames[f.index] for f in use]
     _locate_frames(path, lights)
-    plan, crop_factor = _plan(project, lights, lensfun_db, profile_dir)
+    # Calibrate exactly as the HDR stack was, so the two stay in the same units.
+    flat_mode = st.get("flat_mode")
+    if flat_mode is None and (project.flat_files or project.dark_files or project.bias_files):
+        say("note: the HDR stack was made without your calibration frames; run Stack again to use them "
+            "(the earthshine stack follows the HDR stack)")
+    try:
+        plan, crop_factor, _ = _calibrated_plan(path, project, lights, lensfun_db, profile_dir, flat_mode, say)
+    except ValueError as exc:
+        raise WorkflowError(str(exc)) from exc
     calibs = {fc.frame_index: fc for fc in plan.frames}
     out_dir = Path(output) if output else path.parent
     try:

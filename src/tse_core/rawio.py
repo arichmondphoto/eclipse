@@ -150,6 +150,16 @@ class FullFrame:
     wb: tuple[float, float, float]
 
 
+def _part(master: Optional[np.ndarray], mosaic: RawMosaic, what: str, x0: int, y0: int, w: int, h: int):
+    """The part of a master calibration frame under a region of the sensor."""
+    if master is None:
+        return None
+    if master.shape != mosaic.shape:
+        raise ValueError(f"the master {what} is {master.shape[1]} x {master.shape[0]} px but the light frames are "
+                         f"{mosaic.shape[1]} x {mosaic.shape[0]}; use calibration frames from the same camera")
+    return master[y0 : y0 + h, x0 : x0 + w]
+
+
 def read_mosaic(path: str) -> RawMosaic:
     try:
         import rawpy
@@ -196,10 +206,16 @@ def region(mosaic: RawMosaic, x0: int, y0: int, w: int, h: int, calib: Optional[
     masks = channel_masks(pattern, (h, w))
     sat_cfa = raw >= SATURATION_FRACTION * mosaic.white
     cfa = np.empty((h, w), np.float32)
+    offset = _part(calib.offset_map, mosaic, "dark or bias", x0, y0, w, h) if calib is not None else None
     for c in "RGB":
+        # 1.0 stays the white level above the black level, whatever offset is subtracted.
         scale = 1.0 / max(mosaic.white - mosaic.black[c], 1.0)
-        cfa[masks[c]] = (raw[masks[c]] - mosaic.black[c]) * scale
-    if calib is not None and calib.lens_terms is not None and calib.vignetting in ("lensfun", "profile"):
+        sub = offset[masks[c]] if offset is not None else mosaic.black[c]
+        cfa[masks[c]] = (raw[masks[c]] - sub) * scale
+    flat = _part(calib.flat_map, mosaic, "flat", x0, y0, w, h) if calib is not None else None
+    if flat is not None:
+        cfa /= flat
+    elif calib is not None and calib.lens_terms is not None and calib.vignetting in ("lensfun", "profile"):
         for c in "RGB":
             terms = (calib.channel_terms or {}).get(c, calib.lens_terms)
             vmap = vignetting_map(W, H, tuple(terms), image_crop, calib.profile_crop, box=(x0, y0, w, h))

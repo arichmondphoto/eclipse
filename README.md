@@ -105,7 +105,7 @@ The window has one tab per step, and each step saves into the project file:
 | --- | --- | --- |
 | 1 Frames | Read the RAW folder, check the frames and brackets, choose the lens profile, add calibration folders | Frame table (right-click to exclude a frame), bracket and calibration report |
 | 2 Align | Enter the site (latitude, longitude, elevation), the camera time zone and clock error if known; choose the rotation model | Per-frame shift, rotation and peak strength; the Sun centre report |
-| 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep | The stacked preview and each frame's measured brightness |
+| 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
 | 4 Enhance | Layers to write; each layer's blend strength and Soft Light or Overlay; flatten, saturation, white balance, sky removal; FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
@@ -264,9 +264,11 @@ totality stack eclipse2024.json            # uses the alignment saved by 'totali
 totality stack eclipse2024.json --square   # quicker: a square 10 solar radii wide
 ```
 
-Every frame is read again at full resolution: black level subtracted per
-channel (negative values kept), vignetting divided out per colour, isolated
-hot pixels replaced, demosaiced with the linear Malvar-He-Cutler method in
+Every frame is read again at full resolution and calibrated with the
+frames chosen on the Frames tab (see [Calibration rules](#calibration-rules)):
+the matching master dark, else the master bias, else the RAW file's black
+level subtracted (negative values kept); the flat or vignetting profile
+divided out; isolated hot pixels replaced, demosaiced with the linear Malvar-He-Cutler method in
 32-bit floating point, and resampled onto the reference frame with the
 alignment transform (bicubic).
 
@@ -653,8 +655,26 @@ sRGB. In the GUI the Save dialog's file type chooses; on the command line
 
 * **Vignetting**, first match wins and only one is ever applied:
   1. a profile you name with `--profile`;
-  2. your own flats (`--flats`), used directly when they match the frame's
-     aperture and focal length;
+  2. your own flats (`--flats`, or the flats folder on the Frames tab), when
+     they match the frame's aperture and focal length, used in one of three
+     ways (**Flat frames** on the Stack tab, `totality stack --flat-mode`):
+     - **Master flat** (`master`, the default): the flats are averaged (each
+       with its own bias or black level removed and scaled to 1.0 in the
+       middle, per CFA position) and every frame is divided by that, pixel by
+       pixel. This corrects vignetting *and* dust shadows, provided nothing
+       was changed or cleaned between the eclipse and the flats.
+     - **Smooth profile from the flats** (`profile`): a smooth, radially
+       symmetric profile is fitted to the master flat (as `totality
+       flat-profile` does) and used instead. Vignetting only; dust in the
+       flats is ignored, so dust that moved cannot add dark rings.
+     - **Master flat + compare** (`compare`): the master flat, and the log
+       reports how far it differs from the smooth profile (rms, share of
+       pixels more than 2% darker, the deepest spot), with a warning when
+       the difference is large. The ratio is saved as
+       `<name>_flat_vs_profile_<settings>.fit` next to the stack: 1.0 where
+       they agree, dark spots where there is dust.
+
+     Flats that match no light frame are reported in the log and not used.
   3. a saved own-flats profile for the same lens, within 5% focal length
      and 1/3 stop;
   4. the lensfun profile;
@@ -662,10 +682,19 @@ sRGB. In the GUI the Save dialog's file type chooses; on the command line
 
   Profiles of either kind can be written as a synthetic FITS master flat
   for Siril. The eclipse is assumed focused at infinity.
-* **Darks:** matched by exposure time and ISO; without a match, hot pixels
-  are found from the light frames.
-* **Bias:** matched by ISO; without bias frames, each file's black level is
-  used as a synthetic bias.
+* **Darks:** matched by exposure time and ISO and averaged into a master
+  dark, which is subtracted (it includes the bias); without a match, the
+  bias is used and hot pixels are found from the light frames.
+* **Bias:** matched by ISO and averaged into a master bias; without bias
+  frames, each file's black level is used as a synthetic bias.
+
+Stack logs which correction every frame got ("vignetting: 48 frame(s) by
+master flat (f/8, 400 mm)", "dark/bias: ..."). The earthshine stack is
+calibrated exactly as the HDR stack was, so the two stay in the same
+units; if the HDR stack was made before Stack used the calibration frames,
+the earthshine log says to run Stack again. The Align step uses the lens
+profile only: vignetting and dust do not affect the alignment, which
+works on fine structure.
 
 ## Own-flats profiles
 
@@ -831,6 +860,7 @@ merge the aligned frames into one linear HDR image.
 | `--moon-frame` | frame number whose Moon (and earthshine) is kept (default: the alignment reference) |
 | `--include-rejected` | also stack frames the Sun-centre fit flagged as off the Moon's track |
 | `--no-hot-pixels` | skip the hot-pixel correction |
+| `--flat-mode` | how the project's flat frames are used: master = divide by the master flat (vignetting and dust; default), profile = a smooth profile fitted to them (vignetting only), compare = master flat and report how it differs from the profile |
 | `--profile-dir` | folder of saved own-flats profiles |
 | `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
 | `--quiet` | print only the result, not each step |
