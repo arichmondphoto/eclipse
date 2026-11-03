@@ -134,4 +134,29 @@ assert pt.final_path.endswith("with_proms.jpg") and Path(pt.final_path).exists()
 os.environ["STUB_SAVE"] = str(T / "out" / "pngs.png")
 et.run()
 assert et.outputs["blend"].endswith("pngs_blend.png")
+# Opening a project folder with Browse... on the Frames tab: every tab shows that project (the Align
+# tab's site came up blank because only the Frames tab was told; seen by Andy, Nov 2026).
+root = T / "Folder project"
+(root / "lights").mkdir(parents=True)
+fp = EventProject(name="Folder project")
+fl = make_frames(["1/250", "1/60"])
+for f in fl:
+    f.path = str(root / "lights" / f.file_name)
+    Path(f.path).write_bytes(b"")
+fp.set_inventory(Inventory(fl))
+fp.latitude, fp.longitude, fp.elevation_m, fp.camera_utc_offset_h = 36.942202, -90.334287, 110.0, -5.0
+fp.raw_folder = str(root / "lights")
+(root / "Folder project_align.json").write_text(json.dumps({**align, "frames": align["frames"][:2]}))
+fp.parameters["align"] = {"file": str(root / "Folder project_align.json"), "rotation": "per-frame"}
+fp.save(root / "Folder project.json")
+win4 = G.MainWindow(G.SirilLink())
+os.environ["STUB_DIR"] = str(root)
+win4.frames_tab._pick_folder(win4.frames_tab.folder)
+at = win4.align_tab
+print("Browse... on a project folder: site", at.lat.text(), at.lon.text(), at.elev.text(), at.tz.text(),
+      "| alignment rows", at.table.rowCount())
+assert (at.lat.text(), at.lon.text(), at.elev.text(), at.tz.text()) == ("36.942202", "-90.334287", "110", "-5")
+assert at.table.rowCount() == 2 and at.rotation.currentText() == "per-frame"
+os.environ.pop("STUB_DIR")
+
 print("GUI SMOKE OK")

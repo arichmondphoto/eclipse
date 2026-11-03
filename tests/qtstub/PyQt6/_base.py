@@ -257,7 +257,7 @@ class QFileDialog(Dummy):
 
     @staticmethod
     def getExistingDirectory(*a, **k):
-        return ""
+        return os.environ.get("STUB_DIR", "")
 
 
 class QImage(Dummy):

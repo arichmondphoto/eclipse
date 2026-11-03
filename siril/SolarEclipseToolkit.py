@@ -142,6 +142,7 @@ class SirilLink:
 class FramesTab(QWidget):
     def __init__(self, link: SirilLink, parent=None) -> None:
         super().__init__(parent)
+        self.on_project_opened = None  # set by the main window
         self.link = link
         self.inventory = Inventory()
         self.project = EventProject()
@@ -243,7 +244,8 @@ class FramesTab(QWidget):
         if not folder:
             return
         if edit is self.folder and ProjectFolder.scan(folder).is_project_folder:
-            self.use_project_folder(folder)
+            if self.use_project_folder(folder) and self.on_project_opened is not None:
+                self.on_project_opened()  # every other tab shows this project too
             return
         edit.setText(folder)
 
@@ -1995,6 +1997,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 820)
         self.tabs = QTabWidget()
         self.frames_tab = FramesTab(link)
+        self.frames_tab.on_project_opened = self._project_opened
         self.align_tab = AlignTab(self)
         self.stack_tab = StackTab(self)
         self.enhance_tab = EnhanceTab(self)
@@ -2046,6 +2049,10 @@ class MainWindow(QMainWindow):
                                     "light frames on the Frames tab.")
             return
         self.tabs.setCurrentIndex(0)
+        self._project_opened()
+
+    def _project_opened(self) -> None:
+        """A project was opened on the Frames tab: show it on every tab."""
         self.enhance_tab.forget_preview()
         self.reload_project()
 
@@ -2116,7 +2123,9 @@ def _mono() -> QFont:
 
 
 def _txt(x) -> str:
-    return "" if x is None else f"{x:g}" if isinstance(x, float) else str(x)
+    # 15 significant digits: shows what was typed (36.942202, not 36.9422), so running Align again does
+    # not save a rounded copy back into the project.
+    return "" if x is None else f"{x:.15g}" if isinstance(x, float) else str(x)
 
 
 def _float(edit: QLineEdit):
