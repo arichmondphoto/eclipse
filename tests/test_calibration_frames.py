@@ -141,7 +141,12 @@ def test_master_flat_darks_and_bias_are_used_by_stack(tmp_path, monkeypatch, tru
 
 def test_smooth_profile_from_the_flats_leaves_dust(tmp_path, monkeypatch, truth):
     corona, dust = _zones()
-    got, log = _stack(_project(tmp_path, monkeypatch), tmp_path, flat_mode="profile")
+    path = _project(tmp_path, monkeypatch)
+    got, log = _stack(path, tmp_path, flat_mode="profile")
+    # The log and a small file say what was divided out: the simulated corners are at 1 - 0.45 = 55%.
+    assert "corners are 5" in log or "corners are 6" in log, log
+    small, _ = read_fits(EventProject.load(path).parameters["stack"]["vignetting"])
+    assert small.shape == (SIZE // 8, SIZE // 8) and abs(float(small[0, 0]) - 0.55) < 0.06
     assert _err(got, truth, corona) < 0.015, log  # vignetting corrected by the fitted profile
     assert float(np.median(got[dust] / truth[dust])) < 0.88, log  # the dust shadow stays (it is 20% deep)
     assert "smooth profile" in log
@@ -168,3 +173,4 @@ def test_flats_that_do_not_match_are_reported(tmp_path, monkeypatch):
         m.aperture_f = 5.6  # flats shot at another aperture
     _, log = _stack(path, tmp_path, flat_mode="master")
     assert "f/5.6" in log and "f/8" in log  # says why they were not used
+    assert "NONE applied" in log  # and that nothing took their place (lensfun is off here)

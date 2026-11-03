@@ -203,6 +203,14 @@ win4.ensure_saved()
 saved = EventProject.load(root / "Folder project.json")
 assert saved.latitude == 36.942202 and saved.second_contact == "2024-04-08T13:56:37"
 
+# A flats folder chosen with "..." reaches the project even without Apply (Stack reads it from there).
+(root / "myflats").mkdir()
+for k in range(3):
+    (root / "myflats" / f"FLAT_{k}.NEF").write_bytes(b"")
+ft4.flat_dir.setText(str(root / "myflats"))
+win4.ensure_saved()
+assert len(EventProject.load(root / "Folder project.json").flat_files) == 3
+
 # An older project: contacts typed in true time plus a clock offset move into the camera clock.
 old = EventProject(name="old", second_contact="2024-04-08T13:56:37", third_contact="2024-04-08T14:00:48",
                    camera_clock_offset_s=3600.0)

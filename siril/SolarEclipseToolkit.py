@@ -454,6 +454,17 @@ class FramesTab(QWidget):
         p.camera_utc_offset_h, p.clock_error_s = tz, ce
         return True
 
+    def _store_calibration_folders(self, force: bool = False) -> None:
+        """The bias, darks and flats folders shown into the project, where Stack reads them. Only a
+        folder that changed is read again, so a project whose folders moved keeps its file list."""
+        for edit, attr in ((self.bias_dir, "bias_files"), (self.dark_dir, "dark_files"),
+                           (self.flat_dir, "flat_files")):
+            text = edit.text().strip()
+            files = getattr(self.project, attr)
+            current = str(Path(files[0]).parent) if files else ""
+            if force or text != current:
+                setattr(self.project, attr, find_raw_files(text) if text else [])
+
     def compute_contacts(self) -> None:
         """Fill in the contacts from the eclipse and the site, then mark frames (after the fit check)."""
         from tse_core.event import compute_contacts
@@ -518,9 +529,7 @@ class FramesTab(QWidget):
             self.fit_report = ""
         self.project.second_contact, self.project.third_contact = c2, c3
         self.project.camera_clock_offset_s = 0.0
-        self.project.bias_files = find_raw_files(self.bias_dir.text()) if self.bias_dir.text() else []
-        self.project.dark_files = find_raw_files(self.dark_dir.text()) if self.dark_dir.text() else []
-        self.project.flat_files = find_raw_files(self.flat_dir.text()) if self.flat_dir.text() else []
+        self._store_calibration_folders(force=True)  # Apply also picks up files added to the same folder
         self.replan()
 
     def replan(self) -> None:
@@ -652,6 +661,7 @@ class FramesTab(QWidget):
                 return
             path = Path(name)
         self._store_event()  # typed into the Event box but not applied yet: the steps need it too
+        self._store_calibration_folders()  # a folder chosen with "..." counts even without Apply
         self.project.store_inventory(self.inventory)
         self.project.save(path)
         self.project_path = path

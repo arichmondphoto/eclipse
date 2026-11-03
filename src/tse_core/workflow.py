@@ -300,6 +300,18 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
     except ValueError as exc:
         raise WorkflowError(str(exc)) from exc
     calibs = {fc.frame_index: fc for fc in plan.frames}
+    # What the reference frame is divided by, small enough to send or open quickly in Siril.
+    from .fits import write_fits
+    from .masters import correction_preview
+
+    small, text = correction_preview(calibs.get(ref), tuple(alignment["image_size"]), crop_factor)
+    say(text)
+    if small is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        vpath = out_dir / f"{name}_vignetting.fit"
+        write_fits(vpath, small, {"COMMENT": "Correction applied by Stack (frames divided by this), 1/8 size"})
+        say(f"  saved as {vpath.name} (1/8 size; 1.0 = the middle)")
+        calib_info = {**calib_info, "vignetting": str(vpath)}
     params = StackParams(crop_radii=opts.radii, moon_frame=opts.moon_frame, hot_pixels=opts.hot_pixels)
     try:
         result, _hdr, _w = stack_frames(infos, lambda f: read_mosaic(frames[f.index].path), calibs,

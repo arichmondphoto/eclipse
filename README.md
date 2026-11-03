@@ -708,7 +708,13 @@ sRGB. In the GUI the Save dialog's file type chooses; on the command line
   frames, each file's black level is used as a synthetic bias.
 
 Stack logs which correction every frame got ("vignetting: 48 frame(s) by
-master flat (f/8, 400 mm)", "dark/bias: ..."). The earthshine stack is
+master flat (f/8, 400 mm)", "dark/bias: ..."), how much darker the corners
+were ("the corners are 62% as bright as the middle (-0.69 stops)"), and
+saves that correction for the reference frame as `<name>_vignetting.fit`
+at 1/8 size (1.0 = the middle; open it in Siril to see what was divided
+out). When nothing matched it says "NONE applied". The folders chosen on
+the Frames tab are saved with the project as soon as a step runs, so
+Apply is not needed first. The earthshine stack is
 calibrated exactly as the HDR stack was, so the two stay in the same
 units; if the HDR stack was made before Stack used the calibration frames,
 the earthshine log says to run Stack again. The Align step uses the lens

@@ -279,3 +279,30 @@ def flat_mismatch(lights: list[FrameMeta], calib: CalibrationFrames) -> Optional
     return (f"your flats ({', '.join(sorted(_flat_label(k) for k in fk if k))}) do not match the light frames "
             f"({', '.join(sorted(_flat_label(k) for k in lk if k))}): flats must be taken at the same aperture "
             "and focal length; they were not used")
+
+
+def correction_preview(fc, size: tuple[int, int], image_crop: float = 1.0, step: int = 8):
+    """The vignetting or flat correction a frame gets (what it is divided by; 1.0 = none), reduced
+    ``step`` times, and a line for the log. Returns (image or None, text)."""
+    from .lensfun import vignetting_map
+
+    w, h = size
+    if fc is not None and fc.flat_map is not None:
+        f = fc.flat_map
+        hh, ww = f.shape[0] // step * step, f.shape[1] // step * step
+        small = f[:hh, :ww].reshape(hh // step, step, ww // step, step).mean(axis=(1, 3))
+        what = fc.lens_label or "master flat"
+    elif fc is not None and fc.vignetting in ("profile", "lensfun") and fc.lens_terms is not None:
+        small = vignetting_map(max(w // step, 8), max(h // step, 8), tuple(fc.lens_terms), image_crop, fc.profile_crop)
+        what = fc.lens_label if fc.vignetting == "profile" else f"lensfun profile {fc.lens_label}"
+    else:
+        return None, "vignetting correction: NONE applied (no flats, own-flats profile or lensfun profile matched)"
+    sh, sw = small.shape
+    k = max(2, min(sh, sw) // 20)
+    centre = float(np.median(small[sh // 2 - k:sh // 2 + k, sw // 2 - k:sw // 2 + k]))
+    corners = float(np.median([np.median(small[:k, :k]), np.median(small[:k, -k:]),
+                               np.median(small[-k:, :k]), np.median(small[-k:, -k:])]))
+    rel = corners / centre if centre > 0 else float("nan")
+    text = (f"vignetting correction ({what}): the corners are {rel:.0%} as bright as the middle "
+            f"({math.log2(rel):+.2f} stops) and are brightened by that")
+    return (small / centre).astype(np.float32), text
