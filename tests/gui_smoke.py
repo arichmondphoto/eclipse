@@ -159,4 +159,15 @@ assert (at.lat.text(), at.lon.text(), at.elev.text(), at.tz.text()) == ("36.9422
 assert at.table.rowCount() == 2 and at.rotation.currentText() == "per-frame"
 os.environ.pop("STUB_DIR")
 
+# Every control on the Frames tab has hover help (CLAUDE.md: settings shown in the GUI need it).
+ft = win4.frames_tab
+controls = {"RAW folder": ft.folder, "Browse": ft.browse_btn, "exiftool": ft.use_exiftool, "Read frames": ft.scan_btn,
+            "frame table": ft.table, "Lens profile": ft.lens_combo, "Clock offset": ft.clock,
+            "Second contact": ft.c2, "Third contact": ft.c3, "Bias": ft.bias_dir, "Darks": ft.dark_dir,
+            "Flats": ft.flat_dir, "report": ft.report, **{f"{k} button": b for k, b in ft.setting_buttons.items()},
+            **{f"folder button {i}": b for i, b in enumerate(ft.calib_browse)}}
+missing = [k for k, w in controls.items() if len(w.toolTip()) < 30]
+print("Frames tab controls without hover help:", missing or "none")
+assert not missing
+
 print("GUI SMOKE OK")

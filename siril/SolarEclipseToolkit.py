@@ -160,10 +160,12 @@ class FramesTab(QWidget):
         self.folder.setPlaceholderText("Folder of RAW files from totality")
         browse = QPushButton("Browse…")
         browse.clicked.connect(lambda: self._pick_folder(self.folder))
+        self.browse_btn = browse
         self.use_exiftool = QCheckBox("Use exiftool if installed")
         self.use_exiftool.setChecked(True)
         scan = QPushButton("Read frames")
         scan.clicked.connect(self.scan)
+        self.scan_btn = scan
         row.addWidget(QLabel("RAW folder:"))
         row.addWidget(self.folder, 1)
         row.addWidget(browse)
@@ -195,13 +197,32 @@ class FramesTab(QWidget):
         self.c2 = QLineEdit()
         self.c2.setPlaceholderText("e.g. 2024-04-08T13:47:33")
         self.c3 = QLineEdit()
-        self.c3.setPlaceholderText("optional")
+        self.c3.setPlaceholderText("needed with second contact, e.g. 2024-04-08T13:51:21")
         self.clock = QLineEdit()
         self.clock.setPlaceholderText("added to camera time, e.g. +1:04:08 (blank = clock was right)")
         form.addRow("Clock offset:", self.clock)
         form.addRow("Second contact:", self.c2)
         form.addRow("Third contact:", self.c3)
         self.bias_dir, self.dark_dir, self.flat_dir = QLineEdit(), QLineEdit(), QLineEdit()
+        calib_tips = {
+            "Bias folder:": "Optional. A folder of bias frames: the shortest exposures with the lens cap on, at "
+                            "the same ISO as the eclipse frames. They are averaged into a master bias and "
+                            "subtracted from frames that have no matching dark. Without them, the black level "
+                            "recorded in each RAW file is used, which is fine for most modern cameras.",
+            "Darks folder:": "Optional. A folder of dark frames: lens cap on, the same exposure times and ISO as "
+                             "your eclipse frames, ideally right after totality at the same temperature. Each "
+                             "eclipse frame gets the master dark with its own exposure and ISO subtracted; that "
+                             "removes hot pixels and amp glow, which matters most for the long exposures. Frames "
+                             "with no matching dark use the bias instead.",
+            "Flats folder:": "Optional. A folder of flat frames: the same lens, focal length, aperture and focus "
+                             "(infinity) as the eclipse, aimed at an even light (a light panel, or a white "
+                             "T-shirt over the lens against twilight sky), histogram peak near the middle, 20 to "
+                             "30 frames. They correct vignetting, and dust shadows if nothing was cleaned or "
+                             "changed since the eclipse. How they are used (master flat, smooth profile, or "
+                             "both compared) is chosen on the Stack tab. Flats at another aperture or focal length "
+                             "are not used; the report below says so.",
+        }
+        self.calib_browse = []
         for label, edit in (("Bias folder:", self.bias_dir), ("Darks folder:", self.dark_dir), ("Flats folder:", self.flat_dir)):
             edit.setPlaceholderText("optional")
             box = QHBoxLayout()
@@ -211,7 +232,11 @@ class FramesTab(QWidget):
             b.clicked.connect(lambda _=False, e=edit: self._pick_folder(e))
             box.addWidget(b)
             form.addRow(label, box)
+            _tip(edit, calib_tips[label] + " Click Apply after changing it.", form)
+            _tip(b, "Choose the " + label.rstrip(":").lower() + ".")
+            self.calib_browse.append(b)
         buttons = QHBoxLayout()
+        self.setting_buttons = {}
         for text, slot in (
             ("Apply", self.apply_settings),
             ("Write synthetic flat", self.write_flat),
@@ -220,8 +245,10 @@ class FramesTab(QWidget):
             b = QPushButton(text)
             b.clicked.connect(slot)
             buttons.addWidget(b)
+            self.setting_buttons[text] = b
         form.addRow(buttons)
         bl.addWidget(options, 0)
+        self._settings_form = form
 
         self.report = QPlainTextEdit()
         self.report.setReadOnly(True)
@@ -232,11 +259,60 @@ class FramesTab(QWidget):
         splitter.addWidget(bottom)
         splitter.setSizes([420, 260])
         layout.addWidget(splitter, 1)
+        self._frames_tips(self._settings_form)
 
         if self.db.empty:
             self.report.setPlainText(
                 "The lensfun database was not found.\nClick 'Update lensfun' to download it (about 15 MB)."
             )
+
+    def _frames_tips(self, form) -> None:
+        """Hover help for the Frames tab."""
+        _tip(self.folder, "The folder holding the RAW files from totality (or a project folder holding a "
+             "'lights' subfolder, with optional 'darks', 'flats' and 'bias' subfolders). Partial-phase frames "
+             "may be in it too: they can be marked 'partial' and are then left out.")
+        _tip(self.browse_btn, "Choose the RAW folder. If you choose a project folder (one with a 'lights' "
+             "subfolder), its project file is opened, or a new one made, and the calibration folders are filled "
+             "in from its 'darks', 'flats' and 'bias' subfolders.")
+        _tip(self.use_exiftool, "Read the camera settings with exiftool when it is installed. It reads more "
+             "makers' files fully (lens name, exact time) than the built-in reader. Untick only if exiftool "
+             "gives wrong values.")
+        _tip(self.scan_btn, "Read every RAW file's settings (time, exposure, aperture, ISO, lens) and group the "
+             "exposures into brackets. Run it again after adding or removing files. Frames you marked by hand "
+             "keep their mark.")
+        _tip(self.table, "Every frame found, in capture order. Role: 'light' frames are aligned and stacked; "
+             "'partial' frames (outside totality, from the contact times) and 'excluded' frames are left out. "
+             "Right-click selected rows to mark them light, partial or excluded, for example a shaken frame or "
+             "one with a cloud. Black and White are the sensor levels from the file; Bracket groups the frames "
+             "of one exposure sweep.")
+        _tip(self.lens_combo, "Where the vignetting (darkening towards the corners) correction comes from when you "
+             "have no flats. Automatic: the lensfun profile matching the lens in the files, or a profile you "
+             "fitted from your own flats earlier. Choose a lens by name if Automatic picks none or the wrong one, "
+             "or 'None' to switch the correction off. Flats in the Flats folder are used instead whenever they "
+             "match the frames' aperture and focal length.", form)
+        _tip(self.clock, "Only for comparing frame times with the contact times below. Time added to the "
+             "camera's clock so it reads the same clock as your contact times: +1:00:00 (or 1h) when the camera "
+             "showed 12:56 at a contact you entered as 13:56; -45s when it was 45 s fast. Leave blank if you enter "
+             "the contacts as the camera showed them, or if the camera clock was right. It does not change the "
+             "alignment: the camera's time zone and clock error for the Sun's centre are set on the Align tab.",
+             form)
+        _tip(self.c2, "Second contact (start of totality) as date and time, for example 2024-04-08T13:47:33, in "
+             "the same clock as the Clock offset above. Frames taken before it are marked 'partial' and left out. "
+             "Needs the third contact too; both are applied when you click Apply.", form)
+        _tip(self.c3, "Third contact (end of totality), for example 2024-04-08T13:51:21. Frames taken after it "
+             "are marked 'partial' and left out. The contact times are only used when both are filled in. A "
+             "few seconds' margin either way does no harm; frames marked by hand as excluded stay excluded.",
+             form)
+        b = self.setting_buttons
+        _tip(b["Apply"], "Use the settings above: mark frames outside the contact times, read the calibration "
+             "folders and update the calibration plan in the report. The project is saved.")
+        _tip(b["Write synthetic flat"], "Write the lens profile in use (lensfun, or one fitted from your own flats) "
+             "as a FITS master flat, one per aperture and focal length, for calibrating the frames in Siril "
+             "yourself. The toolkit's own steps do not need it.")
+        _tip(b["Update lensfun"], "Download the latest lensfun database of lens profiles (about 15 MB). Do this "
+             "once after installing, or when your lens is missing from the Lens profile list.")
+        _tip(self.report, "The exposure brackets found and the calibration plan: which vignetting correction, "
+             "darks and bias each group of frames will get, and warnings about anything missing.")
 
     # --------------------------------------------------------------- actions
     def _pick_folder(self, edit: QLineEdit) -> None:

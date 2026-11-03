@@ -13,6 +13,12 @@ class Dummy(metaclass=_Meta):
     def __init__(self, *a, **k):
         pass
 
+    def setToolTip(self, text):
+        self._tooltip = str(text)
+
+    def toolTip(self):
+        return getattr(self, "_tooltip", "")
+
     def __getattr__(self, name):
         if name.startswith("__"):
             raise AttributeError(name)
