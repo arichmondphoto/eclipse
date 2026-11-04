@@ -62,7 +62,10 @@ Moon's radius, log what was measured, README and CLI reference kept current.
 - [ ] Still open: a bright band ~20 px wide stays by the limb (lighter, but not even grey). That
       is local contrast, so it belongs to step 2.
 
-Notes from the crop (`hdr_crop_2500.fit`, 2530 px, top-left (2715, 1468) full frame): the crop
+Notes from the crop (`hdr_crop_2500.fit`, 2530 px). **Its top-left is (2715, 1522) counted from the top**
+(Siril showed y = 1468, counted from the bottom: 5520 - 1468 - 2530 = 1522; found 3 Nov from the Moon,
+which sits 54 px off the header position otherwise). Weight crops cut before 3 Nov used row 1468 and were
+54 px out of place; re-check the step 2 noise-gate figures with the corrected cut. the crop
 alone has no sky, so sky removal and white balance fail on it. Test renders paste it into the
 quarter-size stack scaled up to full frame (scratch scripts `load2.canvas()`); a full-frame
 Enhance takes ~4 min. At 1:1 the strands are soft and grainy: much of the gap to his image is
@@ -163,6 +166,18 @@ labelled composite option.
       map's fine detail; a non-matching map adds nothing. On Andy's stack with his map (match
       0.63) it gives craters and rays close to his look (`moon_looks2.png`, bottom right).
 - [ ] Check in Siril on the full final image (Andy).
+
+### 2b. Deconvolution (tested 3 Nov on the crop, not in the toolkit)
+
+- Blur measured from the lunar limb where the full stack reaches within 3 px of it: Gaussian sigma
+  ~0.8-0.9 px (FWHM ~2.2 px, ~5"). Elsewhere the limb is unusable for this: few frames reach it
+  (the Moon moved), weight 1.2 at the limb vs 32 at +10 px.
+- Weighted Richardson-Lucy (Moon masked), sigma 0.9, 30 iterations, 10-30 s per colour on the crop.
+- Fine detail / noise by radius: ~1.7 to 1.8 R_sun, 1.1 at 1.8-2.4, 0.94 beyond (noise alone ~0.75).
+  Deconvolving everywhere turns the faint corona to grain (the noise gate then flattens the
+  streamers) and rings at the limb. Gated by that measure (full at >= 1.6, none at <= 1.0) and kept
+  4 px off the limb: prominence and inner loops a little crisper, outer corona as before, no limb
+  ring (`deconv_compare.png`). A modest gain; to do as an option only if Andy wants it.
 
 ### 4. A crisp limb
 
