@@ -73,6 +73,11 @@ signal (data), not stretch. Dust spots show as dark rings in the corona (no dust
 
 ### 2. Fine structure without noise
 
+**4 Nov: Andy removed Smooth along strands (`strands`, `strand_orientation`, `smooth_along`) and
+Adaptive: skip finest scales (`mgn_skip_fine`) from the toolkit, and asked for every Enhance option
+to be off by default (Flatten now 0; Adaptive strength stays at the paper's k = 0.7, in steps of
+0.01). The notes below are the history; the step-2 recipes that used strands no longer apply.**
+
 Done as options of the adaptive layer (`EnhanceParams.noise_gate`, `.strands`; `--noise-gate`,
 `--strands`; **Adaptive noise gate** and **Smooth along strands** on the Enhance tab), in
 `enhance.mgn_gated`:

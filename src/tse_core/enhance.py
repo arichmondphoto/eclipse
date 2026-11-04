@@ -59,7 +59,7 @@ class EnhanceParams:
     std_attenuation: Optional[Sequence[float]] = None  # S_0..S_order; default as above
     noise_m: float = 0.7  # FNRGF-N: fraction of the noise removed from the local deviation, in [0, 1)
     ring_smooth: float = 1.5  # smoothing of the circle statistics along the radius, px
-    flatten: float = 0.8  # natural layer: fraction of the radial fall-off (in log) removed
+    flatten: float = 0.0  # natural layer: fraction of the radial fall-off (in log) removed; 0 = off
     # Highlights: 0 = a hard white point (the brightest 0.1% clip); above 0, the top part of the
     # range (this fraction) rolls off smoothly towards white and nothing clips, colours keep their hue.
     shoulder: float = 0.0
@@ -71,13 +71,8 @@ class EnhanceParams:
     # at this level (e.g. 0.6 for a light grey corona). 0 = off.
     midtone: float = 0.0
     mgn_scales: Optional[Sequence[float]] = None  # px; default from the Sun's radius
-    mgn_k: float = 0.7
-    mgn_skip_fine: int = 0  # leave out this many of the finest adaptive scales (they are mostly noise)
-    # Adaptive layer, noise-aware (both 0 = off, as before):
-    # strands: smoothing along the coronal strands before the filter, in units of 2% of the Sun's
-    # radius (1 = about 8 px on a 2024 D850 frame at 400 mm); grain is smoothed out along each
-    # strand while the strand stays sharp across.
-    strands: float = 0.0
+    mgn_k: float = 0.7  # adaptive layer strength: k of arctan(k C), 0.7 as in Morgan & Druckmueller (2014)
+    # Adaptive layer, noise-aware (0 = off):
     # noise_gate: each scale's detail counts only as far as it stands above the noise at that scale
     # (measured from the stack); the number is how many times the noise counts as "clearly above"
     # (3 is a good start). Keeps the finest scales from turning grain into texture.
@@ -615,51 +610,6 @@ def _masked_fill(b: np.ndarray, valid: np.ndarray, r: float) -> np.ndarray:
     return f
 
 
-def strand_orientation(b: np.ndarray, r: float) -> tuple[np.ndarray, np.ndarray]:
-    """Direction along the coronal strands (radians) and how clear it is (coherence 0..1).
-
-    From the structure tensor of the mid-scale detail (``b`` minus a blur of 10% of the Sun's
-    radius): taken from the image itself, the corona's overall fall-off would set the direction
-    (across the strands), and the finest scales are mostly noise.
-    """
-    d = b - blur(b, max(4.0, 0.1 * r))
-    sg, st = max(1.0, 0.0073 * r), max(2.0, 0.024 * r)
-    gx = ndimage.gaussian_filter(d, sg, order=(0, 1))
-    gy = ndimage.gaussian_filter(d, sg, order=(1, 0))
-    jxx, jyy, jxy = blur(gx * gx, st), blur(gy * gy, st), blur(gx * gy, st)
-    theta = 0.5 * np.arctan2(2 * jxy, jxx - jyy) + math.pi / 2
-    coh = np.sqrt((jxx - jyy) ** 2 + 4 * jxy**2) / np.maximum(jxx + jyy, 1e-30)
-    return theta.astype(np.float32), coh.astype(np.float32)
-
-
-def smooth_along(b: np.ndarray, theta: np.ndarray, coh: np.ndarray, length: float,
-                 iso: float = 2.0, chunk: int = 512) -> np.ndarray:
-    """Gaussian smoothing along the strands (sigma ``length`` px) where the direction is clear,
-    a light isotropic one (``iso``) where it is not. Done in row blocks to bound memory."""
-    h, w = b.shape
-    n = int(math.ceil(2.5 * length))
-    ts = np.arange(-n, n + 1, dtype=np.float32)
-    wts = np.exp(-0.5 * (ts / length) ** 2)
-    wts /= wts.sum()
-    base = ndimage.gaussian_filter(b, 0.6)
-    out = np.empty_like(b, dtype=np.float32)
-    iso_img = ndimage.gaussian_filter(b, iso)
-    # Where two families of strands meet the direction flips over a few pixels; a mix that switched
-    # as fast between along and round made speckles there, so the mix changes over a strand length.
-    kmap = ndimage.gaussian_filter(np.clip((coh - 0.2) / 0.3, 0.0, 1.0).astype(np.float32), max(1.0, length))
-    xx = np.arange(w, dtype=np.float32)[None, :]
-    for r0 in range(0, h, chunk):
-        rows = slice(r0, min(h, r0 + chunk))
-        yy = np.arange(rows.start, rows.stop, dtype=np.float32)[:, None]
-        c, s_ = np.cos(theta[rows]), np.sin(theta[rows])
-        acc = np.zeros((rows.stop - rows.start, w), np.float32)
-        for t, wt in zip(ts, wts):
-            acc += wt * ndimage.map_coordinates(base, [yy + t * s_, xx + t * c], order=1, mode="nearest")
-        k = kmap[rows]
-        out[rows] = k * acc + (1 - k) * iso_img[rows]
-    return out
-
-
 def correlated_noise(shape, valid: np.ndarray, sample: np.ndarray, seed: int = 0, patch: int = 64) -> np.ndarray:
     """Unit noise with the spatial spectrum measured in ``sample`` over ``valid`` (demosaicing and
     the alignment's resampling correlate neighbouring pixels, so white noise understates the noise
@@ -704,12 +654,10 @@ def correlated_noise(shape, valid: np.ndarray, sample: np.ndarray, seed: int = 0
 
 
 def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float,
-              noise: np.ndarray, sun_r: float, strands: float = 0.0, gate: float = 3.0,
-              seed: int = 0) -> np.ndarray:
-    """:func:`mgn` with the noise kept down: optional smoothing along the strands first, and each
-    scale's detail weighted by how far it stands above the noise at that scale (a Wiener gain;
+              noise: np.ndarray, sun_r: float, gate: float = 3.0, seed: int = 0) -> np.ndarray:
+    """:func:`mgn` with the noise kept down: each scale's detail weighted by how far it stands above the noise at that scale (a Wiener gain;
     the noise at each scale comes from a noise image with the stack's measured noise and
-    correlation, put through the same smoothing). Pure noise gives almost no contrast."""
+    correlation). Pure noise gives almost no contrast."""
     b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
     bf = _masked_fill(b, valid, sun_r)
     sig = np.where(valid, noise / np.maximum(np.maximum(x, 0) + max(floor, 1e-9), 1e-12), 0.0)
@@ -719,28 +667,6 @@ def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: floa
     faint = valid & (smooth_b < np.percentile(smooth_b[valid], 30))
     nz = correlated_noise(b.shape, faint, bf, seed) * sig
     del b, sig, vm, smooth_b, faint  # full frames are 45 megapixels: free what is done with
-    if strands > 0:
-        theta, coh = strand_orientation(bf, sun_r)
-        # How clear a direction noise alone would seem: only clearer directions than that are
-        # followed, or the smoothing would draw strands out of the noise itself.
-        theta_n, coh_n = strand_orientation(nz, sun_r)
-        base_n = blur(coh_n, max(8.0, 0.1 * sun_r))
-
-        def clear(c):
-            return np.clip((c - base_n) / np.maximum(1.0 - base_n, 1e-3), 0.0, 1.0).astype(np.float32)
-
-        length = max(1.0, strands * 0.02 * sun_r)
-        k_data = clear(coh)
-        bf = smooth_along(bf, theta, k_data, length)
-        del theta, coh
-        # The noise image is smoothed along its *own* ridges, as the data's noise is wherever the
-        # direction comes from the noise: noise smoothed along itself keeps more of its strength,
-        # and judging against that keeps strands from being drawn out of noise. (Where the
-        # direction comes from real strands this overstates the noise a little: safe side.)
-        # Mixed between along and round in the same places as the data (k_data): where the data
-        # is only smoothed round, its noise stays grainier, and the noise image must too.
-        nz = smooth_along(nz, theta_n, k_data, length)
-        del theta_n, coh_n, base_n, k_data
     nz = np.where(valid, nz, 0.0).astype(np.float32)
     acc = np.zeros_like(bf)
     g2 = gate * gate
@@ -1013,7 +939,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
 
     need = set(p.layers) | {k for k, v in p.blend.items() if v}
     scales = list(p.mgn_scales) if p.mgn_scales else [g.sun_r * f for f in (0.006, 0.012, 0.025, 0.05, 0.1, 0.2)]
-    scales = sorted(scales)[min(max(int(p.mgn_skip_fine), 0), len(scales) - 1):]
+    scales = sorted(scales)
     for name_l in LAYERS:
         if name_l not in need:
             continue
@@ -1028,9 +954,9 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
         elif name_l == "fnrgf_n":
             y = to_unit(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), valid)
         else:
-            if p.strands > 0 or p.noise_gate > 0:
-                say(f"adaptive: noise gate {p.noise_gate:g}, smoothing along the strands {p.strands:g}")
-                y = mgn_gated(lum, valid, scales, p.mgn_k, nlev, noise, g.sun_r, p.strands, p.noise_gate)
+            if p.noise_gate > 0:
+                say(f"adaptive: noise gate {p.noise_gate:g}")
+                y = mgn_gated(lum, valid, scales, p.mgn_k, nlev, noise, g.sun_r, p.noise_gate)
             else:
                 y = mgn(lum, valid, scales, p.mgn_k, nlev)
         y[~(show if name_l == "natural" else valid)] = 0.0

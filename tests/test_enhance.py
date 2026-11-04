@@ -272,7 +272,7 @@ def _noisy_corona(strands_amp, seed=1):
 
 
 def test_gated_adaptive_does_not_make_texture_out_of_noise():
-    """The noise-gated adaptive filter (with smoothing along the strands) brings out real strands
+    """The noise-gated adaptive filter brings out real strands
     but leaves pure noise nearly flat; the plain filter turns that noise into full-contrast
     texture. Measured as fine texture (minus a 10 px blur) away from the limb."""
     import numpy as np
@@ -284,7 +284,7 @@ def test_gated_adaptive_does_not_make_texture_out_of_noise():
         img, w, valid, r, R = _noisy_corona(strands_amp)
         scales = [R * f for f in (0.006, 0.012, 0.025, 0.05, 0.1, 0.2)]
         if gated:
-            out = mgn_gated(img, valid, scales, 0.7, 1e-4, noise_map(img, w, valid), R, strands=1.0, gate=3.0)
+            out = mgn_gated(img, valid, scales, 0.7, 1e-4, noise_map(img, w, valid), R, gate=3.0)
         else:
             out = mgn(img, valid, scales, 0.7, 1e-4)
         tex = out - ndimage.gaussian_filter(out, 10)

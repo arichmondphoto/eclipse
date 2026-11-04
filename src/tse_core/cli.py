@@ -156,25 +156,23 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--std-att", help="FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0)")
     p.add_argument("--noise-m", type=float, default=0.7, help="FNRGF-N noise compensation, 0..0.99 (default 0.7)")
     p.add_argument("--adaptive-k", type=float, default=0.7,
-                   help="adaptive layer: strength of the local contrast at each scale (default 0.7)")
-    p.add_argument("--adaptive-skip-fine", type=int, default=0,
-                   help="adaptive layer: leave out this many of its finest scales (0-5; they are mostly noise)")
+                   help="adaptive layer: strength of the local contrast at each scale, k in arctan(k C) "
+                        "(default 0.7, as in Morgan & Druckmueller 2014)")
     p.add_argument("--noise-gate", type=float, default=0.0,
                    help="adaptive layer: each scale's detail counts only as far as it stands above the stack's "
                         "noise at that scale (e.g. 3); 0 = off")
-    p.add_argument("--strands", type=float, default=0.0,
-                   help="adaptive layer: smooth along the coronal strands first, in units of 2%% of the Sun's radius "
-                        "(e.g. 1); 0 = off")
     p.add_argument("--even", type=float, default=0.0,
                    help="take out this fraction of the large brightness differences round the Sun (streamers "
                         "against coronal holes); 0 = off, e.g. 0.7")
     p.add_argument("--midtone", type=float, default=0.0,
-                   help="put the inner corona's median brightness at this level with a gamma; 0 = off, e.g. 0.6")
+                   help="put the inner corona's median brightness at this level with a midtones transfer curve; "
+                        "0 = off, e.g. 0.6")
     p.add_argument("--shoulder", type=float, default=0.0,
                    help="highlight roll-off: 0 = hard white point (the brightest 0.1%% clip); e.g. 0.3 = the top 30%% of "
                         "the range rolls off smoothly to white, nothing clips and colours keep their hue")
-    p.add_argument("--flatten", type=float, default=0.8,
-                   help="natural layer: how much of the radial fall-off to remove, 0..1 (default 0.8)")
+    p.add_argument("--flatten", type=float, default=0.0,
+                   help="natural layer: how much of the radial fall-off to remove, 0..1; 0 = off (default), "
+                        "e.g. 0.8")
     p.add_argument("--saturation", type=float, default=1.0, help="colour saturation, 0 = monochrome (default 1)")
     p.add_argument("--white", choices=["corona", "camera", "none"], default="corona",
                    help="white balance: inner corona neutral (default), the camera's as-shot, or none")
@@ -684,8 +682,7 @@ def cmd_enhance(args) -> int:
     params = EnhanceParams(layers=layers, segments=args.segments, order=args.order,
                            mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
                            noise_m=args.noise_m, flatten=args.flatten, shoulder=args.shoulder, even=args.even, midtone=args.midtone, noise_gate=args.noise_gate,
-                           mgn_k=args.adaptive_k, mgn_skip_fine=args.adaptive_skip_fine,
-                           strands=args.strands, saturation=args.saturation,
+                           mgn_k=args.adaptive_k, saturation=args.saturation,
                            white=args.white, blend=blend, blend_modes=blend_modes,
                            neutral_background=not args.keep_background_colour)
     out, code = _run(enhance_project, args.project, params, hdr_file=args.hdr, output=args.output,

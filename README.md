@@ -110,7 +110,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | Layers to write; each layer's blend strength and Soft Light or Overlay; flatten, saturation, white balance, sky removal; FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
+| 4 Enhance | Layers to write; each layer's blend strength and Soft Light or Overlay; **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -347,7 +347,7 @@ pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 
 | Layer | What it shows |
 | --- | --- |
-| `natural` | log stretch with most of the radial fall-off removed (`--flatten`, default 0.8); the eye-view look |
+| `natural` | log stretch; `--flatten` (off by default, e.g. 0.8) removes that much of the radial fall-off |
 | `nrgf` | normalizing-radial-graded filter (Morgan et al. 2006): each circle around the Sun normalized to the same mean and spread |
 | `fnrgf` | Fourier NRGF (Druckmüllerová et al. 2011): mean and spread follow position angle too, so faint and bright regions at the same height get similar contrast |
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
@@ -404,8 +404,8 @@ Tone: `--even 0.7` (**Evenness**) takes out that fraction of the large
 brightness differences round the Sun (streamers against coronal holes, over
 about a quarter of the Sun's radius) as `--flatten` does for the fall-off
 from the Sun; the strands stay. `--midtone 0.6` (**Midtone**) puts the inner
-corona's median (1.05-2.5 solar radii) at that level with a gamma, for a
-light grey corona. Both off by default.
+corona's median (1.05-2.5 solar radii) at that level with a midtones
+transfer curve, for a light grey corona. Both off by default.
 
 Noise in the adaptive layer: at its finest scales a stack is mostly noise
 (on the 2024 stack, structure stood only 2x and 3.6x above the noise at
@@ -415,21 +415,13 @@ detail by how far it stands above the noise at that scale (a Wiener gain).
 The noise at each scale comes from a noise image with the stack's own noise
 level (from its weights) and spatial spectrum (measured in the faint corona:
 demosaicing and resampling correlate neighbouring pixels), put through the
-same steps. `--strands 1` (**Smooth along strands**) first smooths along
-the direction the coronal strands run (from the mid-scale structure, with
-the Moon filled from around it so its edge does not set the direction),
-never across them. Directions are only followed where they are clearer
-than noise alone would give, and the noise image is smoothed along its own
-ridges as the data's noise would be, so strands are not drawn out of noise.
-A test checks that pure noise gives under 0.4x the texture of the plain
-filter and of real strands. Both are off by default; the output keeps a
-fixed scale, so where there is little real structure it stays flat instead
-of being stretched back up. Where two families of strands meet, the change
-from smoothing along to smoothing round is spread over a strand length, so
-crossings do not speckle. `--adaptive-k` (**Adaptive strength**, default
-0.7) sets how hard local contrast is brought out, and
-`--adaptive-skip-fine N` (**Adaptive: skip finest scales**) leaves out the N
-finest of the six scales.
+same steps. A test checks that pure noise gives under 0.4x the texture of
+the plain filter and of real strands. Off by default (the filter as
+published); the gated output keeps a fixed scale, so where there is little
+real structure it stays flat instead of being stretched back up.
+`--adaptive-k` (**Strength** in the **Adaptive layer (MGN)** box, steps of
+0.01) is k in the paper's arctan(k C): how hard local contrast is brought
+out at each scale. The default, 0.7, is the paper's value.
 
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
@@ -918,14 +910,12 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
 | `--std-att` | FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0) |
 | `--noise-m` | FNRGF-N noise compensation, 0..0.99 (default 0.7) |
-| `--adaptive-k` | adaptive layer: strength of the local contrast at each scale (default 0.7) |
-| `--adaptive-skip-fine` | adaptive layer: leave out this many of its finest scales (0-5; they are mostly noise) |
+| `--adaptive-k` | adaptive layer: strength of the local contrast at each scale, k in arctan(k C) (default 0.7, as in Morgan & Druckmueller 2014) |
 | `--noise-gate` | adaptive layer: each scale's detail counts only as far as it stands above the stack's noise at that scale (e.g. 3); 0 = off |
-| `--strands` | adaptive layer: smooth along the coronal strands first, in units of 2%% of the Sun's radius (e.g. 1); 0 = off |
 | `--even` | take out this fraction of the large brightness differences round the Sun (streamers against coronal holes); 0 = off, e.g. 0.7 |
-| `--midtone` | put the inner corona's median brightness at this level with a gamma; 0 = off, e.g. 0.6 |
+| `--midtone` | put the inner corona's median brightness at this level with a midtones transfer curve; 0 = off, e.g. 0.6 |
 | `--shoulder` | highlight roll-off: 0 = hard white point (the brightest 0.1%% clip); e.g. 0.3 = the top 30%% of the range rolls off smoothly to white, nothing clips and colours keep their hue |
-| `--flatten` | natural layer: how much of the radial fall-off to remove, 0..1 (default 0.8) |
+| `--flatten` | natural layer: how much of the radial fall-off to remove, 0..1; 0 = off (default), e.g. 0.8 |
 | `--saturation` | colour saturation, 0 = monochrome (default 1) |
 | `--white` | white balance: inner corona neutral (default), the camera's as-shot, or none |
 | `--format` | picture type: 16-bit TIFF (default), 16-bit PNG or 8-bit JPG; all 300 dpi |

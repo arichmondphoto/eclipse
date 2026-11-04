@@ -1112,7 +1112,7 @@ class EnhanceTab(StepTab):
 
         tone = QGroupBox("Natural layer and colour")
         tf = QFormLayout(tone)
-        self.flatten = self._dspin(0.0, 1.0, 0.8, 0.05, "How much of the brightness fall-off from the Sun to remove")
+        self.flatten = self._dspin(0.0, 1.0, 0.0, 0.05, "How much of the brightness fall-off from the Sun to remove")
         tf.addRow("Flatten:", self.flatten)
         self.shoulder = self._dspin(0.0, 0.6, 0.0, 0.05, "How softly the brightest parts roll off to white")
         tf.addRow("Highlight roll-off:", self.shoulder)
@@ -1120,16 +1120,6 @@ class EnhanceTab(StepTab):
         tf.addRow("Evenness:", self.even)
         self.midtone = self._dspin(0.0, 0.9, 0.0, 0.05, "Where the inner corona's middle brightness sits")
         tf.addRow("Midtone:", self.midtone)
-        self.noise_gate = self._dspin(0.0, 6.0, 0.0, 0.5, "Adaptive layer: keep noise from becoming texture")
-        tf.addRow("Adaptive noise gate:", self.noise_gate)
-        self.strands = self._dspin(0.0, 3.0, 0.0, 0.25, "Adaptive layer: smooth along the coronal strands")
-        tf.addRow("Smooth along strands:", self.strands)
-        self.mgn_k = self._dspin(0.1, 3.0, 0.7, 0.1, "Adaptive layer: strength of the local contrast")
-        tf.addRow("Adaptive strength:", self.mgn_k)
-        self.skip_fine = QSpinBox()
-        self.skip_fine.setRange(0, 5)
-        self.skip_fine.setValue(0)
-        tf.addRow("Adaptive: skip finest scales:", self.skip_fine)
         self.saturation = self._dspin(0.0, 3.0, 1.0, 0.1, "0 = monochrome")
         tf.addRow("Saturation:", self.saturation)
         self.white = QComboBox()
@@ -1141,6 +1131,16 @@ class EnhanceTab(StepTab):
         self.keep_sky.toggled.connect(self.changed)
         tf.addRow(self.keep_sky)
         self.settings_layout.addWidget(tone)
+
+        adaptive = QGroupBox("Adaptive layer (MGN)")
+        af = QFormLayout(adaptive)
+        self.mgn_k = self._dspin(0.05, 3.0, 0.7, 0.01, "Adaptive layer: strength of the local contrast")
+        self.mgn_k.setDecimals(2)
+        af.addRow("Strength:", self.mgn_k)
+        self.noise_gate = self._dspin(0.0, 6.0, 0.0, 0.5, "Adaptive layer: keep noise from becoming texture")
+        af.addRow("Noise gate:", self.noise_gate)
+        self.settings_layout.addWidget(adaptive)
+        self._adaptive_form = af
 
         fn = QGroupBox("FNRGF (Fourier Normalizing-Radial-Graded Filter)")
         ff = QFormLayout(fn)
@@ -1224,26 +1224,20 @@ class EnhanceTab(StepTab):
                  "as 'no change', so the sky stays dark.\n\nSoft Light (default): gentle, keeps the natural "
                  "tones.\n\nOverlay: stronger, adds more contrast, mostly in the mid-tones. Use a lower "
                  "strength with Overlay (for example 5-20 %).")
-        _tip(self.noise_gate, "Adaptive layer only. The adaptive filter brings out structure at six scales; at the "
-             "finest ones a stack is mostly noise, which it turns into grain. With the gate, each scale's detail "
-             "counts only as far as it stands above the noise measured in your stack at that scale (the number is how "
-             "many times the noise counts as clearly above it).\n\n0 (default): off, as before. 3 is a good start; "
-             "higher keeps more of the faint corona smooth, lower shows finer detail and more grain.")
-        _tip(self.strands, "Adaptive layer only. Smooths along the direction the coronal strands run, never across "
-             "them, so the grain goes and the strands stay sharp and continuous. Directions are taken only where they "
-             "are clearer than noise alone would give, so it does not draw strands out of noise. 1 = about 2% of the "
-             "Sun's radius (8 px on a 400 mm D850 frame).\n\n0 (default): off. Use it with the noise gate (try 1 "
-             "and 3). Slower: the full-size run takes a few minutes more.")
-        _tip(self.mgn_k, "Adaptive layer only: how strongly local contrast is brought out at each scale. "
-             "Default 0.7. Higher gives harder, more graphic strands; lower is gentler.")
-        _tip(self.skip_fine, "Adaptive layer only: leave out this many of its six scales, finest first (about 2.5, "
-             "5, 10, 21, 41 and 83 px on a 400 mm D850 frame). The finest ones are mostly noise in a typical stack; "
-             "skipping 1 or 2 is an alternative or addition to the noise gate. Default 0.")
+        af = self._adaptive_form
+        _tip(self.mgn_k, "How strongly the adaptive layer brings out local contrast at each scale: k in the "
+             "paper's arctan(k x C) (Morgan & Druckmüller 2014). Default 0.7, the paper's value. Higher gives "
+             "harder, more graphic strands; lower is gentler. Steps of 0.01.", af)
+        _tip(self.noise_gate, "The adaptive filter brings out structure at six scales; at the finest ones a stack is "
+             "mostly noise, which it turns into grain. With the gate, each scale's detail counts only as far as it "
+             "stands above the noise measured in your stack at that scale (the number is how many times the noise "
+             "counts as clearly above it).\n\n0 (default): off, the paper's filter as published. 3 is a good start; "
+             "higher keeps more of the faint corona smooth, lower shows finer detail and more grain.", af)
         _tip(self.even, "Takes out this fraction of the large brightness differences round the Sun (bright "
              "streamers against dark coronal holes, over about a quarter of the Sun's radius), as Flatten does for "
              "the fall-off from the Sun. 0 (default): off. 0.6-0.8 gives the even grey corona of a strongly "
              "processed eclipse picture; the strands themselves stay.")
-        _tip(self.midtone, "Lightens or darkens the middle tones (a gamma, black and white stay) so that the inner "
+        _tip(self.midtone, "Lightens or darkens the middle tones (a midtones transfer curve; black and white stay) so that the inner "
              "corona's median brightness (1.05-2.5 solar radii) sits at this level. 0 (default): off. 0.6 gives a "
              "light grey corona; 0.4 a darker one.")
         _tip(self.shoulder, "How the brightest parts of the picture (the inner corona by the limb, bright "
@@ -1253,8 +1247,8 @@ class EnhanceTab(StepTab):
              "higher compresses more of the bright range.")
         _tip(self.flatten, "How much of the corona's brightness fall-off from the Sun the natural layer removes, "
              "from 0 (none: a plain log stretch, the inner corona dominates) to 1 (all of it: equal brightness at "
-             "every height).\n\nDefault 0.8. Lower it (0.5-0.7) to keep more of the natural fall-off; raise it "
-             "to show more of the outer corona. It stops where the corona sinks into the noise, so the sky stays "
+             "every height).\n\n0 (default): off. 0.5-0.7 keeps much of the natural fall-off; 0.8-1 shows more "
+             "of the outer corona. It stops where the corona sinks into the noise, so the sky stays "
              "dark.", tf)
         _tip(self.saturation, "Colour strength in every layer: 0 = black and white, 1 = the measured colour, "
              "above 1 = stronger. Colour fades to grey on its own where the corona is too faint for its colour to "
@@ -1319,8 +1313,6 @@ class EnhanceTab(StepTab):
         modes = {k: c.currentText().lower() for k, c in self.blend_mode.items() if k in blend}
         return EnhanceParams(layers=layers, segments=self.segments.value(), order=self.order.value(),
                              noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(), even=self.even.value(), midtone=self.midtone.value(), noise_gate=self.noise_gate.value(), mgn_k=self.mgn_k.value(),
-                             mgn_skip_fine=self.skip_fine.value(),
-                             strands=self.strands.value(),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
                              blend_modes=modes, neutral_background=not self.keep_sky.isChecked())
 
