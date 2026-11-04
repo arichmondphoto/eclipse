@@ -110,7 +110,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | Layers to write; each layer's blend strength (all 0 % by default) and Soft Light or Overlay; **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); **Adaptive (ACHF)** as a layer (not ticked by default: slow) and the size and strength of each of its six scales (0.5, 1, 3, 10 px on the 2024 frames at strength 1; two larger scales at 0); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
+| 4 Enhance | Layers to write; each layer's blend strength (all 0 % by default) and Soft Light or Overlay; **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); **Adaptive (ACHF)** as a layer (not ticked by default: slow) and the size and strength of each of its six scales (0.5, 1, 3, 10 px on the 2024 frames at strength 1; two larger scales at 0) and **Separate parts at** (2x); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -461,6 +461,21 @@ scales are mostly noise, and the thesis says the amplification "is limited
 by the amount of noise", so lower them if the layer is grainy. The preview
 is a reduced copy (about 1/6 for a full frame), so scales under about 6 px
 hardly show there; they show in the full-size layers.
+
+Requirement (d) of the thesis, kernel weight 0 between pixels in
+significantly different parts of the image judged by a maximum acceptable
+difference in value, is applied to the Moon and also to brightness: a pixel
+more than **Separate parts at** times (`--achf-part-limit`, default 2; 0 =
+off) brighter or darker than the corona at its height (the mean along its
+own circle, which the radial fall-off and the Moon cannot bias) is a part of
+its own; its kernels use only its own part, and the corona's leave it out.
+Without it a bright prominence darkened the corona beside it (a dark fringe;
+seen on the 2024 crop); with it the fringe is gone, while 247 pixels (the
+prominences) were made a part and fine coronal structure was unchanged. It
+costs about 3x the plain filter's time (34 s against 10 s on the crop). A
+thin bright line right at the limb remains: it is in the stack itself (MGN
+shows it too), whose first ~3 px outside the limb hold few frames; the final
+image takes the corona from there out.
 In the blend, the natural-layer base plays the part of the original image's
 share (K1 in h = K1 f + K2 g). The later refinements in Druckmüller's Corona
 4.1 software ("nonlinearity in the use of filtered images") are not
@@ -962,6 +977,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--adaptive-k` | adaptive layer: strength of the local contrast at each scale, k in arctan(k C) (default 0.7, as in Morgan & Druckmueller 2014) |
 | `--achf-scales` | Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in %% of the Sun's radius (default %(default)s: 0.5, 1, 3 and 10 px on the 2024 stack's Sun of 413 px, then 10%% and 20%%) |
 | `--achf-weights` | Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out (default %(default)s) |
+| `--achf-part-limit` | Adaptive (ACHF): a pixel this many times brighter or darker than the corona at its height (a prominence) is a separate part, left out of the corona's kernels and filtered with its own pixels only, so no dark fringe forms round it; 0 = off (default 2) |
 | `--noise-gate` | adaptive layer: each scale's detail counts only as far as it stands above the stack's noise at that scale (e.g. 3); 0 = off |
 | `--even` | take out this fraction of the large brightness differences round the Sun (streamers against coronal holes); 0 = off, e.g. 0.7 |
 | `--midtone` | put the inner corona's median brightness at this level with a midtones transfer curve; 0 = off, e.g. 0.6 |

@@ -1164,6 +1164,10 @@ class EnhanceTab(StepTab):
             cf.addRow(f"Scale {i + 1}:", row)
             self.achf_size.append(size)
             self.achf_w.append(sp)
+        self.achf_parts = self._dspin(0.0, 20.0, 2.0, 0.1, "Adaptive (ACHF): separate parts brighter or darker than this")
+        self.achf_parts.setDecimals(1)
+        self.achf_parts.setSuffix(" x")
+        cf.addRow("Separate parts at:", self.achf_parts)
         self.settings_layout.addWidget(achf_box)
         self._achf_form = cf
 
@@ -1270,6 +1274,14 @@ class EnhanceTab(StepTab):
                  "scales are mostly noise in a typical stack (on the 2024 stack structure stood about 2x above the "
                  "noise at 2.5 px, 9x and more from 10 px up): lower them if the layer is grainy. The bright glow by "
                  "the Moon comes from the large scales.", self._achf_form)
+        _tip(self.achf_parts, "Adaptive (ACHF) only: requirement (d) of the method (Druckmüllerová's thesis, "
+             "section 5.2). A pixel this many times brighter or darker than the corona at its height (a "
+             "prominence, mostly) is treated as a separate part of the picture: its kernels use only its own "
+             "pixels, and the corona's kernels leave it out. Without it a bright prominence darkens the corona "
+             "beside it (a dark fringe round it). Default 2; 0 switches the rule off. Lower picks out fainter "
+             "features as parts; much lower starts to split real coronal structure. On the 2024 crop, 2 made "
+             "247 pixels (the prominences) a part of their own. Costs some time: about 3x the plain filter.",
+             self._achf_form)
         af = self._adaptive_form
         _tip(self.mgn_k, "How strongly the adaptive layer brings out local contrast at each scale: k in the "
              "paper's arctan(k x C) (Morgan & Druckmüller 2014). Default 0.7, the paper's value. Higher gives "
@@ -1381,6 +1393,7 @@ class EnhanceTab(StepTab):
                              noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(), even=self.even.value(), midtone=self.midtone.value(), noise_gate=self.noise_gate.value(), mgn_k=self.mgn_k.value(),
                              achf_scales=tuple(self.achf_frac),
                              achf_weights=tuple(sp.value() for sp in self.achf_w),
+                             achf_part_limit=self.achf_parts.value(),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
                              blend_modes=modes, neutral_background=not self.keep_sky.isChecked())
 

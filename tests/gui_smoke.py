@@ -58,6 +58,7 @@ assert len(et.achf_w) == 6 and d.achf_weights == (1.0, 1.0, 1.0, 1.0, 0.0, 0.0),
 assert tuple(d.achf_scales) == tuple(ACHF_SCALES), d.achf_scales  # not rounded through the px display
 assert abs(et.achf_size[1].value() - ACHF_SCALES[1] * et.sun_r_full) < 0.01
 assert all(len(sz.toolTip()) > 100 for sz in et.achf_size)
+assert d.achf_part_limit == 2.0 and len(et.achf_parts.toolTip()) > 100
 et.achf_size[2].setValue(6.0)  # typed in px for this stack: kept as a fraction of its Sun's radius
 assert abs(et.params().achf_scales[2] - 6.0 / et.sun_r_full) < 1e-12
 et.achf_size[2].setValue(round(ACHF_SCALES[2] * et.sun_r_full, 2)); et.achf_frac[2] = ACHF_SCALES[2]

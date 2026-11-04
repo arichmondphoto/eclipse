@@ -86,6 +86,9 @@ class EnhanceParams:
     # first, and the strength of each.
     achf_scales: Sequence[float] = ACHF_SCALES
     achf_weights: Sequence[float] = ACHF_WEIGHTS
+    # Requirement (d): a pixel this many times brighter or darker than the corona round it (a
+    # prominence, the bright rim at the limb) is a part of its own; 0 = off.
+    achf_part_limit: float = 2.0
     mgn_k: float = 0.7  # adaptive layer strength: k of arctan(k C), 0.7 as in Morgan & Druckmueller (2014)
     # Adaptive layer, noise-aware (0 = off):
     # noise_gate: each scale's detail counts only as far as it stands above the noise at that scale
@@ -722,7 +725,7 @@ def _gauss_rows(a: np.ndarray, sigma: float) -> np.ndarray:
 
 
 def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
-              circular: Optional[bool] = None, band: int = 192) -> np.ndarray:
+              circular: Optional[bool] = None, band: int = 192, sigma_radial: Optional[float] = None) -> np.ndarray:
     """The local mean under Druckmüller's adaptive circular kernel (Druckmüllerová 2013, thesis
     section 5.2, eq. 5.1-5.2): a Gaussian of width ``sigma`` across the radius and ``sigma`` along
     the circle round the Sun's centre (cx, cy), in an incomplete convolution where pixels with
@@ -733,7 +736,8 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
     each row along its circle (width sigma / r in angle, by FFT, as the circle is periodic) gives
     exactly the kernel of eq. 5.1. Where the circle is nearly straight over the kernel (its sagitta
     2 sigma^2 / r stays under 0.1 px down to the smallest radius used) an ordinary weighted Gaussian
-    is the same thing and much faster; ``circular`` forces either way.
+    is the same thing and much faster; ``circular`` forces either way. ``sigma_radial`` (default
+    ``sigma``) gives the kernel another width across the radius (always computed on the circles).
     """
     from scipy.fft import irfft, next_fast_len, rfft
 
@@ -745,6 +749,9 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
     r = np.sqrt(xx * xx + yy * yy)
     used = w > 0
     r_min = float(r[used].min()) if used.any() else 0.0
+    sr = sigma if sigma_radial is None else float(sigma_radial)
+    if sr != sigma:
+        circular = True
     if circular is None:
         circular = 2.0 * sigma * sigma / max(r_min, 1.0) >= 0.1
     fw = f * w
@@ -757,7 +764,7 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
     # Cubic-spline coefficients once (map_coordinates would recompute them for every ring).
     cf = ndimage.spline_filter(fw, order=3, mode="constant")
     cw = ndimage.spline_filter(w, order=3, mode="constant")
-    margin = int(math.ceil(4 * sigma)) + 2
+    margin = int(math.ceil(4 * sr)) + 2
     r_max = float(r.max())
     for r0 in range(0, int(math.ceil(r_max)) + 1, band):
         r1 = r0 + band
@@ -776,8 +783,9 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
         pw = ndimage.map_coordinates(cw, [py, px], order=3, mode="constant", cval=0.0, prefilter=False)
         del py, px
         # Across the radius (constant sigma, rows are 1 px apart) ...
-        pf = _gauss_rows(pf, sigma)
-        pw = _gauss_rows(pw, sigma)
+        if sr > 0:
+            pf = _gauss_rows(pf, sr)
+            pw = _gauss_rows(pw, sr)
         # ... then along each circle, sigma measured along the circle of that row (eq. 5.1).
         k = np.arange(n_phi // 2 + 1, dtype=np.float64)[None, :]
         s_ang = sigma / np.maximum(rows, 0.5)[:, None]
@@ -795,8 +803,32 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
     return out
 
 
+def achf_parts(b: np.ndarray, valid: np.ndarray, cx: float, cy: float, limit: float,
+               ref_sigma: float) -> list[np.ndarray]:
+    """Requirement (d) of the thesis (section 5.2): pixels in significantly different parts of the
+    image do not count in each other's kernels, judged by a maximum acceptable difference in value.
+    Here: a pixel more than ``limit`` times brighter (or darker) than the corona at its height (the
+    mean along its circle, ``ref_sigma`` each way, taken without such pixels, twice so a wide
+    prominence does not hide itself) is in a part of its own. Returns the masks of the parts:
+    the corona, the brighter part, the darker part (empty ones left out)."""
+    if limit <= 1.0:
+        return [valid]
+    t = math.log(limit)
+    normal = valid
+    for _ in range(2):
+        # Along the pixel's own circle only (1 px across the radius): a mean reaching across the
+        # radius is pulled by the corona's steep fall-off, and by the Moon and the frame edges
+        # (where it is one-sided) far enough to make a whole ring by the limb a "part".
+        ref = achf_mean(b, normal.astype(np.float64), cx, cy, ref_sigma, sigma_radial=1.0)
+        bright = valid & (b - ref > t)
+        dark = valid & (b - ref < -t)
+        normal = valid & ~bright & ~dark
+    return [m for m in (normal, bright, dark) if m.any()]
+
+
 def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float,
-         cx: float, cy: float, weights: Optional[Sequence[float]] = None) -> np.ndarray:
+         cx: float, cy: float, weights: Optional[Sequence[float]] = None, part_limit: float = 2.0,
+         ref_sigma: Optional[float] = None) -> np.ndarray:
     """Adaptive (ACHF): Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin &
     Minarovjech 2006; defined in Druckmüllerová 2013, section 5.2). For each scale sigma the
     filtered image is the pixel minus its local mean under the circular kernel (:func:`achf_mean`),
@@ -815,10 +847,20 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
     ws = [1.0] * len(scales) if weights is None else [max(float(v), 0.0) for v in weights]
     if len(ws) != len(scales):
         raise ValueError(f"Adaptive (ACHF) needs one strength per scale ({len(scales)}), got {len(ws)}")
+    used = [s for s, ks in zip(scales, ws) if ks > 0]
+    parts = [valid]
+    if part_limit > 1.0 and used:
+        rs = ref_sigma if ref_sigma else max(4.0 * max(used), 8.0)
+        parts = achf_parts(b, valid, cx, cy, part_limit, rs)
     acc = np.zeros(b.shape, np.float64)
     for s, ks in zip(scales, ws):
         if ks > 0:  # a scale at 0 is not computed at all (and saves its time)
-            acc += ks * np.where(valid, b - achf_mean(b, w, cx, cy, float(s)), 0.0)
+            # Each part's pixels are averaged only with pixels of the same part (eq. 5.2's weight 0
+            # for the others), so a prominence neither darkens the corona beside it nor the reverse.
+            mean = np.zeros(b.shape, np.float64)
+            for m in parts:
+                mean[m] = achf_mean(b, m.astype(np.float64), cx, cy, float(s))[m]
+            acc += ks * np.where(valid, b - mean, 0.0)
     if sum(ws) <= 0:
         out = np.where(valid, 0.5, 0.0).astype(np.float32)
         return out
@@ -828,8 +870,7 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
     # surroundings (a bright ring). Set from all pixels, the ring took the whole range and left the
     # rest of the corona flat grey (seen on the 2024 crop).
     whole = valid
-    used = [s for s, ks in zip(scales, ws) if ks > 0]  # a scale at 0 has no kernel to be whole
-    if used:
+    if used:  # a scale at 0 has no kernel to be whole
         cover = ndimage.gaussian_filter(w, 2.0 * max(used), mode="constant")
         if (valid & (cover > 0.98)).sum() > 1000:
             whole = valid & (cover > 0.98)
@@ -1102,7 +1143,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             y = to_unit(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), valid)
         elif name_l == "achf":
             y = achf(lum, valid, [g.sun_r * f for f in p.achf_scales], nlev, g.sun_x, g.sun_y,
-                     list(p.achf_weights))
+                     list(p.achf_weights), p.achf_part_limit, ref_sigma=0.1 * g.sun_r)
         else:
             if p.noise_gate > 0:
                 say(f"adaptive: noise gate {p.noise_gate:g}")

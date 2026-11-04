@@ -129,3 +129,44 @@ def test_default_scales_are_andys_pixels_on_the_2024_sun_and_scale_with_the_sun(
     path = tmp_path / "s.fit"
     write_fits(path, np.zeros((3, 40, 50), np.float32), {"SUNR": 436.25, "OBJECT": "Sun", "MIRROR": True})
     assert read_fits_header(path) == {k: v for k, v in read_fits(path)[1].items()}
+
+
+def _prominence_scene():
+    r, phi = _grid()
+    corona = 1e3 * np.maximum(r / R_MOON, 1.0) ** -4
+    px, py = CX + (R_MOON + 7) * math.cos(1.0), CY + (R_MOON + 7) * math.sin(1.0)
+    yy, xx = np.mgrid[0:N, 0:N]
+    blob = np.hypot(xx - px, yy - py) < 6
+    img = np.where(blob, corona * 10.0, corona)  # a prominence 10x brighter than the corona by it
+    return r, phi, img, blob, np.hypot(xx - px, yy - py)
+
+
+def test_a_bright_prominence_leaves_no_dark_fringe():
+    """Requirement (d) of the thesis (section 5.2): a kernel weight is 0 where two pixels lie in
+    significantly different parts of the image, by a maximum acceptable difference in value. Without
+    it, a prominence 10x brighter than the corona drags the local mean of the corona beside it up,
+    and a dark fringe forms round it (seen on the 2024 crop); with it, the corona there comes out
+    as the corona elsewhere on the same circle."""
+    r, phi, img, blob, d = _prominence_scene()
+    valid = r > R_MOON + 1.5
+    scales = [1.0, 3.0, 10.0]
+    near = valid & ~blob & (d > 7) & (d < 16)  # the corona round the prominence
+    same_r = lambda out, sel: np.array([np.median(out[valid & (np.abs(r - rv) < 0.5) & (np.abs(phi + 1.5) < 0.6)])  # noqa: E731
+                                        for rv in r[sel]])
+    off = achf(img, valid, scales, 1e-6, CX, CY, part_limit=0)
+    on = achf(img, valid, scales, 1e-6, CX, CY, part_limit=2.0)
+    fringe_off = float(np.median(same_r(off, near) - off[near]))
+    fringe_on = float(np.median(same_r(on, near) - on[near]))
+    assert fringe_off > 0.03, fringe_off  # the fringe is real without the rule
+    assert abs(fringe_on) < 0.25 * fringe_off, (fringe_on, fringe_off)
+
+
+def test_part_rule_leaves_ordinary_structure_alone():
+    """Structure well under the limit (a loop of 30% contrast) is one part: the rule changes nothing."""
+    r, phi = _grid()
+    corona = 1e3 * np.maximum(r / R_MOON, 1.0) ** -4
+    loop = corona * (1 + 0.3 * np.exp(-0.5 * ((r - 120) / 2.0) ** 2) * (np.abs(phi - 1.0) < 0.3))
+    valid = r > R_MOON + 2
+    a = achf(loop, valid, [2.0, 4.0, 8.0], 1e-6, CX, CY, part_limit=0)
+    b = achf(loop, valid, [2.0, 4.0, 8.0], 1e-6, CX, CY, part_limit=2.0)
+    assert np.abs(a - b)[valid].max() < 1e-5
