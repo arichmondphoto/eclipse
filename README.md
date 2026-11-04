@@ -110,7 +110,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | Layers to write; each layer's blend strength (all 0 % by default) and Soft Light or Overlay; **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
+| 4 Enhance | Layers to write; each layer's blend strength (all 0 % by default) and Soft Light or Overlay; **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); **Adaptive (ACHF)** as a layer (not ticked by default: slow); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -352,6 +352,7 @@ pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | `fnrgf` | Fourier NRGF (Druckmüllerová et al. 2011): mean and spread follow position angle too, so faint and bright regions at the same height get similar contrast |
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
 | `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the log image: fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
+| `achf` | **Adaptive (ACHF)**: Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; defined in Druckmüllerová 2013): the log image minus its local mean under a kernel that follows the circles round the Sun, at the same six scales, Moon left out. Written only on request (`--layers ...,achf`): a few minutes on a full frame |
 | `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light (or Overlay) at the given opacities; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay` (`--blend none` to skip); the same thing you would do with layers in Photoshop |
 
 **Names used:** NRGF = Normalizing-Radial-Graded Filter; FNRGF = Fourier
@@ -422,6 +423,45 @@ real structure it stays flat instead of being stretched back up.
 `--adaptive-k` (**Strength** in the **Adaptive layer (MGN)** box, steps of
 0.01) is k in the paper's arctan(k C): how hard local contrast is brought
 out at each scale. The default, 0.7, is the paper's value.
+
+Adaptive (ACHF): Druckmüller's adaptive circular high-pass filter, as
+defined in H. Druckmüllerová's PhD thesis (*Application of Adaptive Filters
+in Processing of Solar Corona Images*, Brno University of Technology, 2013),
+section 5.2. For each scale sigma, each pixel's local mean is an incomplete
+convolution (eq. 5.2) with the kernel of eq. 5.1,
+exp(-((rho - r)^2 + (r (theta - phi))^2) / 2 sigma^2): a Gaussian of width sigma
+across the radius and sigma *along the Sun-centred circle*, so the kernel
+bends with the corona; the Moon and pixels outside the image have weight 0,
+so nothing rings at the limb. The filtered image is the pixel minus that
+mean. It is computed exactly in Sun-centred polar coordinates (rows 1 px
+apart in radius, the circle sampled at least 1 px apart; across the radius,
+then along each circle by FFT), or as an ordinary weighted Gaussian where the
+circle is straight to within 0.1 px over the kernel. Tests check the
+circular geometry (a corona that only varies with radius gives exactly the
+1-D blur of its profile; a straight kernel does not), that the Moon has no
+influence, and the small-scale limit. Not published, so chosen here and
+open to change: the filter works on log brightness, uses the same six scales
+as Adaptive (MGN) (0.6-20% of the Sun's radius; the thesis gives 0.5-64 px),
+sums them with equal weights (an amplification rising with spatial
+frequency), and is centred on mid-grey for the blend with its contrast set
+from where every kernel is whole (next to the Moon the large kernels see
+only the fainter corona outside, so a bright ring forms there; set from all
+pixels, that ring took the whole range and left the rest flat grey on the
+2024 crop). The 2006 paper's one published setting (its Figure 9, rising to
+20x for the finest detail) fits only with scales of about 0.5 and 1 px
+carrying most of the weight, which on a typical stack is mostly noise; the
+thesis says the amplification "is limited by the amount of noise", and
+Druckmüller's software set it with eight sliders. The equal weights are a
+starting point, not his setting. In the blend, the natural-layer base plays the part of the original image's
+share (K1 in h = K1 f + K2 g). The later refinements in Druckmüller's Corona
+4.1 software ("nonlinearity in the use of filtered images") are not
+published and not reproduced. It amplifies detail without normalizing its
+contrast, so it keeps more of the difference between bright and faint
+structure than Adaptive (MGN), and more noise in the faint corona. On the
+2024 crop (2530 px square) it took 61 s against 3 s for Adaptive (MGN); a full
+frame takes a few minutes, so it is off unless ticked (Enhance tab) or listed
+in `--layers`, and the preview computes it only when it is ticked, blended
+or shown.
 
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
@@ -903,7 +943,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--hdr` | HDR FITS file (default: the one saved by 'totality stack') |
 | `--output`, `-o` | output folder (default: next to the project) |
 | `--name` | output file name prefix (default: the project name) |
-| `--layers` | comma-separated layers to write (default: all of natural, nrgf, fnrgf, fnrgf_n, adaptive) |
+| `--layers` | comma-separated layers to write, from natural, nrgf, fnrgf, fnrgf_n, adaptive, achf (default: all but achf, which takes minutes on a full frame) |
 | `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' (default soft light), e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s) |
 | `--order` | FNRGF Fourier order (default 10) |
 | `--segments` | FNRGF angular segments (default 50) |

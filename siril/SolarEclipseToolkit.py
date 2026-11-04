@@ -1067,7 +1067,7 @@ class StackTab(StepTab):
 # ---------------------------------------------------------------------------
 
 LAYER_NAMES = {"natural": "Natural", "nrgf": "NRGF", "fnrgf": "FNRGF", "fnrgf_n": "FNRGF-N",
-               "adaptive": "Adaptive (MGN)", "blend": "Blend"}
+               "adaptive": "Adaptive (MGN)", "achf": "Adaptive (ACHF)", "blend": "Blend"}
 
 
 class EnhanceTab(StepTab):
@@ -1088,7 +1088,8 @@ class EnhanceTab(StepTab):
         self.layer_checks = {}
         for k in LAYERS:
             c = QCheckBox(LAYER_NAMES[k])
-            c.setChecked(True)
+            c.setChecked(k != "achf")  # Adaptive (ACHF) takes minutes on a full frame: on request
+            c.toggled.connect(self.changed)
             ll.addWidget(c)
             self.layer_checks[k] = c
         self.settings_layout.addWidget(lay)
@@ -1097,7 +1098,7 @@ class EnhanceTab(StepTab):
         bf = QFormLayout(blend)
         self.blend = {}
         self.blend_mode = {}
-        for k, default in (("fnrgf_n", 0), ("adaptive", 0), ("fnrgf", 0), ("nrgf", 0)):
+        for k, default in (("fnrgf_n", 0), ("adaptive", 0), ("achf", 0), ("fnrgf", 0), ("nrgf", 0)):
             sp = self._spin(0, 100, default, " %")
             mode = QComboBox()
             mode.addItems(["Soft Light", "Overlay"])
@@ -1199,6 +1200,13 @@ class EnhanceTab(StepTab):
             "fnrgf_n": "FNRGF-N = FNRGF with Noise compensation (from the same 2011 paper): FNRGF that discounts "
                        "the noise, so the faint outer corona is enhanced as strongly "
                        "as the inner corona without turning into grain. Usually the best structure layer.",
+            "achf": "Fine detail with Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & "
+                    "Minarovjech 2006; defined in H. Druckmüllerová's thesis, 2013): at each of the same six scales "
+                    "as Adaptive (MGN), each pixel minus its local mean, taken with a kernel that bends along the "
+                    "circle round the Sun and leaves the Moon out. Amplifies detail without normalizing its "
+                    "contrast, so it keeps more of the difference between bright and faint structure than "
+                    "Adaptive (MGN), and more noise in the faint corona. Slow: a few minutes on a full frame, "
+                    "about 10 s on the preview, so it is only computed when ticked, blended or shown.",
             "adaptive": "Fine detail (loops, plumes, streamer edges) at several scales and every direction. "
                         "Method: MGN = Multi-scale Gaussian Normalization (Morgan & Druckmüller 2014), the "
                         "published successor to Druckmüller's ACHF = Adaptive Circular High-pass Filter. "
@@ -1326,6 +1334,10 @@ class EnhanceTab(StepTab):
             return
         params = self.params()
         cached = self.small
+        # Adaptive (ACHF) is slow (about 10 s even on the preview): only when it is wanted.
+        want_achf = (self.layer_checks["achf"].isChecked() or self.blend["achf"].value() > 0
+                     or self.show_layer.currentData() == "achf")
+        preview_layers = tuple(k for k in LAYERS if k != "achf" or want_achf)
 
         def job(path, say, cancel):
             small = cached
@@ -1335,7 +1347,7 @@ class EnhanceTab(StepTab):
             # The preview shows every layer the blend needs, whatever is ticked for writing.
             from dataclasses import replace
 
-            p = replace(params, layers=tuple(LAYERS))
+            p = replace(params, layers=preview_layers)
             result, layers = W.enhance_preview(small, p, say, cancel)
             return small, result, layers
 
@@ -1355,6 +1367,8 @@ class EnhanceTab(StepTab):
         img = self.preview_layers.get(k)
         if img is not None:
             self.view.show_array(img)
+        elif k == "achf" and self.small is not None:
+            self.preview()  # Adaptive (ACHF) is computed on request: chosen here, so now
         elif self.outputs.get(k):
             self.view.show_file(self.outputs[k])
 

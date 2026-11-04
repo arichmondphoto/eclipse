@@ -117,7 +117,8 @@ def test_enhance_layers_and_colour():
     weight = np.ones(img.shape, np.float32)
     header = {"SUNX": g.sun_x, "SUNY": g.sun_y, "SUNR": g.sun_r, "MOONX": g.moon_x, "MOONY": g.moon_y,
               "MOONR": g.moon_r}
-    res, layers = E.enhance(hdr.copy(), weight, header, E.EnhanceParams())
+    assert E.EnhanceParams().layers == E.DEFAULT_LAYERS and "achf" not in E.DEFAULT_LAYERS  # slow: on request
+    res, layers = E.enhance(hdr.copy(), weight, header, E.EnhanceParams(layers=E.LAYERS))
     assert set(layers) == set(E.LAYERS) | {"blend"}
     # Corona white balance: the tint is removed.
     assert res.white == pytest.approx([1 / 1.3, 1.0, 1 / 0.7], rel=0.02)

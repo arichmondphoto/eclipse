@@ -45,7 +45,9 @@ from scipy import ndimage
 
 Say = Callable[[str], None]
 
-LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive")
+LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive", "achf")
+# Written unless asked otherwise: Adaptive (ACHF) takes minutes on a full frame, so only on request.
+DEFAULT_LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive")
 # The natural layer is the base; the others are soft-light layers at these opacities. All filter
 # layers start at 0 (Andy, Nov 2026: every Enhance option off by default), so the blend starts as the
 # natural layer and each layer is added by choice.
@@ -54,7 +56,7 @@ DEFAULT_BLEND = {"natural": 1.0}
 
 @dataclass
 class EnhanceParams:
-    layers: tuple[str, ...] = LAYERS
+    layers: tuple[str, ...] = DEFAULT_LAYERS
     segments: int = 50  # angular segments per circle (paper: 50)
     order: int = 10  # Fourier order (paper: 10)
     mean_attenuation: Optional[Sequence[float]] = None  # A_0..A_order; default 1, 0.9, ..., 0
@@ -693,6 +695,129 @@ def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: floa
 
 
 
+def _gauss_rows(a: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian blur down the columns (axis 0) by FFT, edges extended by their own values (as
+    ``mode="nearest"``); the same result as ``gaussian_filter1d`` and far faster for wide kernels."""
+    from scipy.fft import irfft, next_fast_len, rfft
+
+    pad = int(math.ceil(4 * sigma)) + 1
+    ap = np.pad(a, ((pad, pad), (0, 0)), mode="edge")
+    n = next_fast_len(ap.shape[0])
+    k = np.arange(n // 2 + 1, dtype=np.float64)[:, None]
+    tf = np.exp(-0.5 * (2 * math.pi * sigma * k / n) ** 2)
+    out = irfft(rfft(ap, n=n, axis=0) * tf, n=n, axis=0)
+    # The FFT wraps round: the padded edges (4 sigma) keep the far end out of the kept rows.
+    return out[pad:pad + a.shape[0]]
+
+
+def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
+              circular: Optional[bool] = None, band: int = 192) -> np.ndarray:
+    """The local mean under Druckmüller's adaptive circular kernel (Druckmüllerová 2013, thesis
+    section 5.2, eq. 5.1-5.2): a Gaussian of width ``sigma`` across the radius and ``sigma`` along
+    the circle round the Sun's centre (cx, cy), in an incomplete convolution where pixels with
+    ``w`` = 0 (the Moon, outside the image) do not count.
+
+    Computed in Sun-centred polar coordinates, one ring of radii at a time: rows 1 px apart in
+    radius, the circle sampled at least 1 px apart. Blurring each column across the radius and then
+    each row along its circle (width sigma / r in angle, by FFT, as the circle is periodic) gives
+    exactly the kernel of eq. 5.1. Where the circle is nearly straight over the kernel (its sagitta
+    2 sigma^2 / r stays under 0.1 px down to the smallest radius used) an ordinary weighted Gaussian
+    is the same thing and much faster; ``circular`` forces either way.
+    """
+    from scipy.fft import irfft, next_fast_len, rfft
+
+    f = np.asarray(f, dtype=np.float64)
+    w = np.asarray(w, dtype=np.float64)
+    h, wd = f.shape
+    yy = np.arange(h, dtype=np.float64)[:, None] - cy
+    xx = np.arange(wd, dtype=np.float64)[None, :] - cx
+    r = np.sqrt(xx * xx + yy * yy)
+    used = w > 0
+    r_min = float(r[used].min()) if used.any() else 0.0
+    if circular is None:
+        circular = 2.0 * sigma * sigma / max(r_min, 1.0) >= 0.1
+    fw = f * w
+    if not circular:
+        num = ndimage.gaussian_filter(fw, sigma, mode="constant")
+        den = ndimage.gaussian_filter(w, sigma, mode="constant")
+        return np.where(den > 1e-9, num / np.maximum(den, 1e-300), f)
+    phi = np.mod(np.arctan2(yy, xx), 2 * math.pi)
+    out = f.copy()
+    # Cubic-spline coefficients once (map_coordinates would recompute them for every ring).
+    cf = ndimage.spline_filter(fw, order=3, mode="constant")
+    cw = ndimage.spline_filter(w, order=3, mode="constant")
+    margin = int(math.ceil(4 * sigma)) + 2
+    r_max = float(r.max())
+    for r0 in range(0, int(math.ceil(r_max)) + 1, band):
+        r1 = r0 + band
+        sel = (r >= r0) & (r < r1)
+        if not sel.any():
+            continue
+        rows = np.arange(max(0, r0 - margin), r1 + margin + 1, dtype=np.float64)
+        n_phi = next_fast_len(max(64, int(math.ceil(2 * math.pi * rows[-1]))))
+        ang = np.arange(n_phi) * (2 * math.pi / n_phi)
+        py = cy + rows[:, None] * np.sin(ang)[None, :]
+        px = cx + rows[:, None] * np.cos(ang)[None, :]
+        # Cubic in and out: linear interpolation both ways blurred fine structure measurably (3.6%
+        # of a texture's spread at sigma 3 px, against 1.8%; the rest is eq. 5.1's even sampling
+        # in angle, which weights the outer side of the kernel a little less than a flat Gaussian).
+        pf = ndimage.map_coordinates(cf, [py, px], order=3, mode="constant", cval=0.0, prefilter=False)
+        pw = ndimage.map_coordinates(cw, [py, px], order=3, mode="constant", cval=0.0, prefilter=False)
+        del py, px
+        # Across the radius (constant sigma, rows are 1 px apart) ...
+        pf = _gauss_rows(pf, sigma)
+        pw = _gauss_rows(pw, sigma)
+        # ... then along each circle, sigma measured along the circle of that row (eq. 5.1).
+        k = np.arange(n_phi // 2 + 1, dtype=np.float64)[None, :]
+        s_ang = sigma / np.maximum(rows, 0.5)[:, None]
+        tf = np.exp(-0.5 * (s_ang * k) ** 2)
+        pf = irfft(rfft(pf, axis=1) * tf, n=n_phi, axis=1)
+        pw = irfft(rfft(pw, axis=1) * tf, n=n_phi, axis=1)
+        mean = np.where(pw > 1e-9, pf / np.maximum(pw, 1e-300), 0.0)
+        del pf, tf
+        ri = r[sel] - rows[0]
+        pj = phi[sel] * (n_phi / (2 * math.pi))
+        m = ndimage.map_coordinates(mean, [ri, pj], order=3, mode="grid-wrap")
+        ok = ndimage.map_coordinates(pw, [ri, pj], order=1, mode="grid-wrap") > 1e-9
+        out[sel] = np.where(ok, m, f[sel])
+        del mean, pw
+    return out
+
+
+def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float,
+         cx: float, cy: float) -> np.ndarray:
+    """Adaptive (ACHF): Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin &
+    Minarovjech 2006; defined in Druckmüllerová 2013, section 5.2). For each scale sigma the
+    filtered image is the pixel minus its local mean under the circular kernel (:func:`achf_mean`),
+    the Moon and unusable pixels left out; the scales are summed with equal weights, which gives
+    the amplification rising with spatial frequency of the 2006 paper's Figure 9.
+
+    Not published, so chosen here: it works on log brightness (as Adaptive (MGN) does, so the same
+    contrast counts the same at every height), uses the same scales as Adaptive (MGN), and is
+    centred on mid-grey for the blend, whose natural-layer base plays the part of the original
+    image's share (K1 in the thesis). Druckmüller's later "nonlinearity in the use of filtered
+    images" (Corona 4.1) is not published and not reproduced.
+    """
+    b = np.log(np.maximum(x, 0) + max(floor, 1e-9))
+    w = valid.astype(np.float64)
+    acc = np.zeros(b.shape, np.float64)
+    for s in scales:
+        acc += np.where(valid, b - achf_mean(b, w, cx, cy, float(s)), 0.0)
+    acc /= max(len(scales), 1)
+    # The contrast is set from where every kernel is whole: by the Moon (weight 0) the large scales
+    # see only the fainter corona outside, so every pixel there reads as brighter than its
+    # surroundings (a bright ring). Set from all pixels, the ring took the whole range and left the
+    # rest of the corona flat grey (seen on the 2024 crop).
+    whole = valid
+    if len(scales):
+        cover = ndimage.gaussian_filter(w, 2.0 * max(scales), mode="constant")
+        if (valid & (cover > 0.98)).sum() > 1000:
+            whole = valid & (cover > 0.98)
+    out = to_unit(acc.astype(np.float32), whole, 99.9)
+    out[~valid] = 0.0
+    return out
+
+
 def mgn(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float) -> np.ndarray:
     """Multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of log(X); local part only."""
     b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
@@ -955,6 +1080,8 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             y = to_unit(fnrgf(lum, r, phi, valid, stats, mean_att, std_att), valid)
         elif name_l == "fnrgf_n":
             y = to_unit(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), valid)
+        elif name_l == "achf":
+            y = achf(lum, valid, scales, nlev, g.sun_x, g.sun_y)
         else:
             if p.noise_gate > 0:
                 say(f"adaptive: noise gate {p.noise_gate:g}")

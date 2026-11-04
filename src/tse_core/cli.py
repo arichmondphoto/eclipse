@@ -15,7 +15,7 @@ from .frames import format_exposure, parse_duration
 from .inventory import Inventory, find_raw_files
 from .lensfun import LensfunDatabase, corner_falloff, download_database, import_database
 from .metadata import ExifToolReader, rawpy_available, read_frames
-from .enhance import DEFAULT_BLEND, LAYERS
+from .enhance import DEFAULT_BLEND, DEFAULT_LAYERS, LAYERS
 from .project import EventProject
 from .vignetting_profile import VignettingProfile, fit_profile_from_files, load_profile_library
 
@@ -145,8 +145,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--hdr", help="HDR FITS file (default: the one saved by 'totality stack')")
     p.add_argument("--output", "-o", help="output folder (default: next to the project)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
-    p.add_argument("--layers", default=",".join(LAYERS),
-                   help=f"comma-separated layers to write (default: all of {', '.join(LAYERS)})")
+    p.add_argument("--layers", default=",".join(DEFAULT_LAYERS),
+                   help=f"comma-separated layers to write, from {', '.join(LAYERS)} (default: all but achf, which "
+                        "takes minutes on a full frame)")
     p.add_argument("--blend", default=",".join(f"{k}={v}" for k, v in DEFAULT_BLEND.items()),
                    help="suggested blend as layer=weight pairs, each optionally ':overlay' (default soft light), "
                         "e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s)")
