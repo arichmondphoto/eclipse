@@ -1067,7 +1067,7 @@ class StackTab(StepTab):
 # ---------------------------------------------------------------------------
 
 LAYER_NAMES = {"natural": "Natural", "nrgf": "NRGF", "fnrgf": "FNRGF", "fnrgf_n": "FNRGF-N",
-               "adaptive": "Adaptive", "blend": "Blend"}
+               "adaptive": "Adaptive (MGN)", "blend": "Blend"}
 
 
 class EnhanceTab(StepTab):
