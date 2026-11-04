@@ -454,6 +454,62 @@ def _scaled_params(params, scale: float):
     return params
 
 
+# The detail box: at most this many full-size pixels a side, so it renders in seconds.
+DETAIL_MAX_SIDE = 2000
+
+
+def detail_box(box, shape, max_side: int = DETAIL_MAX_SIDE) -> tuple:
+    """A box (y0, y1, x0, x1) in full-size pixels inside an image of ``shape``, at most
+    ``max_side`` a side (shrunk about its centre)."""
+    h, w = int(shape[0]), int(shape[1])
+    y0, y1, x0, x1 = (int(round(v)) for v in box)
+    y0, y1 = sorted((y0, y1))
+    x0, x1 = sorted((x0, x1))
+    out = []
+    for a, b, n in ((y0, y1, h), (x0, x1, w)):
+        if b - a > max_side:
+            c = (a + b) // 2
+            a, b = c - max_side // 2, c - max_side // 2 + max_side
+        a, b = max(0, a), min(n, b)
+        if b - a < 1:
+            raise WorkflowError("The detail box is outside the picture.")
+        out += [a, b]
+    return tuple(out)
+
+
+def detail_frame_key(project_path, params, hdr_file: Optional[str] = None) -> tuple:
+    """What a prepared full-size stack depends on (see :func:`detail_frame`)."""
+    path = Path(project_path).resolve()
+    hdr = hdr_file or EventProject.load(path).parameters.get("stack", {}).get("hdr") or ""
+    return (str(path), str(hdr), bool(params.neutral_background), str(params.white), float(params.moon_margin_px))
+
+
+def detail_frame(project_path, params, hdr_file: Optional[str] = None, say: Optional[Say] = None, cancel=None):
+    """The full-size stack prepared for rendering detail boxes (sky, white balance, noise and dust
+    spots measured over the whole image, as the full-size write does)."""
+    from .enhance import prepare
+
+    say = reporter(say, cancel)
+    data = load_hdr(Path(project_path).resolve(), hdr_file)
+    say("Reading the full-size stack for the detail box (once; kept while the settings White balance "
+        "and Keep the sky stay the same)…")
+    frame = prepare(data.hdr, data.weight, data.header, params, progress=say)
+    del data
+    return frame
+
+
+def enhance_detail(frame, params, box, say: Optional[Say] = None, cancel=None) -> tuple[tuple, dict]:
+    """The layers of ``box`` at full resolution, exactly as the full-size write makes them there.
+    Returns (the box used, {layer: (h, w, 3) 0..1})."""
+    from .enhance import render, render_margin
+
+    say = reporter(say, cancel)
+    b = detail_box(box, frame.shape)
+    say(f"detail box {b[3] - b[2]} x {b[1] - b[0]} px at x {b[2]}, y {b[0]} (full size), with "
+        f"{render_margin(params, frame.g)} px round it for the filters")
+    return b, render(frame, params, box=b, progress=say)
+
+
 def enhance_project(project_path, params, hdr_file: Optional[str] = None, output: Optional[str] = None,
                     name: Optional[str] = None, say: Optional[Say] = None, cancel=None, fmt: str = "tif"):
     """Full-resolution enhancement, writing the TIFF layers. Returns (EnhanceResult, notes).

@@ -69,3 +69,22 @@ def test_double_click_toggles_fit_and_100():
     small = make(200, 150)  # smaller than the view: twice the fit instead
     small.toggle(350, 300)
     assert small.zoom == pytest.approx(2 * small.fit_scale())
+
+
+def test_dragged_box_in_image_pixels_and_back():
+    """Shift-drag on the Enhance preview chooses the detail box: view to image pixels, clipped to
+    the image, whole pixels; the outline is drawn back where it was dragged."""
+    z = ViewZoom()
+    z.set_view(800, 600)
+    z.set_image(1400, 933)
+    s = z.fit_scale()  # 800 / 1400
+    ox, oy = 0.0, (600 - 933 * s) / 2
+    box = z.box_from_drag(ox + 700 * s, oy + 100 * s, ox + 350 * s, oy + 400 * s)  # dragged up-left
+    assert box == (350, 100, 700, 400)
+    vx, vy = z.to_view(350, 100)
+    assert abs(vx - (ox + 350 * s)) < 1e-6 and abs(vy - (oy + 100 * s)) < 1e-6
+    assert z.box_from_drag(-50, -50, 5000, 5000) == (0, 0, 1400, 933)  # past the edges: clipped
+    assert z.box_from_drag(100, 100, 101, 140) is None  # a click, not a box
+    z.set_zoom(2.0, 400, 300)
+    for ix, iy in ((10.0, 20.0), (900.5, 700.25)):
+        assert all(abs(a - b) < 1e-9 for a, b in zip(z.to_image(*z.to_view(ix, iy)), (ix, iy)))

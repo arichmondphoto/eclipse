@@ -110,7 +110,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | Layers to write; each layer's blend strength (all 0 % by default) and Soft Light or Overlay; **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); **Adaptive (ACHF)** as a layer (not ticked by default: slow) and the size and strength of each of its six scales (0.5, 1, 3, 10 px on the 2024 frames at strength 1; two larger scales at 0) and **Separate parts at** (2x); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; then **Write full-size layers** |
+| 4 Enhance | Layers to write; each layer's blend strength (all 0 % by default) and Soft Light or Overlay; **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); **Adaptive (ACHF)** as a layer (not ticked by default: slow) and the size and strength of each of its six scales (0.5, 1, 3, 10 px on the 2024 frames at strength 1; two larger scales at 0) **Separate parts at** (2x) and **Contrast** (1); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers** |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -120,7 +120,10 @@ drag to move round, double-click for 100% at that point (again for fit),
 **0** fit, **1** 100%; the zoom shows in the corner. A preview run again with
 other settings keeps the zoom and place, so settings can be compared on the
 same detail. Previews are reduced copies (about 1400 px), so 100% there is a
-preview pixel, not a full-size one.
+preview pixel, not a full-size one. On the Enhance tab, hold **Shift** and
+drag on the whole picture to choose a **detail box**: the **Detail box (full
+resolution)** tab then shows that part at full resolution, the very pixels
+**Write full-size layers** will write (see [The detail box](#the-detail-box)).
 Long steps run in the background: progress shows in the log under each tab
 and **Cancel** stops at the next step. **Open … in Siril** loads a result
 into Siril. **Project → New from folder…**, **Open…** and **Save** manage
@@ -442,11 +445,9 @@ circular geometry (a corona that only varies with radius gives exactly the
 influence, and the small-scale limit. Not published, so chosen here and
 open to change: the filter works on log brightness, sums its scales with
 the strengths set (an amplification rising with spatial frequency), and is
-centred on mid-grey for the blend with its contrast set
-from where every kernel is whole (next to the Moon the large kernels see
-only the fainter corona outside, so a bright ring forms there; set from all
-pixels, that ring took the whole range and left the rest flat grey on the
-2024 crop). Its six scales each have a size and a strength (**Adaptive layer (ACHF):
+centred on mid-grey for the blend on a fixed scale: **Contrast** (`--achf-contrast`,
+default 1) plays the thesis's K2, and 1 is the contrast the layer had on the
+2024 crop at full size with the default scales. Its six scales each have a size and a strength (**Adaptive layer (ACHF):
 size and strength of each scale** on the Enhance tab; `--achf-scales` in %
 of the Sun's radius and `--achf-weights`, finest first), as the sliders of
 Druckmüller's Corona program did. Defaults (Andy's choice): sizes of 0.5, 1,
@@ -460,7 +461,7 @@ likewise rests on scales of about 0.5-1 px; on a typical stack the finest
 scales are mostly noise, and the thesis says the amplification "is limited
 by the amount of noise", so lower them if the layer is grainy. The preview
 is a reduced copy (about 1/6 for a full frame), so scales under about 6 px
-hardly show there; they show in the full-size layers.
+hardly show there; they show in the full-size layers and in the detail box.
 
 Requirement (d) of the thesis, kernel weight 0 between pixels in
 significantly different parts of the image judged by a maximum acceptable
@@ -489,6 +490,46 @@ or shown.
 
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
+
+### The detail box
+
+The preview is a reduced copy, so fine settings (the ACHF scales, the noise
+gate, Noise compensation) cannot be judged on it. Hold **Shift** and drag a
+box on the whole picture: the **Detail box (full resolution)** tab shows that
+part of the full-size stack, at most 2000 px a side, and redraws it when a
+setting changes. It is exactly what **Write full-size layers** writes there
+(tests compare boxes through the limb, at a frame corner and in the outer
+corona of the 2024 stack with the full-size result, every layer and the
+blend, to a thousandth of the range; the window's own check matches the
+written 16-bit blend to its rounding). The box is kept in the project.
+
+This works because the full-size write is two steps, and the box runs the
+second one only:
+
+1. **Prepare** (once per stack, and again only when **White balance** or
+   **Keep the sky** changes): the sky model, white balance, noise, dust
+   spots, the masks. Then, kept for later and re-measured only when a
+   setting they depend on changes: the circle statistics of the NRGF and
+   FNRGF layers, the natural layer's profile, black and white points,
+   evenness map and midtone, and the noise model of the gated adaptive layer.
+2. **Render** the box with a margin as wide as the filters reach (the
+   Gaussians to 4 sigma; for ACHF also its parts rule), then cut the margin
+   off. The reduced-size blurs are laid on the whole image's grid and the
+   gated layer's noise image is drawn in fixed 256 px tiles of the whole
+   image, so a box sees the same values as the full picture.
+
+For this the filter layers have **fixed output scales** instead of being
+stretched to each picture's own spread: NRGF 3.5, FNRGF 6.8, FNRGF-N 20,
+Adaptive (MGN) 1.0 and Adaptive (ACHF) 0.0106 (output 0.5 + arctan(1.6 y / s) / pi).
+These are the scales the old per-picture stretch used on the 2024 crop
+(2530 px square round the Sun) at full size with the default settings, so
+the layers look as they did there (checked: within 0.4 of an 8-bit step at
+the 95th percentile). The NRGF, FNRGF and MGN outputs are normalized, so a
+fixed scale suits any stack; for ACHF, **Contrast** adjusts it. The blend
+is no longer re-stretched after mixing and Midtone is no longer re-applied
+to it: with Midtone 0.6 the 2024 crop's blend came out about 3% darker in
+the mid-tones (median 0.478 against 0.507) than before; raise Midtone a
+little to match.
 
 ## Earthshine
 
@@ -978,6 +1019,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--achf-scales` | Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in %% of the Sun's radius (default %(default)s: 0.5, 1, 3 and 10 px on the 2024 stack's Sun of 413 px, then 10%% and 20%%) |
 | `--achf-weights` | Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out (default %(default)s) |
 | `--achf-part-limit` | Adaptive (ACHF): a pixel this many times brighter or darker than the corona at its height (a prominence) is a separate part, left out of the corona's kernels and filtered with its own pixels only, so no dark fringe forms round it; 0 = off (default 2) |
+| `--achf-contrast` | Adaptive (ACHF): contrast of the layer (the thesis's K2); 1 = the contrast it had on the 2024 stack at full size with the default scales (default 1) |
 | `--noise-gate` | adaptive layer: each scale's detail counts only as far as it stands above the stack's noise at that scale (e.g. 3); 0 = off |
 | `--even` | take out this fraction of the large brightness differences round the Sun (streamers against coronal holes); 0 = off, e.g. 0.7 |
 | `--midtone` | put the inner corona's median brightness at this level with a midtones transfer curve; 0 = off, e.g. 0.6 |

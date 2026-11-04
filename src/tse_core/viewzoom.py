@@ -56,6 +56,26 @@ class ViewZoom:
         s = self.scale()
         return self.cx + (vx - self.view_w / 2.0) / s, self.cy + (vy - self.view_h / 2.0) / s
 
+    def to_view(self, ix: float, iy: float) -> tuple[float, float]:
+        """Image pixel coordinates to view coordinates (the reverse of :meth:`to_image`)."""
+        s = self.scale()
+        return self.view_w / 2.0 + (ix - self.cx) * s, self.view_h / 2.0 + (iy - self.cy) * s
+
+    def box_from_drag(self, vx0: float, vy0: float, vx1: float, vy1: float) -> Optional[tuple[int, int, int, int]]:
+        """A box dragged in the view as (x0, y0, x1, y1) whole image pixels inside the image (x1, y1
+        exclusive); None for a drag under 4 view px either way (a click) or one that misses the image."""
+        if abs(vx1 - vx0) < 4 or abs(vy1 - vy0) < 4:
+            return None
+        ax, ay = self.to_image(vx0, vy0)
+        bx, by = self.to_image(vx1, vy1)
+        x0, x1 = sorted((ax, bx))
+        y0, y1 = sorted((ay, by))
+        x0, y0 = max(0, int(x0)), max(0, int(y0))
+        x1, y1 = min(self.img_w, int(x1 + 0.999)), min(self.img_h, int(y1 + 0.999))
+        if x1 - x0 < 1 or y1 - y0 < 1:
+            return None
+        return x0, y0, x1, y1
+
     def rects(self):
         """(target, source): where to draw (view px) and which part of the image (image px),
         each as (x, y, w, h); None when there is no image."""

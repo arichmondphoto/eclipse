@@ -89,6 +89,8 @@ class EnhanceParams:
     # Requirement (d): a pixel this many times brighter or darker than the corona round it (a
     # prominence, the bright rim at the limb) is a part of its own; 0 = off.
     achf_part_limit: float = 2.0
+    # Adaptive (ACHF): contrast of the layer (the thesis's K2); 1 = as tuned on the 2024 stack.
+    achf_contrast: float = 1.0
     mgn_k: float = 0.7  # adaptive layer strength: k of arctan(k C), 0.7 as in Morgan & Druckmueller (2014)
     # Adaptive layer, noise-aware (0 = off):
     # noise_gate: each scale's detail counts only as far as it stands above the noise at that scale
@@ -137,30 +139,42 @@ def geometry_from_header(header: dict) -> Geometry:
     return Geometry(mx, my, mr / 1.04, mx, my, mr)
 
 
-def polar(shape: tuple[int, int], g: Geometry) -> tuple[np.ndarray, np.ndarray]:
-    """Distance from the Sun's centre (px) and position angle (radians, 0..2pi) of every pixel."""
+def polar(shape: tuple[int, int], g: Geometry, origin: tuple[int, int] = (0, 0)) -> tuple[np.ndarray, np.ndarray]:
+    """Distance from the Sun's centre (px) and position angle (radians, 0..2pi) of every pixel of
+    the region of ``shape`` starting at ``origin`` (row, column) of the whole image."""
     h, w = shape
-    yy = np.arange(h, dtype=np.float32)[:, None] - np.float32(g.sun_y)
-    xx = np.arange(w, dtype=np.float32)[None, :] - np.float32(g.sun_x)
+    yy = (np.arange(origin[0], origin[0] + h, dtype=np.float64) - g.sun_y).astype(np.float32)[:, None]
+    xx = (np.arange(origin[1], origin[1] + w, dtype=np.float64) - g.sun_x).astype(np.float32)[None, :]
     r = np.sqrt(xx * xx + yy * yy)
     phi = np.arctan2(yy, xx)
     phi = np.where(phi < 0, phi + np.float32(2 * math.pi), phi).astype(np.float32)
     return r, phi
 
 
-def blur(img: np.ndarray, sigma: float) -> np.ndarray:
-    """Gaussian blur; large kernels run on a reduced copy (fast on 45-megapixel frames)."""
+def blur(img: np.ndarray, sigma: float, origin: tuple[int, int] = (0, 0)) -> np.ndarray:
+    """Gaussian blur; large kernels run on a reduced copy (fast on 45-megapixel frames).
+
+    ``origin`` is where ``img`` starts in the whole image: the reduced copy's blocks are laid on the
+    whole image's grid, so a region (a detail box with its margin) gets exactly the whole image's
+    result away from its edges."""
     if sigma <= 6:
         return ndimage.gaussian_filter(img, sigma, mode="reflect")
     f = int(sigma // 3)
     h, w = img.shape
-    ph, pw = (-h) % f, (-w) % f
-    a = np.pad(img, ((0, ph), (0, pw)), mode="reflect")
+    oy, ox = int(origin[0]) % f, int(origin[1]) % f
+    ph, pw = (-(h + oy)) % f, (-(w + ox)) % f
+    a = np.pad(img, ((oy, ph), (ox, pw)), mode="reflect")
     small = a.reshape(a.shape[0] // f, f, a.shape[1] // f, f).mean(axis=(1, 3))
     s2 = math.sqrt(max(sigma**2 - (f**2 - 1) / 12.0, 0.25)) / f
     small = ndimage.gaussian_filter(small, s2, mode="reflect")
     big = ndimage.zoom(small, f, order=1, mode="nearest", grid_mode=True)
-    return big[:h, :w].astype(img.dtype, copy=False)
+    return big[oy:oy + h, ox:ox + w].astype(img.dtype, copy=False)
+
+
+def _blur_reach(sigma: float) -> int:
+    """How far :func:`blur` reaches, in px (Gaussians are cut at 4 sigma; the reduced copy adds
+    up to two of its blocks)."""
+    return int(math.ceil(4 * sigma)) + (2 * int(sigma // 3) if sigma > 6 else 0) + 2
 
 
 def _attenuation(values: Optional[Sequence[float]], order: int) -> np.ndarray:
@@ -172,11 +186,23 @@ def _attenuation(values: Optional[Sequence[float]], order: int) -> np.ndarray:
     return a
 
 
-def to_unit(y: np.ndarray, valid: np.ndarray, spread: float = 99.5) -> np.ndarray:
-    """Map a zero-centred filter output to 0..1 with a soft arctan curve."""
-    s = float(np.percentile(np.abs(y[valid]), spread)) if valid.any() else 1.0
-    s = s or 1.0
-    return (0.5 + np.arctan(1.6 * y / s) / math.pi).astype(np.float32)
+# Fixed output scales of the filter layers (zero-centred output y shown as 0.5 + arctan(1.6 y / s) / pi).
+# Fixed, not measured on each image, so a detail box gives exactly the full-size result without
+# rendering the whole image. The values are the scales the earlier per-image stretch (99.5th
+# percentile of |y|; 99.9th for the adaptive layers) used on Andy's full-size 2024 crop (2530 px
+# square round the Sun) at the default settings, so the layers look as they did there. NRGF, FNRGF
+# and MGN outputs are normalized (z-scores, normalized contrast), so they suit any data; the ACHF's
+# is not (its Contrast setting is the thesis's K2).
+NRGF_SPREAD = 3.5
+FNRGF_SPREAD = 6.8
+FNRGF_N_SPREAD = 20.0
+MGN_SPREAD = 1.0
+ACHF_SPREAD = 0.0106
+
+
+def to_fixed(y: np.ndarray, spread: float) -> np.ndarray:
+    """A zero-centred filter output to 0..1 with a soft arctan curve and a fixed scale."""
+    return (0.5 + np.arctan(1.6 * y / spread) / math.pi).astype(np.float32)
 
 
 def roll_off(y: np.ndarray, shoulder: float) -> np.ndarray:
@@ -504,59 +530,119 @@ def radial_profile(x: np.ndarray, r: np.ndarray, valid: np.ndarray, smooth: floa
     return prof
 
 
-def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
-            flatten: float, stats_valid: Optional[np.ndarray] = None, show: Optional[np.ndarray] = None,
-            shoulder: float = 0.0, even: float = 0.0, sun_r: float = 0.0, midtone: float = 0.0) -> np.ndarray:
-    """Log stretch with part of the radial fall-off removed.
+@dataclass
+class NaturalStats:
+    """What the natural layer measures over the whole image (see :func:`natural_stats`)."""
 
-    ``x`` has the sky removed. The flattening stops where the corona sinks
-    into the noise, so the sky beyond stays dark instead of being lifted.
-    """
-    floor = max(noise_level, 1e-9)
-    lg = np.log(np.maximum(x, 0) + floor).astype(np.float32)
-    # Circle averages from completed circles (see ring_stats), so no arcs at the frame edges.
-    lo = float(lg[valid].min()) if valid.any() else 0.0
-    sv = valid if stats_valid is None else stats_valid
-    prof = ring_stats(lg - lo, r, phi, sv, 36, 0, 2.0).ring_mean + lo
-    prof = np.maximum(prof, math.log(4 * floor))  # no lifting of what is mostly noise
+    floor: float
+    prof: np.ndarray  # mean log brightness per 1-px circle (completed circles)
+    black: float
+    white: float
+    ring: Optional[np.ndarray] = None  # Evenness: the circles' mean of the large-scale map
+    loc: Optional[tuple] = None  # Evenness: the large-scale map as (blurred lg, blurred base, blurred mask)
+    mid: Optional[float] = None  # Midtone: the inner corona's median before the curve
+
+
+def _ring_at(prof: np.ndarray, r: np.ndarray) -> np.ndarray:
     ri = np.clip(r - 0.5, 0, len(prof) - 1.001)
     i0 = ri.astype(np.int32)
     t = ri - i0
-    base = (1 - t) * prof[i0] + t * prof[i0 + 1]
-    out = lg - np.float32(flatten) * base.astype(np.float32)
+    return ((1 - t) * prof[i0] + t * prof[i0 + 1]).astype(np.float32)
+
+
+def natural_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
+                  flatten: float, stats_valid: Optional[np.ndarray] = None, shoulder: float = 0.0,
+                  even: float = 0.0, sun_r: float = 0.0, midtone: float = 0.0,
+                  base_cache: Optional[dict] = None) -> NaturalStats:
+    """The natural layer's whole-image measurements: the circles' mean log brightness, the black
+    point (the sky), the white point (99.9th percentile), and for Evenness and Midtone their maps
+    and medians. ``base_cache`` keeps what does not depend on the settings between calls."""
+    cache = base_cache if base_cache is not None else {}
+    floor = max(noise_level, 1e-9)
+    lg = np.log(np.maximum(x, 0) + floor).astype(np.float32)
+    sv = valid if stats_valid is None else stats_valid
+    if "prof" not in cache:
+        # Circle averages from completed circles (see ring_stats), so no arcs at the frame edges.
+        lo = float(lg[valid].min()) if valid.any() else 0.0
+        prof = ring_stats(lg - lo, r, phi, sv, 36, 0, 2.0).ring_mean + lo
+        cache["prof"] = np.maximum(prof, math.log(4 * floor))  # no lifting of what is mostly noise
+    prof = cache["prof"]
+    base = _ring_at(prof, r)
+    out = lg - np.float32(flatten) * base
     # Black point: the sky (pixels at the noise level), so it comes out dark (taken before any
     # evening out, which must not move the sky).
     sky = valid & (x < floor)
     black = float(np.median(out[sky])) if sky.sum() > 1000 else float(np.percentile(out[valid], 0.5))
+    ring = loc = None
     if even > 0 and sun_r > 0:
-        # Streamers against coronal holes: the large-scale differences round each circle.
-        m = sv.astype(np.float32)
-        sig = max(4.0, 0.25 * sun_r)
-        loc = blur(np.where(sv, out, 0.0).astype(np.float32), sig) / np.maximum(blur(m, sig), 1e-6)
-        lo2 = float(loc[sv].min()) if sv.any() else 0.0
-        rp = ring_stats(loc - lo2, r, phi, sv, 36, 0, 2.0).ring_mean + lo2
-        ring = ((1 - t) * rp[i0] + t * rp[i0 + 1]).astype(np.float32)
-        # Only where the corona stands well above the noise (the sky stays where it is), and
-        # fading in from 1.15 to 1.4 solar radii: right by the limb the corona's contrast is so
-        # steep that taking out its local mean pushed the dark gaps between bright loops to black.
-        above = np.clip((lg - math.log(4 * floor)) / 2.0, 0.0, 1.0)
-        rin = np.clip((r / sun_r - 1.15) / 0.25, 0.0, 1.0)
-        out = out - np.float32(even) * (above * rin * (loc - ring)).astype(np.float32)
+        if "loc" not in cache:
+            m = sv.astype(np.float32)
+            sig = max(4.0, 0.25 * sun_r)
+            cache["loc"] = (blur(np.where(sv, lg, 0.0).astype(np.float32), sig),
+                            blur(np.where(sv, base, 0.0).astype(np.float32), sig), blur(m, sig))
+        loc = cache["loc"]
+        lmap = _loc_map(loc, flatten)
+        lo2 = float(lmap[sv].min()) if sv.any() else 0.0
+        ring = ring_stats(lmap - lo2, r, phi, sv, 36, 0, 2.0).ring_mean + lo2
+        out = _even(out, lg, lmap, _ring_at(ring, r), r, floor, even, sun_r)
     white = float(np.percentile(out[valid], 99.9))
-    out = np.clip(roll_off((out - black) / ((white - black) or 1.0), shoulder), 0.0, 1.0).astype(np.float32)
+    mid = None
     if midtone > 0 and sun_r > 0:
-        out = set_midtone(out, valid & (r > 1.05 * sun_r) & (r < 2.5 * sun_r), midtone)
-    out[~(valid if show is None else show)] = 0.0
+        y = np.clip(roll_off((out - black) / ((white - black) or 1.0), shoulder), 0.0, 1.0)
+        sel = valid & (r > 1.05 * sun_r) & (r < 2.5 * sun_r)
+        mid = float(np.median(y[sel])) if sel.any() else None
+    return NaturalStats(floor, prof, black, white, ring, loc, mid)
+
+
+def _loc_map(loc: tuple, flatten: float) -> np.ndarray:
+    """The large-scale mean of (lg - flatten * base), from its three blurred parts (blurs are
+    linear, so this is exactly the blur of the flattened image, for any flatten)."""
+    b_lg, b_base, b_m = loc
+    return ((b_lg - np.float32(flatten) * b_base) / np.maximum(b_m, 1e-6)).astype(np.float32)
+
+
+def _even(out, lg, lmap, ring, r, floor, even, sun_r):
+    # Streamers against coronal holes: the large-scale differences round each circle, only where
+    # the corona stands well above the noise (the sky stays where it is), and fading in from 1.15
+    # to 1.4 solar radii: right by the limb the corona's contrast is so steep that taking out its
+    # local mean pushed the dark gaps between bright loops to black.
+    above = np.clip((lg - math.log(4 * floor)) / 2.0, 0.0, 1.0)
+    rin = np.clip((r / sun_r - 1.15) / 0.25, 0.0, 1.0)
+    return out - np.float32(even) * (above * rin * (lmap - ring)).astype(np.float32)
+
+
+def natural_apply(x: np.ndarray, r: np.ndarray, st: NaturalStats, flatten: float, shoulder: float = 0.0,
+                  even: float = 0.0, sun_r: float = 0.0, midtone: float = 0.0,
+                  loc: Optional[tuple] = None, show: Optional[np.ndarray] = None) -> np.ndarray:
+    """The natural layer at each pixel from the whole image's measurements: a region (``x``, ``r``
+    and the ``loc`` maps cut to it) gives exactly the whole image's result there."""
+    lg = np.log(np.maximum(x, 0) + st.floor).astype(np.float32)
+    out = lg - np.float32(flatten) * _ring_at(st.prof, r)
+    if even > 0 and sun_r > 0 and st.ring is not None:
+        out = _even(out, lg, _loc_map(loc if loc is not None else st.loc, flatten), _ring_at(st.ring, r), r,
+                    st.floor, even, sun_r)
+    out = np.clip(roll_off((out - st.black) / ((st.white - st.black) or 1.0), shoulder), 0.0, 1.0).astype(np.float32)
+    if midtone > 0 and st.mid is not None:
+        out = _mtf(out, st.mid, midtone)
+    if show is not None:
+        out[~show] = 0.0
     return out
 
 
-def set_midtone(out: np.ndarray, sel: np.ndarray, midtone: float) -> np.ndarray:
-    """A midtones transfer curve (as in PixInsight's) that puts the median of ``out`` over ``sel``
-    at ``midtone``; black and white stay, and unlike a gamma it has a finite slope at black, so the
-    dark sky is lifted only a little."""
-    if not sel.any():
-        return out
-    a = float(np.median(out[sel]))
+def natural(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
+            flatten: float, stats_valid: Optional[np.ndarray] = None, show: Optional[np.ndarray] = None,
+            shoulder: float = 0.0, even: float = 0.0, sun_r: float = 0.0, midtone: float = 0.0) -> np.ndarray:
+    """Log stretch with part of the radial fall-off removed (the whole image at once).
+
+    ``x`` has the sky removed. The flattening stops where the corona sinks
+    into the noise, so the sky beyond stays dark instead of being lifted.
+    """
+    st = natural_stats(x, r, phi, valid, noise_level, flatten, stats_valid, shoulder, even, sun_r, midtone)
+    return natural_apply(x, r, st, flatten, shoulder, even, sun_r, midtone, show=valid if show is None else show)
+
+
+def _mtf(out: np.ndarray, a: float, midtone: float) -> np.ndarray:
+    """The midtones transfer curve that takes ``a`` to ``midtone``."""
     t = min(max(midtone, 0.05), 0.95)
     if not 0.0 < a < 1.0:
         return out
@@ -581,7 +667,7 @@ BLEND_MODES = {"soft light": soft_light, "overlay": overlay}
 
 def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Optional[dict] = None,
                      show: Optional[np.ndarray] = None, fade: Optional[np.ndarray] = None,
-                     shoulder: float = 0.0, midtone: float = 0.0, tone_sel: Optional[np.ndarray] = None) -> np.ndarray:
+                     shoulder: float = 0.0) -> np.ndarray:
     """The natural layer as the base, each filter layer applied at its weight (like layer opacity
     in Photoshop) in its mode, soft light unless ``modes`` says overlay. The filter layers are
     centred on mid-grey, which both modes treat as 'no change', so they add structure without
@@ -600,9 +686,10 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
             base = (1 - wf) * base + wf * fn(base, layers[k])
         else:
             base = (1 - w) * base + w * fn(base, layers[k])
-    out = stretch(base, valid, 0.05, 99.95, shoulder)
-    if midtone > 0 and tone_sel is not None:
-        out = set_midtone(out, tone_sel, midtone)
+    # No stretch measured over the whole image (a detail box must give the full-size result): the
+    # natural base already runs from black to white, and both modes keep 0..1. The natural
+    # layer's midtone curve is already in the base, so it is not measured again here.
+    out = np.clip(roll_off(base, shoulder), 0.0, 1.0).astype(np.float32)
     out[~(valid if show is None else show)] = 0.0
     return out
 
@@ -628,12 +715,12 @@ def _masked_fill(b: np.ndarray, valid: np.ndarray, r: float) -> np.ndarray:
     return f
 
 
-def correlated_noise(shape, valid: np.ndarray, sample: np.ndarray, seed: int = 0, patch: int = 64) -> np.ndarray:
-    """Unit noise with the spatial spectrum measured in ``sample`` over ``valid`` (demosaicing and
-    the alignment's resampling correlate neighbouring pixels, so white noise understates the noise
-    left after any smoothing), scaled so that the 1-px scatter statistic used by
-    :func:`noise_map` reads 1. The spectrum is the average over patches of the residual after a
-    6 px blur, so smooth structure in the sample does not count as noise."""
+def noise_kernel(valid: np.ndarray, sample: np.ndarray, patch: int = 64) -> Optional[np.ndarray]:
+    """The convolution kernel giving unit noise the spatial spectrum measured in ``sample`` over
+    ``valid`` (demosaicing and the alignment's resampling correlate neighbouring pixels, so white
+    noise understates the noise left after any smoothing); None if too little to measure. The
+    spectrum is the average over patches of the residual after a 6 px blur, so smooth structure in
+    the sample does not count as noise."""
     r = (sample - ndimage.gaussian_filter(sample, 6.0)).astype(np.float32)
     h, w = r.shape
     win = np.outer(np.hanning(patch), np.hanning(patch))
@@ -649,54 +736,107 @@ def correlated_noise(shape, valid: np.ndarray, sample: np.ndarray, seed: int = 0
                     count += 1
         if count >= 4:
             break
-    n = np.random.default_rng(seed).normal(0.0, 1.0, shape).astype(np.float32)
-    if count >= 4:
-        # Undo the 6 px high-pass where it let enough through; below that frequency the noise is
-        # taken as flat (demosaicing and resampling correlate only neighbouring pixels).
-        fy = np.fft.fftfreq(patch)[:, None]
-        fx = np.fft.fftfreq(patch)[None, :]
-        f = np.hypot(fy, fx)
-        t = 1.0 - np.exp(-2.0 * math.pi**2 * 36.0 * f**2)
-        psd = psd / count
-        ok = t > 0.5
-        corr = np.where(ok, psd / np.maximum(t, 1e-6) ** 2, 0.0)
-        f_cut = float(f[ok].min())
-        ring = ok & (f < f_cut * 1.5)
-        corr = np.where(ok, corr, float(corr[ring].mean()))
-        kern = np.real(np.fft.fftshift(np.fft.ifft2(np.sqrt(corr))))
-        kern /= np.sqrt((kern**2).sum())
+    if count < 4:
+        return None
+    # Undo the 6 px high-pass where it let enough through; below that frequency the noise is
+    # taken as flat (demosaicing and resampling correlate only neighbouring pixels).
+    fy = np.fft.fftfreq(patch)[:, None]
+    fx = np.fft.fftfreq(patch)[None, :]
+    f = np.hypot(fy, fx)
+    t = 1.0 - np.exp(-2.0 * math.pi**2 * 36.0 * f**2)
+    psd = psd / count
+    ok = t > 0.5
+    corr = np.where(ok, psd / np.maximum(t, 1e-6) ** 2, 0.0)
+    f_cut = float(f[ok].min())
+    ring = ok & (f < f_cut * 1.5)
+    corr = np.where(ok, corr, float(corr[ring].mean()))
+    kern = np.real(np.fft.fftshift(np.fft.ifft2(np.sqrt(corr))))
+    kern /= np.sqrt((kern**2).sum())
+    return kern.astype(np.float32)
+
+
+NOISE_TILE = 256
+
+
+def tiled_noise(shape: tuple[int, int], origin: tuple[int, int], seed: int,
+                kern: Optional[np.ndarray]) -> np.ndarray:
+    """Noise for the region of the whole image starting at ``origin``: white noise drawn per fixed
+    256 px tile of the whole image (each tile from its own seed), then given the measured spectrum.
+    A region gets exactly the noise the whole image has there."""
+    h, w = shape
+    oy, ox = int(origin[0]), int(origin[1])
+    pad = (kern.shape[0] // 2 + 1) if kern is not None else 0
+    y0, y1, x0, x1 = oy - pad, oy + h + pad, ox - pad, ox + w + pad
+    T = NOISE_TILE
+    ty0, ty1 = y0 // T, (y1 - 1) // T
+    tx0, tx1 = x0 // T, (x1 - 1) // T
+    big = np.empty(((ty1 - ty0 + 1) * T, (tx1 - tx0 + 1) * T), np.float32)
+    for ty in range(ty0, ty1 + 1):
+        for tx in range(tx0, tx1 + 1):
+            rng = np.random.default_rng([int(seed) + 7, ty + 1_000_000, tx + 1_000_000])
+            big[(ty - ty0) * T:(ty - ty0 + 1) * T, (tx - tx0) * T:(tx - tx0 + 1) * T] = rng.normal(0.0, 1.0, (T, T))
+    n = big[y0 - ty0 * T:y1 - ty0 * T, x0 - tx0 * T:x1 - tx0 * T]
+    if kern is not None:
         from scipy.signal import fftconvolve
-        n = fftconvolve(n, kern.astype(np.float32), mode="same").astype(np.float32)
+
+        n = fftconvolve(n, kern, mode="same").astype(np.float32)
+    return n[pad:pad + h, pad:pad + w]
+
+
+def noise_norm(kern: Optional[np.ndarray], seed: int = 0) -> float:
+    """The factor that makes :func:`tiled_noise` read 1 on the 1-px scatter statistic used by
+    :func:`noise_map` (measured on a fixed 1024 px sample, so the same everywhere)."""
+    n = tiled_noise((1024, 1024), (0, 0), seed, kern)
     hp = n - ndimage.gaussian_filter(n, 1.0)
-    return (n / (1.4826 * float(np.median(np.abs(hp))) / 0.96)).astype(np.float32)
+    return 1.4826 * float(np.median(np.abs(hp))) / 0.96
+
+
+def correlated_noise(shape, valid: np.ndarray, sample: np.ndarray, seed: int = 0, patch: int = 64) -> np.ndarray:
+    """Unit noise with the spatial spectrum measured in ``sample`` over ``valid``, scaled so that
+    the 1-px scatter statistic used by :func:`noise_map` reads 1."""
+    kern = noise_kernel(valid, sample, patch)
+    return (tiled_noise(shape, (0, 0), seed, kern) / noise_norm(kern, seed)).astype(np.float32)
+
+
+def gated_prep(x: np.ndarray, valid: np.ndarray, floor: float, sun_r: float, seed: int = 0) -> dict:
+    """What the noise-gated adaptive layer measures over the whole image: the log image with the
+    Moon and frame edges filled (``bf``), and the noise model (kernel and scale)."""
+    b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
+    bf = _masked_fill(b, valid, sun_r)
+    smooth_b = blur(bf, max(4.0, 0.05 * sun_r))  # the faint part, as a region (not single pixels)
+    faint = valid & (smooth_b < np.percentile(smooth_b[valid], 30))
+    kern = noise_kernel(faint, bf)
+    return {"bf": bf, "kern": kern, "norm": noise_norm(kern, seed), "seed": seed}
 
 
 def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float,
-              noise: np.ndarray, sun_r: float, gate: float = 3.0, seed: int = 0) -> np.ndarray:
-    """:func:`mgn` with the noise kept down: each scale's detail weighted by how far it stands above the noise at that scale (a Wiener gain;
-    the noise at each scale comes from a noise image with the stack's measured noise and
-    correlation). Pure noise gives almost no contrast."""
-    b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
-    bf = _masked_fill(b, valid, sun_r)
+              noise: np.ndarray, sun_r: float, gate: float = 3.0, seed: int = 0, prep: Optional[dict] = None,
+              origin: tuple[int, int] = (0, 0)) -> np.ndarray:
+    """:func:`mgn` with the noise kept down: each scale's detail weighted by how far it stands above
+    the noise at that scale (a Wiener gain; the noise at each scale comes from a noise image with
+    the stack's measured noise and correlation). Pure noise gives almost no contrast.
+
+    ``prep`` (from :func:`gated_prep` on the whole image) and ``origin`` let it run on a region."""
+    if prep is None:
+        prep = gated_prep(x, valid, floor, sun_r, seed)
+    bf = prep["bf"]
     sig = np.where(valid, noise / np.maximum(np.maximum(x, 0) + max(floor, 1e-9), 1e-12), 0.0)
     vm = valid.astype(np.float32)
     sig = ndimage.gaussian_filter(sig.astype(np.float32), 4.0) / np.maximum(ndimage.gaussian_filter(vm, 4.0), 1e-3)
-    smooth_b = blur(bf, max(4.0, 0.05 * sun_r))  # the faint part, as a region (not single pixels)
-    faint = valid & (smooth_b < np.percentile(smooth_b[valid], 30))
-    nz = correlated_noise(b.shape, faint, bf, seed) * sig
-    del b, sig, vm, smooth_b, faint  # full frames are 45 megapixels: free what is done with
+    nz = tiled_noise(bf.shape, origin, prep["seed"], prep["kern"]) / prep["norm"] * sig
+    del sig, vm  # full frames are 45 megapixels: free what is done with
     nz = np.where(valid, nz, 0.0).astype(np.float32)
     acc = np.zeros_like(bf)
     g2 = gate * gate
     for w in scales:
-        d = bf - blur(bf, w)
-        sd2 = blur(d * d, w)
-        dn = nz - blur(nz, w)
+        d = bf - blur(bf, w, origin)
+        sd2 = blur(d * d, w, origin)
+        dn = nz - blur(nz, w, origin)
         # Both judged over a wider area than the scale itself: over a few pixels the estimates
         # scatter so much that noise passes the gate by chance.
         wide = max(3.0 * w, 8.0)
-        n2 = blur(dn * dn, wide)
-        s2 = blur(d * d, wide)
+        n2 = blur(dn * dn, wide, origin)
+        s2 = blur(d * d, wide, origin)
         gain = np.maximum(s2 - n2, 0.0) / np.maximum(s2 + (g2 - 1.0) * n2, 1e-12) if gate > 0 else 1.0
         acc += np.arctan(k * gain * d / np.sqrt(np.maximum(sd2, 1e-12)))
         del d, sd2, dn, n2, s2, gain
@@ -706,7 +846,6 @@ def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: floa
     out = (0.5 + np.arctan(1.6 * acc / 0.6) / math.pi).astype(np.float32)
     out[~valid] = 0.0
     return out
-
 
 
 def _gauss_rows(a: np.ndarray, sigma: float) -> np.ndarray:
@@ -725,7 +864,8 @@ def _gauss_rows(a: np.ndarray, sigma: float) -> np.ndarray:
 
 
 def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
-              circular: Optional[bool] = None, band: int = 192, sigma_radial: Optional[float] = None) -> np.ndarray:
+              circular: Optional[bool] = None, band: int = 192, sigma_radial: Optional[float] = None,
+              r_ref: Optional[float] = None) -> np.ndarray:
     """The local mean under Druckmüller's adaptive circular kernel (Druckmüllerová 2013, thesis
     section 5.2, eq. 5.1-5.2): a Gaussian of width ``sigma`` across the radius and ``sigma`` along
     the circle round the Sun's centre (cx, cy), in an incomplete convolution where pixels with
@@ -748,7 +888,9 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
     xx = np.arange(wd, dtype=np.float64)[None, :] - cx
     r = np.sqrt(xx * xx + yy * yy)
     used = w > 0
-    r_min = float(r[used].min()) if used.any() else 0.0
+    # The smallest radius that matters: given (the Moon's radius, so a detail box decides as the
+    # whole image does), or the smallest radius with data.
+    r_min = float(r_ref) if r_ref is not None else (float(r[used].min()) if used.any() else 0.0)
     sr = sigma if sigma_radial is None else float(sigma_radial)
     if sr != sigma:
         circular = True
@@ -804,7 +946,7 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
 
 
 def achf_parts(b: np.ndarray, valid: np.ndarray, cx: float, cy: float, limit: float,
-               ref_sigma: float) -> list[np.ndarray]:
+               ref_sigma: float, r_ref: Optional[float] = None) -> list[np.ndarray]:
     """Requirement (d) of the thesis (section 5.2): pixels in significantly different parts of the
     image do not count in each other's kernels, judged by a maximum acceptable difference in value.
     Here: a pixel more than ``limit`` times brighter (or darker) than the corona at its height (the
@@ -819,7 +961,7 @@ def achf_parts(b: np.ndarray, valid: np.ndarray, cx: float, cy: float, limit: fl
         # Along the pixel's own circle only (1 px across the radius): a mean reaching across the
         # radius is pulled by the corona's steep fall-off, and by the Moon and the frame edges
         # (where it is one-sided) far enough to make a whole ring by the limb a "part".
-        ref = achf_mean(b, normal.astype(np.float64), cx, cy, ref_sigma, sigma_radial=1.0)
+        ref = achf_mean(b, normal.astype(np.float64), cx, cy, ref_sigma, sigma_radial=1.0, r_ref=r_ref)
         bright = valid & (b - ref > t)
         dark = valid & (b - ref < -t)
         normal = valid & ~bright & ~dark
@@ -828,7 +970,7 @@ def achf_parts(b: np.ndarray, valid: np.ndarray, cx: float, cy: float, limit: fl
 
 def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float,
          cx: float, cy: float, weights: Optional[Sequence[float]] = None, part_limit: float = 2.0,
-         ref_sigma: Optional[float] = None) -> np.ndarray:
+         ref_sigma: Optional[float] = None, r_ref: Optional[float] = None, contrast: float = 1.0) -> np.ndarray:
     """Adaptive (ACHF): Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin &
     Minarovjech 2006; defined in Druckmüllerová 2013, section 5.2). For each scale sigma the
     filtered image is the pixel minus its local mean under the circular kernel (:func:`achf_mean`),
@@ -851,7 +993,7 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
     parts = [valid]
     if part_limit > 1.0 and used:
         rs = ref_sigma if ref_sigma else max(4.0 * max(used), 8.0)
-        parts = achf_parts(b, valid, cx, cy, part_limit, rs)
+        parts = achf_parts(b, valid, cx, cy, part_limit, rs, r_ref)
     acc = np.zeros(b.shape, np.float64)
     for s, ks in zip(scales, ws):
         if ks > 0:  # a scale at 0 is not computed at all (and saves its time)
@@ -859,42 +1001,56 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
             # for the others), so a prominence neither darkens the corona beside it nor the reverse.
             mean = np.zeros(b.shape, np.float64)
             for m in parts:
-                mean[m] = achf_mean(b, m.astype(np.float64), cx, cy, float(s))[m]
+                mean[m] = achf_mean(b, m.astype(np.float64), cx, cy, float(s), r_ref=r_ref)[m]
             acc += ks * np.where(valid, b - mean, 0.0)
     if sum(ws) <= 0:
         out = np.where(valid, 0.5, 0.0).astype(np.float32)
         return out
     acc /= sum(ws)
-    # The contrast is set from where every kernel is whole: by the Moon (weight 0) the large scales
-    # see only the fainter corona outside, so every pixel there reads as brighter than its
-    # surroundings (a bright ring). Set from all pixels, the ring took the whole range and left the
-    # rest of the corona flat grey (seen on the 2024 crop).
-    whole = valid
-    if used:  # a scale at 0 has no kernel to be whole
-        cover = ndimage.gaussian_filter(w, 2.0 * max(used), mode="constant")
-        if (valid & (cover > 0.98)).sum() > 1000:
-            whole = valid & (cover > 0.98)
-    out = to_unit(acc.astype(np.float32), whole, 99.9)
+    # A fixed output scale (the thesis's K2 is the Contrast setting): measured over the whole image
+    # it would make a detail box differ from the full-size result.
+    out = to_fixed((acc * contrast).astype(np.float32), ACHF_SPREAD)
     out[~valid] = 0.0
     return out
 
 
-def mgn(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float) -> np.ndarray:
-    """Multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of log(X); local part only."""
+def _achf_reach(scales: Sequence[float], weights: Sequence[float], part_limit: float, ref_sigma: float) -> int:
+    used = [s for s, k in zip(scales, weights) if k > 0]
+    if not used:
+        return 0
+    reach = int(math.ceil(4 * max(used))) + 8
+    if part_limit > 1.0:  # the parts' reference reaches 4 ref_sigma along the circle, twice
+        reach += 2 * int(math.ceil(4 * ref_sigma)) + 8
+    return reach
+
+
+def mgn(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float,
+        origin: tuple[int, int] = (0, 0)) -> np.ndarray:
+    """Multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of log(X); local part only,
+    on a fixed output scale (:data:`MGN_SPREAD`), as the paper's mapping is fixed."""
     b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
     # Fill invalid pixels with their surroundings so the Moon and frame edges do not ring.
     m = valid.astype(np.float32)
-    fill = blur(b * m, 8.0) / np.maximum(blur(m, 8.0), 1e-6)
+    fill = blur(b * m, 8.0, origin) / np.maximum(blur(m, 8.0, origin), 1e-6)
     b = np.where(valid, b, fill).astype(np.float32)
     acc = np.zeros_like(b)
     for w in scales:
-        d = b - blur(b, w)
-        sd = np.sqrt(np.maximum(blur(d * d, w), 1e-12))
+        d = b - blur(b, w, origin)
+        sd = np.sqrt(np.maximum(blur(d * d, w, origin), 1e-12))
         acc += np.arctan(k * d / sd)
     acc /= len(scales)
-    out = to_unit(acc, valid, 99.9)
+    out = to_fixed(acc, MGN_SPREAD)
     out[~valid] = 0.0
     return out
+
+
+def _mgn_reach(scales: Sequence[float], gated: bool) -> int:
+    """How far the adaptive layer reaches from a pixel (for a detail box's margin)."""
+    w = max(scales)
+    reach = _blur_reach(8.0) + _blur_reach(w) + _blur_reach(w)  # fill, detail, its spread
+    if gated:  # the noise image (kernel 64 px, 4 px smoothing) and the 3x wider judging blurs
+        reach = max(reach, _blur_reach(8.0) + _blur_reach(w) + _blur_reach(max(3 * w, 8.0)) + 32 + 16)
+    return reach
 
 
 # ---------------------------------------------------------------------------
@@ -1051,17 +1207,40 @@ class EnhanceResult:
         return "\n".join(lines)
 
 
-def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[EnhanceParams] = None,
-            out_dir=None, name: str = "corona", progress: Optional[Say] = None,
-            fmt: str = "tif", moon: Optional[MoonInput] = None, keep: Optional[set] = None) -> tuple[EnhanceResult, dict]:
-    """``hdr`` is (h, w, 3) linear. Writes one image per layer to ``out_dir`` (``fmt``: tif, png or
-    jpg; see ``imageout``); without
-    ``out_dir`` returns the layers instead as {name: (h, w, 3) float32 in 0..1}."""
+@dataclass
+class Frame:
+    """A stack made ready for enhancing (see :func:`prepare`): the sky removed and white balanced,
+    and everything the layers measure over the whole image, so any region can be rendered alone
+    (:func:`render`) and comes out exactly as in the full-size picture."""
+
+    g: Geometry
+    shape: tuple
+    rgb: np.ndarray  # (h, w, 3) linear, sky removed, white balanced
+    lum: np.ndarray
+    weight: np.ndarray
+    valid: np.ndarray  # pixels with corona data (off the Moon, inside the frame)
+    show: np.ndarray  # pixels drawn by the natural layer and the blend (with the Moon if put in)
+    stats_valid: np.ndarray  # valid without dust spots and stars (for the circle statistics)
+    noise: np.ndarray
+    nlev: float
+    wb: np.ndarray
+    bg: np.ndarray
+    sky_kind: str
+    colour_floor: float
+    moon: Optional[MoonInput] = None
+    moon_margin_px: float = 1.5
+    cache: dict = field(default_factory=dict)  # whole-image measurements, by what they depend on
+
+
+def prepare(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[EnhanceParams] = None,
+            moon: Optional[MoonInput] = None, progress: Optional[Say] = None) -> Frame:
+    """The whole-image part of enhancing: masks, sky, white balance, noise, dust spots. Depends only
+    on the settings White and Neutral background (and the Moon); ``hdr`` is changed in place."""
     say = progress or (lambda _m: None)
     p = params or EnhanceParams()
     g = geometry_from_header(header)
     h, w = hdr.shape[:2]
-    r, phi = polar((h, w), g)
+    r, _ = polar((h, w), g)
     finite = np.isfinite(hdr).all(axis=2)
     hdr = np.asarray(hdr, dtype=np.float32)
     np.nan_to_num(hdr, copy=False, nan=0.0, posinf=0.0, neginf=0.0)  # in place: saves 0.5 GB
@@ -1080,13 +1259,6 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     # With the Moon put into the stack: the statistics still come from the corona only (valid),
     # but the natural layer and the blend are drawn over the Moon too, with the same curve.
     show = valid if moon is None else (valid | moon.mask)
-    fade = None
-    if moon is not None:
-        dmoon = np.sqrt((np.arange(h, dtype=np.float32)[:, None] - np.float32(g.moon_y)) ** 2
-                        + (np.arange(w, dtype=np.float32)[None, :] - np.float32(g.moon_x)) ** 2) - g.moon_r
-        t = np.clip((dmoon - p.moon_margin_px) / 4.0, 0.0, 1.0)
-        fade = (t * t * (3 - 2 * t)).astype(np.float32)
-        del dmoon, t
 
     camera_wb = None
     if all(k in header for k in ("WBR", "WBG", "WBB")):
@@ -1103,68 +1275,145 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     wb = white_balance(hdr, r, valid, g, p.white, camera_wb)
     hdr *= wb[None, None, :]
     bg = bg * wb
-    rgb = hdr
-    lum = rgb.mean(axis=2)
+    lum = hdr.mean(axis=2)
     say(f"white balance {wb.round(3).tolist()}; sky removed ({sky_kind}) {bg.tolist()}")
-
     stats_valid = valid & ~spot_mask(lum, valid, r, 2.0 * g.sun_r)
     say(f"{int((valid & ~stats_valid).sum())} pixels in dust spots or stars left out of the circle statistics")
+    del r
     noise = noise_map(lum, weight, valid)
     nlev = float(np.median(noise[valid & (noise > 0)])) if (valid & (noise > 0)).any() else 0.0
     # Per-channel sky offsets are only known to about their own size; where the corona is no
     # brighter than that, its colour cannot be trusted and is shown grey.
-    col = chroma(rgb, lum, show, noise, p.saturation, colour_floor=2.0 * float(np.abs(bg).max()))
-    del rgb
+    return Frame(g, (h, w), hdr, lum, weight, valid, show, stats_valid, noise, nlev, wb, bg, sky_kind,
+                 2.0 * float(np.abs(bg).max()), moon, p.moon_margin_px)
 
-    order = p.order
-    mean_att = _attenuation(p.mean_attenuation, order)
-    std_att = _attenuation(p.std_attenuation, order)
-    layers: dict[str, np.ndarray] = {}
-    stats = None
-    if {"fnrgf", "fnrgf_n", "nrgf"} & set(p.layers) or "fnrgf_n" in p.blend or "fnrgf" in p.blend:
-        say("circle statistics")
-        stats = ring_stats(lum, r, phi, stats_valid, p.segments, order, p.ring_smooth, noise)
 
-    need = set(p.layers) | {k for k, v in p.blend.items() if v}
+def _mgn_scales(p: EnhanceParams, g: Geometry) -> list:
     scales = list(p.mgn_scales) if p.mgn_scales else [g.sun_r * f for f in (0.006, 0.012, 0.025, 0.05, 0.1, 0.2)]
-    scales = sorted(scales)
+    return sorted(scales)
+
+
+def needed_layers(p: EnhanceParams) -> set:
+    return set(p.layers) | {k for k, v in p.blend.items() if v}
+
+
+def render_margin(p: EnhanceParams, g: Geometry, need: Optional[set] = None) -> int:
+    """How far outside a box the layers look (px): a box rendered with this margin is exact."""
+    need = needed_layers(p) if need is None else need
+    reach = _blur_reach(3.0)  # the colour ratios
+    if "adaptive" in need:
+        reach = max(reach, _mgn_reach(_mgn_scales(p, g), p.noise_gate > 0))
+    if "achf" in need:
+        reach = max(reach, _achf_reach([g.sun_r * f for f in p.achf_scales], list(p.achf_weights),
+                                       p.achf_part_limit, 0.1 * g.sun_r))
+    return reach
+
+
+def _ring_cache(frame: Frame, p: EnhanceParams) -> RingStats:
+    key = ("ring", p.segments, p.order, p.ring_smooth)
+    if key not in frame.cache:
+        r, phi = polar(frame.shape, frame.g)
+        frame.cache[key] = ring_stats(frame.lum, r, phi, frame.stats_valid, p.segments, p.order, p.ring_smooth,
+                                      frame.noise)
+    return frame.cache[key]
+
+
+def _natural_cache(frame: Frame, p: EnhanceParams) -> NaturalStats:
+    key = ("nat", float(p.flatten), float(p.even), float(p.shoulder), float(p.midtone))
+    if key not in frame.cache:
+        r, phi = polar(frame.shape, frame.g)
+        frame.cache[key] = natural_stats(frame.lum, r, phi, frame.valid, frame.nlev, p.flatten, frame.stats_valid,
+                                         p.shoulder, p.even, frame.g.sun_r, p.midtone,
+                                         base_cache=frame.cache.setdefault("nat_base", {}))
+    return frame.cache[key]
+
+
+def _gated_cache(frame: Frame) -> dict:
+    if "gated" not in frame.cache:
+        frame.cache["gated"] = gated_prep(frame.lum, frame.valid, frame.nlev, frame.g.sun_r)
+    return frame.cache["gated"]
+
+
+def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[tuple] = None,
+           keep: Optional[set] = None, progress: Optional[Say] = None,
+           emit: Optional[Callable[[str, np.ndarray], None]] = None) -> dict:
+    """The coloured layers ({name: (h, w, 3) float32 0..1}) of ``box`` = (y0, y1, x0, x1) of the
+    whole image (default: all of it), exactly as in the full-size picture: whole-image measurements
+    come from ``frame`` (and are kept in ``frame.cache``), the local filters run on the box plus
+    their reach. With ``emit``, each coloured layer is handed to it as soon as it is made and not
+    kept (a full 45 MP colour layer is half a gigabyte)."""
+    say = progress or (lambda _m: None)
+    p = params or EnhanceParams()
+    g = frame.g
+    H, W = frame.shape
+    y0, y1, x0, x1 = (0, H, 0, W) if box is None else (int(v) for v in box)
+    y0, x0 = max(0, y0), max(0, x0)
+    y1, x1 = min(H, y1), min(W, x1)
+    if y1 <= y0 or x1 <= x0:
+        raise ValueError(f"empty box {box}")
+    need = needed_layers(p)
+    m = 0 if box is None else render_margin(p, g, need)
+    Y0, Y1, X0, X1 = max(0, y0 - m), min(H, y1 + m), max(0, x0 - m), min(W, x1 + m)
+    reg = (slice(Y0, Y1), slice(X0, X1))
+    origin = (Y0, X0)
+    lum, valid, show, noise = frame.lum[reg], frame.valid[reg], frame.show[reg], frame.noise[reg]
+    r, phi = polar((Y1 - Y0, X1 - X0), g, origin)
+    cx, cy = g.sun_x - X0, g.sun_y - Y0
+    fade = None
+    if frame.moon is not None:
+        yy = (np.arange(Y0, Y1, dtype=np.float64) - g.moon_y).astype(np.float32)[:, None]
+        xx = (np.arange(X0, X1, dtype=np.float64) - g.moon_x).astype(np.float32)[None, :]
+        t = np.clip((np.sqrt(xx * xx + yy * yy) - g.moon_r - frame.moon_margin_px) / 4.0, 0.0, 1.0)
+        fade = (t * t * (3 - 2 * t)).astype(np.float32)
+        del xx, yy, t
+
+    mean_att = _attenuation(p.mean_attenuation, p.order)
+    std_att = _attenuation(p.std_attenuation, p.order)
+    scales = _mgn_scales(p, g)
+    layers: dict[str, np.ndarray] = {}
     for name_l in LAYERS:
         if name_l not in need:
             continue
         say(f"layer {name_l}")
         if name_l == "natural":
-            y = natural(lum, r, phi, valid, nlev, p.flatten, stats_valid, show=show, shoulder=p.shoulder,
-                        even=p.even, sun_r=g.sun_r, midtone=p.midtone)
-        elif name_l == "nrgf":
-            y = to_unit(nrgf(lum, r, valid, stats), valid)
-        elif name_l == "fnrgf":
-            y = to_unit(fnrgf(lum, r, phi, valid, stats, mean_att, std_att), valid)
-        elif name_l == "fnrgf_n":
-            y = to_unit(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), valid)
+            st = _natural_cache(frame, p)
+            loc = None if st.loc is None else tuple(a[reg] for a in st.loc)
+            y = natural_apply(lum, r, st, p.flatten, p.shoulder, p.even, g.sun_r, p.midtone, loc=loc, show=show)
+        elif name_l in ("nrgf", "fnrgf", "fnrgf_n"):
+            stats = _ring_cache(frame, p)
+            if name_l == "nrgf":
+                y = to_fixed(nrgf(lum, r, valid, stats), NRGF_SPREAD)
+            elif name_l == "fnrgf":
+                y = to_fixed(fnrgf(lum, r, phi, valid, stats, mean_att, std_att), FNRGF_SPREAD)
+            else:
+                y = to_fixed(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), FNRGF_N_SPREAD)
         elif name_l == "achf":
-            y = achf(lum, valid, [g.sun_r * f for f in p.achf_scales], nlev, g.sun_x, g.sun_y,
-                     list(p.achf_weights), p.achf_part_limit, ref_sigma=0.1 * g.sun_r)
+            y = achf(lum, valid, [g.sun_r * f for f in p.achf_scales], frame.nlev, cx, cy,
+                     list(p.achf_weights), p.achf_part_limit, ref_sigma=0.1 * g.sun_r, r_ref=g.moon_r,
+                     contrast=p.achf_contrast)
         else:
             if p.noise_gate > 0:
                 say(f"adaptive: noise gate {p.noise_gate:g}")
-                y = mgn_gated(lum, valid, scales, p.mgn_k, nlev, noise, g.sun_r, p.noise_gate)
+                prep = _gated_cache(frame)
+                y = mgn_gated(lum, valid, scales, p.mgn_k, frame.nlev, noise, g.sun_r, p.noise_gate,
+                              prep=dict(prep, bf=prep["bf"][reg]), origin=origin)
             else:
-                y = mgn(lum, valid, scales, p.mgn_k, nlev)
+                y = mgn(lum, valid, scales, p.mgn_k, frame.nlev, origin=origin)
         y[~(show if name_l == "natural" else valid)] = 0.0
         layers[name_l] = y
-
-    notes = []
     blend_w = {k: float(v) for k, v in p.blend.items() if v and k in layers}
     if blend_w:
         layers["blend"] = soft_light_blend(layers, blend_w, valid, p.blend_modes, show=show, fade=fade,
-                                             shoulder=p.shoulder, midtone=p.midtone,
-                                             tone_sel=valid & (r > 1.05 * g.sun_r) & (r < 2.5 * g.sun_r))
-    unknown = set(p.blend) - set(LAYERS)
-    if unknown:
-        notes.append(f"unknown blend layer(s) ignored: {', '.join(sorted(unknown))}")
-
-    def coloured(k: str) -> np.ndarray:
-        img = layers[k][..., None] * col
+                                           shoulder=p.shoulder)
+    col = chroma(frame.rgb[reg], lum, show, noise, p.saturation, colour_floor=frame.colour_floor)
+    inner = (slice(y0 - Y0, y1 - Y0), slice(x0 - X0, x1 - X0))
+    col = col[inner]
+    moon = frame.moon
+    out = {}
+    for k in layers:
+        if keep is not None and k not in keep:
+            continue
+        img = layers[k][inner][..., None] * col
         if p.shoulder > 0:  # keep the hue where a colour would go past white (a bright prominence)
             img = img / np.maximum(img.max(axis=2, keepdims=True), 1.0)
         img = np.clip(img, 0.0, 1.0)
@@ -1172,39 +1421,62 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
             # The seas and highlands, added (screen) where the stretched light of the Moon itself
             # leaves room for them: nothing is cut or pasted, so the limb is the stack's own.
             hc, wc = moon.surface.shape[:2]
-            ys = slice(max(moon.y0, 0), min(moon.y0 + hc, h))
-            xs = slice(max(moon.x0, 0), min(moon.x0 + wc, w))
-            sy = slice(ys.start - moon.y0, ys.stop - moon.y0)
-            sx = slice(xs.start - moon.x0, xs.stop - moon.x0)
-            add = moon.surface[sy, sx] * (moon.visibility[sy, sx, None] if moon.visibility is not None else 1.0)
-            # Where the Moon's own stretched light is already bright (the limb, a prominence spilling
-            # over it), the surface steps back: it could not be seen there, and adding it would wash
-            # the prominence out to white.
-            own = img[ys, xs].mean(axis=2)
-            t = np.clip((0.7 - own) / 0.4, 0.0, 1.0)
-            add = add * (t * t * (3 - 2 * t))[..., None]
-            img[ys, xs] = 1.0 - (1.0 - img[ys, xs]) * (1.0 - np.clip(add, 0.0, 1.0))
-        return img.astype(np.float32)
+            ys = slice(max(moon.y0, y0), min(moon.y0 + hc, y1))
+            xs = slice(max(moon.x0, x0), min(moon.x0 + wc, x1))
+            if ys.stop > ys.start and xs.stop > xs.start:
+                sy = slice(ys.start - moon.y0, ys.stop - moon.y0)
+                sx = slice(xs.start - moon.x0, xs.stop - moon.x0)
+                iy = slice(ys.start - y0, ys.stop - y0)
+                ix = slice(xs.start - x0, xs.stop - x0)
+                add = moon.surface[sy, sx] * (moon.visibility[sy, sx, None] if moon.visibility is not None else 1.0)
+                # Where the Moon's own stretched light is already bright (the limb, a prominence
+                # spilling over it), the surface steps back: it could not be seen there, and adding
+                # it would wash the prominence out to white.
+                own = img[iy, ix].mean(axis=2)
+                t = np.clip((0.7 - own) / 0.4, 0.0, 1.0)
+                add = add * (t * t * (3 - 2 * t))[..., None]
+                img[iy, ix] = 1.0 - (1.0 - img[iy, ix]) * (1.0 - np.clip(add, 0.0, 1.0))
+        if emit is not None:
+            emit(k, img.astype(np.float32, copy=False))
+        else:
+            out[k] = img.astype(np.float32)
+        del img
+    return out
 
+
+def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[EnhanceParams] = None,
+            out_dir=None, name: str = "corona", progress: Optional[Say] = None,
+            fmt: str = "tif", moon: Optional[MoonInput] = None, keep: Optional[set] = None) -> tuple[EnhanceResult, dict]:
+    """``hdr`` is (h, w, 3) linear. Writes one image per layer to ``out_dir`` (``fmt``: tif, png or
+    jpg; see ``imageout``); without ``out_dir`` returns the layers instead as {name: (h, w, 3)
+    float32 in 0..1}. The same as :func:`prepare` then :func:`render` of the whole image."""
+    say = progress or (lambda _m: None)
+    p = params or EnhanceParams()
+    frame = prepare(hdr, weight, header, p, moon=moon, progress=say)
+    notes = []
+    unknown = set(p.blend) - set(LAYERS)
+    if unknown:
+        notes.append(f"unknown blend layer(s) ignored: {', '.join(sorted(unknown))}")
+    scales = _mgn_scales(p, frame.g)
     paths: dict = {}
-    colour: dict = {}
+    emit = None
     if out_dir is not None:
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
-        for k in list(layers):
-            if keep is not None and k not in keep:
-                continue
-            # One colour image at a time: a full 45 MP RGB layer is half a gigabyte.
-            img = coloured(k)
+
+        def emit(k, img):
             paths[k] = str(write_image(with_format(out / f"{name}_{k}.tif", fmt), img))
-            del img
             say(f"wrote {paths[k]}")
+
+    colour = render(frame, p, keep=keep, progress=say, emit=emit)
+    wb, bg, nlev = frame.wb, frame.bg, frame.nlev
+    del frame
+    if out_dir is not None:
         info = {"params": {k: (list(v) if isinstance(v, tuple) else v) for k, v in asdict(p).items()},
-                "white": wb.tolist(), "background": bg.tolist(), "noise_level": nlev, "scales": scales, "geometry": asdict(g)}
+                "white": wb.tolist(), "background": bg.tolist(), "noise_level": nlev, "scales": scales,
+                "geometry": asdict(geometry_from_header(header))}
         (out / f"{name}_enhance.json").write_text(json.dumps(info, indent=2, default=float), encoding="utf-8")
         paths["info"] = str(out / f"{name}_enhance.json")
-    else:
-        colour = {k: coloured(k) for k in layers if keep is None or k in keep}
     return EnhanceResult(paths, wb.tolist(), nlev, bg.tolist(), scales, notes), colour
 
 

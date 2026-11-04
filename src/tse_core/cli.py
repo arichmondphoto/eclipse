@@ -170,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="Adaptive (ACHF): a pixel this many times brighter or darker than the corona at its height "
                         "(a prominence) is a separate part, left out of the corona's kernels and filtered with its "
                         "own pixels only, so no dark fringe forms round it; 0 = off (default 2)")
+    p.add_argument("--achf-contrast", type=float, default=1.0,
+                   help="Adaptive (ACHF): contrast of the layer (the thesis's K2); 1 = the contrast it had on the "
+                        "2024 stack at full size with the default scales (default 1)")
     p.add_argument("--noise-gate", type=float, default=0.0,
                    help="adaptive layer: each scale's detail counts only as far as it stands above the stack's "
                         "noise at that scale (e.g. 3); 0 = off")
@@ -707,7 +710,7 @@ def cmd_enhance(args) -> int:
                            noise_m=args.noise_m, flatten=args.flatten, shoulder=args.shoulder, even=args.even, midtone=args.midtone, noise_gate=args.noise_gate,
                            mgn_k=args.adaptive_k, achf_weights=_six(args.achf_weights, "--achf-weights"),
                            achf_scales=tuple(v / 100.0 for v in _six(args.achf_scales, "--achf-scales", positive=True)),
-                           achf_part_limit=args.achf_part_limit,
+                           achf_part_limit=args.achf_part_limit, achf_contrast=args.achf_contrast,
                            saturation=args.saturation,
                            white=args.white, blend=blend, blend_modes=blend_modes,
                            neutral_background=not args.keep_background_colour)

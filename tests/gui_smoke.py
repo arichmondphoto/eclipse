@@ -82,6 +82,30 @@ assert Path(et.outputs["blend"]).name == "custom_blend.tif" and Path(et.outputs[
 print("written:", sorted(et.outputs))
 assert "nrgf" not in et.outputs and "blend" in et.outputs and all(Path(v).exists() for v in et.outputs.values())
 assert "enhance" in EventProject.load(path).parameters
+# Detail box: Shift-drag on the reduced picture (here the signal the view sends); the box is rendered
+# at full resolution and is exactly the same pixels as the full-size blend just written.
+import tifffile
+assert len(et.achf_contrast.toolTip()) > 100 and et.params().achf_contrast == 1.0
+b = et.small.binning
+et.view.box_drawn.emit((20, 30, 120, 90))  # x0, y0, x1, y1 in preview px
+assert et.detail_mode and et.box == (30 * b, 90 * b, 20 * b, 120 * b), et.box
+assert EventProject.load(path).parameters["enhance_box"] == list(et.box)  # kept with the project
+written = tifffile.imread(et.outputs["blend"]).astype(np.float64) / 65535.0
+y0, y1, x0, x1 = et.box
+diff = np.abs(et.detail_layers["blend"] - written[y0:y1, x0:x1]).max()
+print("detail box", et.box, "largest difference from the written blend:", diff)
+assert diff < 2 / 65535, diff  # the 16-bit rounding of the file only
+frame = et.frame
+et.flatten.setValue(0.7)
+et.preview()  # (the stand-in's timer does not fire)
+assert et.frame is frame and et.params().flatten == 0.7  # the full-size stack is not read again
+et.white.setCurrentIndex(1)
+et.preview()
+assert et.frame is not frame  # White balance changes what is measured over the whole stack
+et.white.setCurrentIndex(0)
+et.flatten.setValue(0.6)
+et._view_changed(0)
+assert not et.detail_mode
 
 # Align with nothing to align (no real RAW files): a clear message, no crash.
 win.align_tab.lat.setText("abc")

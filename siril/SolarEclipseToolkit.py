@@ -1077,6 +1077,14 @@ class EnhanceTab(StepTab):
         super().__init__(window)
         self.small: W.HdrData | None = None
         self.preview_layers: dict = {}
+        # The detail box: (y0, y1, x0, x1) in full-size px, rendered at full resolution from the
+        # full-size stack, prepared once (``frame``) while White balance and Keep the sky stay.
+        self.box = None
+        self.frame = None
+        self.frame_key = None
+        self.detail_layers: dict = {}
+        self.detail_mode = False  # the Detail box view is the one shown
+        self._stale = {"whole", "detail"}
         self._dirty = False
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
@@ -1168,6 +1176,9 @@ class EnhanceTab(StepTab):
         self.achf_parts.setDecimals(1)
         self.achf_parts.setSuffix(" x")
         cf.addRow("Separate parts at:", self.achf_parts)
+        self.achf_contrast = self._dspin(0.1, 10.0, 1.0, 0.05, "Adaptive (ACHF): contrast of the layer")
+        self.achf_contrast.setDecimals(2)
+        cf.addRow("Contrast:", self.achf_contrast)
         self.settings_layout.addWidget(achf_box)
         self._achf_form = cf
 
@@ -1205,14 +1216,25 @@ class EnhanceTab(StepTab):
         self.show_layer.setCurrentIndex(self.show_layer.count() - 1)
         self.show_layer.currentIndexChanged.connect(self._show)
         top.addWidget(self.show_layer)
-        top.addStretch(1)
+        self.box_label = QLabel("")
+        top.addWidget(self.box_label, 1)
         self.open_btn = QPushButton("Open layer in Siril")
         self.open_btn.clicked.connect(self._open_layer)
         top.addWidget(self.open_btn)
         self.results_layout.addLayout(top)
-        self.view = ImageView()
-        self.results_layout.addWidget(self.view, 1)
+        self.view = ImageView(boxes=True)
+        self.view.box_drawn.connect(self._box_drawn)
+        self.detail_view = ImageView()
+        self.detail_view.setText("No detail box yet.\n\nOn the 'Whole picture' tab, hold Shift and drag a box "
+                                 "round the part you want to judge. It is shown here at full resolution, "
+                                 "exactly as 'Write full-size layers' will make it.")
+        self.views = QTabWidget()
+        self.views.addTab(self.view, "Whole picture (reduced)")
+        self.views.addTab(self.detail_view, "Detail box (full resolution)")
+        self.views.currentChanged.connect(self._view_changed)
+        self.results_layout.addWidget(self.views, 1)
         self.outputs: dict = {}
+        self._box_text()
 
         layer_tips = {
             "natural": "Natural: a logarithmic (log) stretch with most of the brightness fall-off from the Sun removed. The closest to what "
@@ -1282,6 +1304,18 @@ class EnhanceTab(StepTab):
              "features as parts; much lower starts to split real coronal structure. On the 2024 crop, 2 made "
              "247 pixels (the prominences) a part of their own. Costs some time: about 3x the plain filter.",
              self._achf_form)
+        _tip(self.achf_contrast, "Adaptive (ACHF) only: how strongly the layer shows its detail (the thesis's "
+             "K2, the weight of the filtered image). 1 (default) is the contrast the layer had on the 2024 stack "
+             "at full size with the default scales. Raise it when the large scales are off and the layer looks "
+             "flat; lower it when it looks harsh or when you add strength to the scales. The layer's contrast is "
+             "fixed, not measured on each picture, so the detail box shows exactly what the full-size layer will.",
+             self._achf_form)
+        _tip(self.views, "Whole picture: a reduced copy of the stack (about 1400 px wide), quick to update. "
+             "Hold Shift and drag on it to choose a detail box.\n\nDetail box: that box at full resolution, "
+             "exactly as 'Write full-size layers' will make it (the same pixels), so fine settings such as the "
+             "ACHF scales, the noise gate and Noise compensation can be judged. The first detail takes a while (the "
+             "full-size stack is read and measured once); after that a setting change redraws only the box. "
+             "At most 2000 px a side.")
         af = self._adaptive_form
         _tip(self.mgn_k, "How strongly the adaptive layer brings out local contrast at each scale: k in the "
              "paper's arctan(k x C) (Morgan & Druckmüller 2014). Default 0.7, the paper's value. Higher gives "
@@ -1380,9 +1414,17 @@ class EnhanceTab(StepTab):
                 size.blockSignals(True)  # only the display changes: the fractions stay as they are
                 size.setValue(round(frac * sun_r, 2))
                 size.blockSignals(False)
+        box = project.parameters.get("enhance_box")
+        self.box = tuple(int(v) for v in box) if box and len(box) == 4 else None
+        self._box_text()
+        self._outline()
 
     def forget_preview(self) -> None:
         self.small = None
+        self.frame = None  # the full-size stack (gigabytes on a full frame)
+        self.frame_key = None
+        self.preview_layers, self.detail_layers = {}, {}
+        self._stale = {"whole", "detail"}
 
     def params(self) -> EnhanceParams:
         blend = {"natural": 1.0}
@@ -1394,42 +1436,112 @@ class EnhanceTab(StepTab):
                              achf_scales=tuple(self.achf_frac),
                              achf_weights=tuple(sp.value() for sp in self.achf_w),
                              achf_part_limit=self.achf_parts.value(),
+                             achf_contrast=self.achf_contrast.value(),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
                              blend_modes=modes, neutral_background=not self.keep_sky.isChecked())
 
     def changed(self, *_args) -> None:
-        if self.auto.isChecked() and self.small is not None:
+        self._stale = {"whole", "detail"}
+        if self.auto.isChecked() and (self.small is not None or (self.detail_mode and self.detail_layers)):
             self.timer.start()
+
+    # -- the detail box --------------------------------------------------------------------------
+
+    def _box_text(self) -> None:
+        if self.box is None:
+            self.box_label.setText("  Shift-drag on the whole picture for a full-resolution detail box")
+        else:
+            y0, y1, x0, x1 = self.box
+            self.box_label.setText(f"  Detail box: {x1 - x0} x {y1 - y0} px at x {x0}, y {y0}")
+
+    def _outline(self) -> None:
+        """The detail box outlined on the reduced picture."""
+        if self.box is None or self.small is None:
+            self.view.set_box(None)
+            return
+        b = self.small.binning
+        y0, y1, x0, x1 = self.box
+        self.view.set_box((x0 / b, y0 / b, x1 / b, y1 / b))
+
+    def _box_drawn(self, xy) -> None:
+        """A box Shift-dragged on the reduced picture: the same part of the full-size stack."""
+        if self.small is None:
+            return
+        b = self.small.binning
+        x0, y0, x1, y1 = xy
+        h, w = self.small.hdr.shape[:2]
+        self.box = W.detail_box((y0 * b, y1 * b, x0 * b, x1 * b), (h * b, w * b))
+        if (y1 - y0) * b > W.DETAIL_MAX_SIDE or (x1 - x0) * b > W.DETAIL_MAX_SIDE:
+            self.log.appendPlainText(f"The detail box is limited to {W.DETAIL_MAX_SIDE} px a side at full size; "
+                                     "kept the middle of the box drawn.")
+        self.main.frames_tab.project.parameters["enhance_box"] = list(self.box)  # saved with the project
+        self._box_text()
+        self._outline()
+        self.detail_layers = {}
+        self._stale.add("detail")
+        self.detail_mode = True
+        self.views.setCurrentIndex(1)
+        self.preview()
+
+    def _view_changed(self, i) -> None:
+        self.detail_mode = i == 1
+        if self.detail_mode and self.box is not None and ("detail" in self._stale or not self.detail_layers):
+            self.preview()
+        elif not self.detail_mode and self.small is not None and "whole" in self._stale:
+            self.preview()
+
+    # -- previews --------------------------------------------------------------------------------
 
     def preview(self) -> None:
         if self.worker is not None:
             self._dirty = True  # run again when the current preview finishes
             return
         params = self.params()
-        cached = self.small
+        from dataclasses import replace
+
+        detail = self.detail_mode and self.box is not None
         # Adaptive (ACHF) is slow (about 10 s even on the preview): only when it is wanted.
         want_achf = (self.layer_checks["achf"].isChecked() or self.blend["achf"].value() > 0
                      or self.show_layer.currentData() == "achf")
-        preview_layers = tuple(k for k in LAYERS if k != "achf" or want_achf)
+        # The preview shows every layer the blend needs, whatever is ticked for writing.
+        p = replace(params, layers=tuple(k for k in LAYERS if k != "achf" or want_achf))
+        if detail:
+            path = self.main.frames_tab.project_path
+            key = W.detail_frame_key(path, p) if path else None
+            if key != self.frame_key:
+                self.frame, self.frame_key = None, None  # free the old one before reading again
+            frame, box = self.frame, self.box
+
+            def job(path, say, cancel):
+                fr = frame if frame is not None else W.detail_frame(path, p, say=say, cancel=cancel)
+                used, layers = W.enhance_detail(fr, p, box, say, cancel)
+                return "detail", W.detail_frame_key(path, p), fr, used, layers
+
+            self.start("Detail box", job, self._preview_done, reload=False)
+            return
+        cached = self.small
 
         def job(path, say, cancel):
             small = cached
             if small is None:
                 say("Reading the HDR stack for the preview…")
                 small = W.reduce_for_preview(W.load_hdr(path), max_side=1400)
-            # The preview shows every layer the blend needs, whatever is ticked for writing.
-            from dataclasses import replace
-
-            p = replace(params, layers=preview_layers)
             result, layers = W.enhance_preview(small, p, say, cancel)
-            return small, result, layers
+            return "whole", small, result, layers
 
         self.start("Preview", job, self._preview_done, reload=False)
 
     def _preview_done(self, out) -> None:
-        self.small, result, layers = out
-        self.preview_layers = layers
-        self.log.appendPlainText(result.describe())
+        if out[0] == "detail":
+            _, self.frame_key, self.frame, used, self.detail_layers = out
+            self.box = used
+            self._box_text()
+            self._stale.discard("detail")
+        else:
+            _, self.small, result, self.preview_layers = out
+            self.log.appendPlainText(result.describe())
+            self._stale.discard("whole")
+            self._outline()
         self._show()
         if self._dirty:
             self._dirty = False
@@ -1440,10 +1552,17 @@ class EnhanceTab(StepTab):
         img = self.preview_layers.get(k)
         if img is not None:
             self.view.show_array(img)
-        elif k == "achf" and self.small is not None:
-            self.preview()  # Adaptive (ACHF) is computed on request: chosen here, so now
-        elif self.outputs.get(k):
+        elif self.outputs.get(k) and self.small is None:
             self.view.show_file(self.outputs[k])
+        d = self.detail_layers.get(k)
+        if d is not None:
+            self.detail_view.show_array(d)
+        # Adaptive (ACHF) is computed on request: chosen here, so now.
+        if k == "achf" and self.worker is None:
+            if self.detail_mode and self.box is not None and d is None:
+                self.preview()
+            elif not self.detail_mode and self.small is not None and img is None:
+                self.preview()
 
     def run(self) -> None:
         params = self.params()
@@ -2129,10 +2248,13 @@ class ImageView(QWidget):
 
     Mouse wheel (or + and -): zoom about the pointer. Drag: move round. Double-click: 100% at
     that point, or back to fit. 0: fit, 1: 100%. A refreshed preview of the same size keeps the
-    zoom and place, so settings can be compared on the same detail.
+    zoom and place, so settings can be compared on the same detail. With ``boxes`` on, Shift-drag
+    draws a box (``box_drawn`` gives it as (x0, y0, x1, y1) image px) and ``set_box`` outlines one.
     """
 
-    def __init__(self, parent=None) -> None:
+    box_drawn = pyqtSignal(object)
+
+    def __init__(self, parent=None, boxes: bool = False) -> None:
         super().__init__(parent)
         self.setMinimumSize(320, 240)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -2144,6 +2266,18 @@ class ImageView(QWidget):
         self._text = "No image yet."
         self._zoom = ViewZoom()
         self._drag = None
+        self._boxes = boxes
+        self._box = None  # (x0, y0, x1, y1) image px: outlined
+        self._sel = None  # (start, now) view px while Shift-dragging
+        if boxes:
+            self.setToolTip("Scroll to zoom, drag to move round, double-click for 100% (again to fit). "
+                            "Keys: + and - zoom, 0 fit, 1 100%.\n\nHold Shift and drag to choose the detail "
+                            "box, shown at full resolution on the 'Detail box' tab.")
+
+    def set_box(self, box) -> None:
+        """Outline ``box`` = (x0, y0, x1, y1) in image px (None: no outline)."""
+        self._box = None if box is None else tuple(float(v) for v in box)
+        self.update()
 
     def setText(self, text: str) -> None:  # noqa: N802 - Qt-style name, as before
         self._text = text
@@ -2195,6 +2329,20 @@ class ImageView(QWidget):
             # Smooth when shrinking; sharp pixels when enlarged well past 100%.
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, self._zoom.scale() < 2.0)
             p.drawPixmap(QRectF(tx, ty, tw, th), self._pix, QRectF(sx, sy, sw, sh))
+            outline = None
+            if self._sel is not None:
+                (ax, ay), (bx, by) = self._sel
+                outline = (min(ax, bx), min(ay, by), abs(bx - ax), abs(by - ay))
+            elif self._box is not None:
+                vx0, vy0 = self._zoom.to_view(self._box[0], self._box[1])
+                vx1, vy1 = self._zoom.to_view(self._box[2], self._box[3])
+                outline = (vx0, vy0, vx1 - vx0, vy1 - vy0)
+            if outline is not None:
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.setPen(QColor(0, 0, 0))
+                p.drawRect(QRectF(outline[0] - 1, outline[1] - 1, outline[2] + 2, outline[3] + 2))
+                p.setPen(QColor("#ffd400"))
+                p.drawRect(QRectF(*outline))
             label = self._zoom.label()
             p.setPen(QColor("#bbbbbb"))
             box = QRectF(6, self.height() - 24, 70, 18)
@@ -2216,13 +2364,22 @@ class ImageView(QWidget):
         event.accept()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt override
-        if event.button() == Qt.MouseButton.LeftButton and self._zoom.zoom is not None:
+        if (self._boxes and self._pix is not None and event.button() == Qt.MouseButton.LeftButton
+                and event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            pos = event.position()
+            self._sel = ((pos.x(), pos.y()), (pos.x(), pos.y()))
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        elif event.button() == Qt.MouseButton.LeftButton and self._zoom.zoom is not None:
             self._drag = event.position()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt override
-        if self._drag is not None:
+        if self._sel is not None:
+            pos = event.position()
+            self._sel = (self._sel[0], (pos.x(), pos.y()))
+            self.update()
+        elif self._drag is not None:
             pos = event.position()
             self._zoom.pan(pos.x() - self._drag.x(), pos.y() - self._drag.y())
             self._drag = pos
@@ -2230,7 +2387,15 @@ class ImageView(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt override
-        if self._drag is not None:
+        if self._sel is not None:
+            (ax, ay), (bx, by) = self._sel
+            self._sel = None
+            self.unsetCursor()
+            box = self._zoom.box_from_drag(ax, ay, bx, by)
+            self.update()
+            if box is not None:
+                self.box_drawn.emit(box)
+        elif self._drag is not None:
             self._drag = None
             self.unsetCursor()
         super().mouseReleaseEvent(event)
