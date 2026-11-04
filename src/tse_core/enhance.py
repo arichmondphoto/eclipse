@@ -48,6 +48,13 @@ Say = Callable[[str], None]
 LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive", "achf")
 # Written unless asked otherwise: Adaptive (ACHF) takes minutes on a full frame, so only on request.
 DEFAULT_LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive")
+# Adaptive (ACHF) scales, finest first, as fractions of the Sun's radius (so they suit any lens):
+# Andy's choice (4 Nov 2026) of 0.5, 1, 3 and 10 px on his 2024 frames (Sun radius 413.29 px, from
+# the stack's SUNR; not the Moon's 435.92), within the thesis's 0.5-64 px, plus 10% and 20% of the
+# radius switched off (strength 0).
+SUN_R_2024 = 413.29
+ACHF_SCALES = tuple(v / SUN_R_2024 for v in (0.5, 1.0, 3.0, 10.0)) + (0.1, 0.2)
+ACHF_WEIGHTS = (1.0, 1.0, 1.0, 1.0, 0.0, 0.0)
 # The natural layer is the base; the others are soft-light layers at these opacities. All filter
 # layers start at 0 (Andy, Nov 2026: every Enhance option off by default), so the blend starts as the
 # natural layer and each layer is added by choice.
@@ -75,6 +82,10 @@ class EnhanceParams:
     # at this level (e.g. 0.6 for a light grey corona). 0 = off.
     midtone: float = 0.0
     mgn_scales: Optional[Sequence[float]] = None  # px; default from the Sun's radius
+    # Adaptive (ACHF): the six scales (kernel widths sigma) as fractions of the Sun's radius, finest
+    # first, and the strength of each.
+    achf_scales: Sequence[float] = ACHF_SCALES
+    achf_weights: Sequence[float] = ACHF_WEIGHTS
     mgn_k: float = 0.7  # adaptive layer strength: k of arctan(k C), 0.7 as in Morgan & Druckmueller (2014)
     # Adaptive layer, noise-aware (0 = off):
     # noise_gate: each scale's detail counts only as far as it stands above the noise at that scale
@@ -785,12 +796,13 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
 
 
 def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float,
-         cx: float, cy: float) -> np.ndarray:
+         cx: float, cy: float, weights: Optional[Sequence[float]] = None) -> np.ndarray:
     """Adaptive (ACHF): Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin &
     Minarovjech 2006; defined in Druckmüllerová 2013, section 5.2). For each scale sigma the
     filtered image is the pixel minus its local mean under the circular kernel (:func:`achf_mean`),
     the Moon and unusable pixels left out; the scales are summed with equal weights, which gives
-    the amplification rising with spatial frequency of the 2006 paper's Figure 9.
+    an amplification rising with spatial frequency; ``weights`` (one per scale, default all 1)
+    change each scale's share, like the frequency sliders of Druckmüller's Corona program.
 
     Not published, so chosen here: it works on log brightness (as Adaptive (MGN) does, so the same
     contrast counts the same at every height), uses the same scales as Adaptive (MGN), and is
@@ -800,17 +812,25 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
     """
     b = np.log(np.maximum(x, 0) + max(floor, 1e-9))
     w = valid.astype(np.float64)
+    ws = [1.0] * len(scales) if weights is None else [max(float(v), 0.0) for v in weights]
+    if len(ws) != len(scales):
+        raise ValueError(f"Adaptive (ACHF) needs one strength per scale ({len(scales)}), got {len(ws)}")
     acc = np.zeros(b.shape, np.float64)
-    for s in scales:
-        acc += np.where(valid, b - achf_mean(b, w, cx, cy, float(s)), 0.0)
-    acc /= max(len(scales), 1)
+    for s, ks in zip(scales, ws):
+        if ks > 0:  # a scale at 0 is not computed at all (and saves its time)
+            acc += ks * np.where(valid, b - achf_mean(b, w, cx, cy, float(s)), 0.0)
+    if sum(ws) <= 0:
+        out = np.where(valid, 0.5, 0.0).astype(np.float32)
+        return out
+    acc /= sum(ws)
     # The contrast is set from where every kernel is whole: by the Moon (weight 0) the large scales
     # see only the fainter corona outside, so every pixel there reads as brighter than its
     # surroundings (a bright ring). Set from all pixels, the ring took the whole range and left the
     # rest of the corona flat grey (seen on the 2024 crop).
     whole = valid
-    if len(scales):
-        cover = ndimage.gaussian_filter(w, 2.0 * max(scales), mode="constant")
+    used = [s for s, ks in zip(scales, ws) if ks > 0]  # a scale at 0 has no kernel to be whole
+    if used:
+        cover = ndimage.gaussian_filter(w, 2.0 * max(used), mode="constant")
         if (valid & (cover > 0.98)).sum() > 1000:
             whole = valid & (cover > 0.98)
     out = to_unit(acc.astype(np.float32), whole, 99.9)
@@ -1081,7 +1101,8 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
         elif name_l == "fnrgf_n":
             y = to_unit(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), valid)
         elif name_l == "achf":
-            y = achf(lum, valid, scales, nlev, g.sun_x, g.sun_y)
+            y = achf(lum, valid, [g.sun_r * f for f in p.achf_scales], nlev, g.sun_x, g.sun_y,
+                     list(p.achf_weights))
         else:
             if p.noise_gate > 0:
                 say(f"adaptive: noise gate {p.noise_gate:g}")

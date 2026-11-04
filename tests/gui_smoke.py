@@ -51,6 +51,21 @@ assert {"natural", "fnrgf_n", "adaptive", "blend"} <= set(et.preview_layers)
 d = et.params()
 assert (d.flatten, d.shoulder, d.even, d.midtone, d.noise_gate, d.mgn_k) == (0.0, 0.0, 0.0, 0.0, 0.0, 0.7), d
 assert d.blend == {"natural": 1.0}, d.blend  # every filter layer at 0 %
+# Adaptive (ACHF): six per-scale strengths, all 1 by default, each with hover help; ticked off.
+from tse_core.enhance import ACHF_SCALES
+assert len(et.achf_w) == 6 and d.achf_weights == (1.0, 1.0, 1.0, 1.0, 0.0, 0.0), d.achf_weights
+# Sizes are fractions of the Sun's radius whatever the open stack's Sun; shown in its pixels.
+assert tuple(d.achf_scales) == tuple(ACHF_SCALES), d.achf_scales  # not rounded through the px display
+assert abs(et.achf_size[1].value() - ACHF_SCALES[1] * et.sun_r_full) < 0.01
+assert all(len(sz.toolTip()) > 100 for sz in et.achf_size)
+et.achf_size[2].setValue(6.0)  # typed in px for this stack: kept as a fraction of its Sun's radius
+assert abs(et.params().achf_scales[2] - 6.0 / et.sun_r_full) < 1e-12
+et.achf_size[2].setValue(round(ACHF_SCALES[2] * et.sun_r_full, 2)); et.achf_frac[2] = ACHF_SCALES[2]
+assert all(len(sp.toolTip()) > 100 for sp in et.achf_w)
+assert not et.layer_checks["achf"].isChecked() and "achf" not in d.layers
+et.achf_w[0].setValue(0.4)
+assert et.params().achf_weights[0] == 0.4
+et.achf_w[0].setValue(1.0)
 assert "strands" not in vars(et) and "skip_fine" not in vars(et)  # (the stand-in answers any hasattr)
 assert "strands" not in d.__dataclass_fields__ and "mgn_skip_fine" not in d.__dataclass_fields__
 et.blend["fnrgf_n"].setValue(40)

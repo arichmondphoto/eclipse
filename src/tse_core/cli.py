@@ -15,7 +15,7 @@ from .frames import format_exposure, parse_duration
 from .inventory import Inventory, find_raw_files
 from .lensfun import LensfunDatabase, corner_falloff, download_database, import_database
 from .metadata import ExifToolReader, rawpy_available, read_frames
-from .enhance import DEFAULT_BLEND, DEFAULT_LAYERS, LAYERS
+from .enhance import ACHF_SCALES, ACHF_WEIGHTS, DEFAULT_BLEND, DEFAULT_LAYERS, LAYERS
 from .project import EventProject
 from .vignetting_profile import VignettingProfile, fit_profile_from_files, load_profile_library
 
@@ -159,6 +159,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--adaptive-k", type=float, default=0.7,
                    help="adaptive layer: strength of the local contrast at each scale, k in arctan(k C) "
                         "(default 0.7, as in Morgan & Druckmueller 2014)")
+    p.add_argument("--achf-scales", default=",".join(f"{100 * v:.4g}" for v in ACHF_SCALES),
+                   help="Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in %% of "
+                        "the Sun's radius (default %(default)s: 0.5, 1, 3 and 10 px on the 2024 stack's Sun of 413 px, then 10%% "
+                        "and 20%%)")
+    p.add_argument("--achf-weights", default=",".join(f"{v:g}" for v in ACHF_WEIGHTS),
+                   help="Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out "
+                        "(default %(default)s)")
     p.add_argument("--noise-gate", type=float, default=0.0,
                    help="adaptive layer: each scale's detail counts only as far as it stands above the stack's "
                         "noise at that scale (e.g. 3); 0 = off")
@@ -396,6 +403,17 @@ def cmd_inventory(args) -> int:
         project.save(path)
         print(f"Project saved to {path}")
     return 0
+
+
+def _six(text: str, option: str, positive: bool = False) -> tuple:
+    """Six numbers of 0 or more (more than 0 with ``positive``), finest scale first."""
+    try:
+        vals = tuple(float(v) for v in text.split(","))
+    except ValueError:
+        vals = ()
+    if len(vals) != 6 or min(vals) < 0 or (positive and min(vals) <= 0):
+        raise SystemExit(f"{option} takes six numbers{' above 0' if positive else ' of 0 or more'}, finest scale first")
+    return vals
 
 
 def _contacts(inv, project, args) -> None:
@@ -683,7 +701,9 @@ def cmd_enhance(args) -> int:
     params = EnhanceParams(layers=layers, segments=args.segments, order=args.order,
                            mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
                            noise_m=args.noise_m, flatten=args.flatten, shoulder=args.shoulder, even=args.even, midtone=args.midtone, noise_gate=args.noise_gate,
-                           mgn_k=args.adaptive_k, saturation=args.saturation,
+                           mgn_k=args.adaptive_k, achf_weights=_six(args.achf_weights, "--achf-weights"),
+                           achf_scales=tuple(v / 100.0 for v in _six(args.achf_scales, "--achf-scales", positive=True)),
+                           saturation=args.saturation,
                            white=args.white, blend=blend, blend_modes=blend_modes,
                            neutral_background=not args.keep_background_colour)
     out, code = _run(enhance_project, args.project, params, hdr_file=args.hdr, output=args.output,

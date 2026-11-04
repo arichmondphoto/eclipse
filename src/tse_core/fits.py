@@ -55,6 +55,34 @@ def write_fits(path: str | os.PathLike, data: np.ndarray, header: Optional[dict[
         fh.write(body)
 
 
+def read_fits_header(path: str | os.PathLike) -> dict[str, Any]:
+    """The header only (reads the first blocks, not the image)."""
+    header: dict[str, Any] = {}
+    with open(path, "rb") as fh:
+        while True:
+            block = fh.read(_BLOCK)
+            if not block:
+                return header
+            for i in range(0, len(block), 80):
+                card = block[i:i + 80].decode("ascii", "replace")
+                key = card[:8].strip()
+                if key == "END":
+                    return header
+                if card[8:10] == "= ":
+                    value = card[10:].split(" /")[0].strip()
+                    if value.startswith("'"):
+                        header[key] = value.strip("'").rstrip()
+                        continue
+                    for conv in (int, float):
+                        try:
+                            header[key] = conv(value)
+                            break
+                        except ValueError:
+                            pass
+                    else:
+                        header[key] = value == "T" if value in ("T", "F") else value
+
+
 def read_fits(path: str | os.PathLike) -> tuple[np.ndarray, dict[str, Any]]:
     with open(path, "rb") as fh:
         raw = fh.read()

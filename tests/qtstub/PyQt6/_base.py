@@ -133,11 +133,19 @@ class QLineEdit(QWidget):
 class _Spin(QWidget):
     def __init__(self, *a):
         self._v = 0
+        self._blocked = False
         self.valueChanged = _Signal()
 
+    def blockSignals(self, b):
+        # As Qt: while blocked, changes do not signal; returns the previous state.
+        was, self._blocked = self._blocked, bool(b)
+        return was
+
     def setValue(self, v):
+        changed = v != self._v
         self._v = v
-        self.valueChanged.emit(v)
+        if changed and not self._blocked:  # Qt signals only a real change
+            self.valueChanged.emit(v)
 
     def value(self):
         return self._v

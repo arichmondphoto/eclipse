@@ -89,7 +89,7 @@ from tse_core import workflow as W  # noqa: E402
 from tse_core.brackets import detect_brackets  # noqa: E402
 from tse_core import imageout as IO  # noqa: E402
 from tse_core.viewzoom import ViewZoom  # noqa: E402
-from tse_core.enhance import LAYERS, EnhanceParams  # noqa: E402
+from tse_core.enhance import ACHF_SCALES, ACHF_WEIGHTS, LAYERS, SUN_R_2024, EnhanceParams  # noqa: E402
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
 from tse_core.frames import format_exposure  # noqa: E402
 from tse_core.inventory import Inventory, ProjectFolder, find_raw_files  # noqa: E402
@@ -1143,6 +1143,30 @@ class EnhanceTab(StepTab):
         self.settings_layout.addWidget(adaptive)
         self._adaptive_form = af
 
+        achf_box = QGroupBox("Adaptive layer (ACHF): size and strength of each scale")
+        cf = QFormLayout(achf_box)
+        # Sizes are shown in px for the open stack and kept as fractions of the Sun's radius, so
+        # they mean the same on any lens; until a stack is known, the 2024 D850 frames' Sun (413 px).
+        self.sun_r_full = SUN_R_2024
+        self.achf_frac = list(ACHF_SCALES)  # the true values; the px boxes show and edit them
+        self.achf_size, self.achf_w = [], []
+        for i, (frac, wt) in enumerate(zip(ACHF_SCALES, ACHF_WEIGHTS)):
+            size = self._dspin(0.01, 1000.0, round(frac * self.sun_r_full, 2), 0.1, "Adaptive (ACHF): size of this scale")
+            size.setDecimals(2)
+            size.valueChanged.connect(lambda v, i=i: self._achf_size_edited(i, v))
+            size.setSuffix(" px")
+            sp = self._dspin(0.0, 3.0, wt, 0.05, "Adaptive (ACHF): strength of this scale")
+            sp.setDecimals(2)
+            row = QHBoxLayout()
+            row.addWidget(size, 1)
+            row.addWidget(QLabel("strength"))
+            row.addWidget(sp, 1)
+            cf.addRow(f"Scale {i + 1}:", row)
+            self.achf_size.append(size)
+            self.achf_w.append(sp)
+        self.settings_layout.addWidget(achf_box)
+        self._achf_form = cf
+
         fn = QGroupBox("FNRGF (Fourier Normalizing-Radial-Graded Filter)")
         ff = QFormLayout(fn)
         self.order = self._spin(1, 20, 10, "")
@@ -1201,8 +1225,8 @@ class EnhanceTab(StepTab):
                        "the noise, so the faint outer corona is enhanced as strongly "
                        "as the inner corona without turning into grain. Usually the best structure layer.",
             "achf": "Fine detail with Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & "
-                    "Minarovjech 2006; defined in H. Druckmüllerová's thesis, 2013): at each of the same six scales "
-                    "as Adaptive (MGN), each pixel minus its local mean, taken with a kernel that bends along the "
+                    "Minarovjech 2006; defined in H. Druckmüllerová's thesis, 2013): at each of its own scales "
+                    "(size and strength set below), each pixel minus its local mean, taken with a kernel that bends along the "
                     "circle round the Sun and leaves the Moon out. Amplifies detail without normalizing its "
                     "contrast, so it keeps more of the difference between bright and faint structure than "
                     "Adaptive (MGN), and more noise in the faint corona. Slow: a few minutes on a full frame, "
@@ -1232,6 +1256,20 @@ class EnhanceTab(StepTab):
                  "as 'no change', so the sky stays dark.\n\nSoft Light (default): gentle, keeps the natural "
                  "tones.\n\nOverlay: stronger, adds more contrast, mostly in the mid-tones. Use a lower "
                  "strength with Overlay (for example 5-20 %).")
+        for size, sp in zip(self.achf_size, self.achf_w):
+            _tip(size, "Adaptive (ACHF) only: the width (sigma) of this scale's kernel in pixels of your full-size "
+                 "stack; the structure about this size and finer is brought out. The thesis uses 0.5-64 px. Kept as "
+                 "a fraction of the Sun's radius, so the same setting suits another lens or camera (the pixels shown "
+                 "follow the open stack). Defaults 0.5, 1, 3 and 10 px on the 2024 D850 frames at 400 mm, and 10% "
+                 "and 20% of the Sun's radius (41 and 83 px there) for the last two, which start switched off.\n\n"
+                 "The preview is a reduced copy (about 1/6 for a full frame): scales under about 6 px are finer than "
+                 "its pixels and hardly show there; they show in 'Write full-size layers'.", self._achf_form)
+            _tip(sp, "Adaptive (ACHF) only: how much this scale counts, like the frequency sliders of Druckmüller's "
+                 "Corona program. 0 leaves the scale out (and saves its time); only the ratios matter (all at 2 is "
+                 "the same as all at 1). Defaults: 1 for the first four scales, 0 for the last two.\n\nThe finest "
+                 "scales are mostly noise in a typical stack (on the 2024 stack structure stood about 2x above the "
+                 "noise at 2.5 px, 9x and more from 10 px up): lower them if the layer is grainy. The bright glow by "
+                 "the Moon comes from the large scales.", self._achf_form)
         af = self._adaptive_form
         _tip(self.mgn_k, "How strongly the adaptive layer brings out local contrast at each scale: k in the "
              "paper's arctan(k x C) (Morgan & Druckmüller 2014). Default 0.7, the paper's value. Higher gives "
@@ -1307,9 +1345,29 @@ class EnhanceTab(StepTab):
         sp.valueChanged.connect(self.changed)
         return sp
 
+    def _achf_size_edited(self, i: int, px: float) -> None:
+        """A size typed in px for the open stack: kept as a fraction of its Sun's radius."""
+        self.achf_frac[i] = px / self.sun_r_full
+
     def load_project(self, project: EventProject, path: Path) -> None:
         self.outputs = {k: W.resolve(path, v) for k, v in project.parameters.get("enhance", {}).items()
                         if k in LAYER_NAMES and W.resolve(path, v)}
+        # The full-size stack's Sun, so the ACHF sizes show in its pixels (kept as fractions).
+        hdr_path = W.resolve(path, project.parameters.get("stack", {}).get("hdr"))
+        sun_r = None
+        if hdr_path:
+            try:
+                from tse_core.fits import read_fits_header
+
+                sun_r = float(read_fits_header(hdr_path).get("SUNR") or 0) or None
+            except (OSError, ValueError):
+                sun_r = None
+        if sun_r and abs(sun_r - self.sun_r_full) > 1e-6:
+            self.sun_r_full = sun_r
+            for size, frac in zip(self.achf_size, self.achf_frac):
+                size.blockSignals(True)  # only the display changes: the fractions stay as they are
+                size.setValue(round(frac * sun_r, 2))
+                size.blockSignals(False)
 
     def forget_preview(self) -> None:
         self.small = None
@@ -1321,6 +1379,8 @@ class EnhanceTab(StepTab):
         modes = {k: c.currentText().lower() for k, c in self.blend_mode.items() if k in blend}
         return EnhanceParams(layers=layers, segments=self.segments.value(), order=self.order.value(),
                              noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(), even=self.even.value(), midtone=self.midtone.value(), noise_gate=self.noise_gate.value(), mgn_k=self.mgn_k.value(),
+                             achf_scales=tuple(self.achf_frac),
+                             achf_weights=tuple(sp.value() for sp in self.achf_w),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
                              blend_modes=modes, neutral_background=not self.keep_sky.isChecked())
 

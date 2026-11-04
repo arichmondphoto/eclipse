@@ -95,3 +95,37 @@ def test_achf_layer_brings_out_detail_and_nothing_round_a_smooth_corona():
     # compared within the image, not with the smooth one).
     rest = valid & (np.abs(r - 120) < 0.5) & (np.abs(np.angle(np.exp(1j * (phi - 1.0)))) > 0.8)
     assert out[rest].std() < 0.01
+
+
+def test_scale_weights():
+    """Per-scale strengths (like the eight frequency sliders of Druckmüller's Corona program): a
+    scale at 0 adds nothing, so with only one scale on, the layer is that scale's filter alone;
+    all equal is the plain sum; all 0 is flat mid-grey."""
+    r, phi = _grid()
+    rng = np.random.default_rng(3)
+    img = 1e3 * np.maximum(r / R_MOON, 1.0) ** -4 * (1 + 0.1 * ndimage.gaussian_filter(rng.normal(size=(N, N)), 2))
+    valid = r > R_MOON + 2
+    scales = [2.0, 4.0, 8.0, 16.0]
+    only = achf(img, valid, [4.0], 1e-6, CX, CY)
+    picked = achf(img, valid, scales, 1e-6, CX, CY, weights=[0, 1, 0, 0])
+    assert np.abs(only - picked)[valid].max() < 1e-5
+    assert np.abs(achf(img, valid, scales, 1e-6, CX, CY, weights=[2, 2, 2, 2])
+                  - achf(img, valid, scales, 1e-6, CX, CY))[valid].max() < 1e-5
+    flat = achf(img, valid, scales, 1e-6, CX, CY, weights=[0, 0, 0, 0])
+    assert np.abs(flat[valid] - 0.5).max() < 1e-6
+
+
+def test_default_scales_are_andys_pixels_on_the_2024_sun_and_scale_with_the_sun(tmp_path):
+    """Defaults: 0.5, 1, 3 and 10 px on the 2024 frames (Sun radius 413.29 px, the stack's SUNR), then 10% and 20% of the radius
+    switched off; kept as fractions of the Sun's radius, so a Sun twice the size gets twice the px."""
+    from tse_core.enhance import ACHF_SCALES, ACHF_WEIGHTS, EnhanceParams
+    from tse_core.fits import read_fits, read_fits_header, write_fits
+
+    p = EnhanceParams()
+    assert [round(f * 413.29, 3) for f in p.achf_scales[:4]] == [0.5, 1.0, 3.0, 10.0]
+    assert tuple(p.achf_weights) == ACHF_WEIGHTS == (1, 1, 1, 1, 0, 0) and p.achf_scales[4:] == (0.1, 0.2)
+    assert [round(f * 2 * 413.29, 3) for f in ACHF_SCALES[:4]] == [1.0, 2.0, 6.0, 20.0]
+    # The window reads the stack's Sun from its header without loading the image.
+    path = tmp_path / "s.fit"
+    write_fits(path, np.zeros((3, 40, 50), np.float32), {"SUNR": 436.25, "OBJECT": "Sun", "MIRROR": True})
+    assert read_fits_header(path) == {k: v for k, v in read_fits(path)[1].items()}
