@@ -1097,7 +1097,7 @@ class EnhanceTab(StepTab):
         bf = QFormLayout(blend)
         self.blend = {}
         self.blend_mode = {}
-        for k, default in (("fnrgf_n", 70), ("adaptive", 50), ("fnrgf", 0), ("nrgf", 0)):
+        for k, default in (("fnrgf_n", 0), ("adaptive", 0), ("fnrgf", 0), ("nrgf", 0)):
             sp = self._spin(0, 100, default, " %")
             mode = QComboBox()
             mode.addItems(["Soft Light", "Overlay"])
@@ -1216,8 +1216,8 @@ class EnhanceTab(StepTab):
         blend_tip = ("How strongly this layer is applied over the natural layer in the blend, like layer "
                      "opacity in Photoshop. 0 % leaves it out. The mode beside it picks Soft Light or Overlay.\n\n"
                      "Both modes treat mid-grey as 'no change', so the filter layers add structure without "
-                     "lifting the dark sky. Defaults: FNRGF-N 70 %, adaptive 50 %, Soft Light. Lower them for a "
-                     "more natural look.")
+                     "lifting the dark sky. Default 0 % for every layer (the blend is then the natural layer); "
+                     "try FNRGF-N 50-70 % and adaptive 30-50 %, Soft Light.")
         for k, sp in self.blend.items():
             _tip(sp, f"{LAYER_NAMES[k]}: " + blend_tip, bf)
             _tip(self.blend_mode[k], "How this layer is applied, as Photoshop's layer modes. Both treat mid-grey "

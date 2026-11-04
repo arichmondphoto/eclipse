@@ -46,8 +46,10 @@ from scipy import ndimage
 Say = Callable[[str], None]
 
 LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive")
-# The natural layer is the base; the others are soft-light layers at these opacities.
-DEFAULT_BLEND = {"natural": 1.0, "fnrgf_n": 0.7, "adaptive": 0.5}
+# The natural layer is the base; the others are soft-light layers at these opacities. All filter
+# layers start at 0 (Andy, Nov 2026: every Enhance option off by default), so the blend starts as the
+# natural layer and each layer is added by choice.
+DEFAULT_BLEND = {"natural": 1.0}
 
 
 @dataclass
