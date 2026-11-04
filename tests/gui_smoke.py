@@ -51,7 +51,7 @@ et.blend["fnrgf_n"].setValue(40)
 # Defaults (Andy, 4 Nov 2026): every option off; adaptive strength the paper's k = 0.7 in 0.01 steps.
 d = et.params()
 assert (d.flatten, d.shoulder, d.even, d.midtone, d.noise_gate, d.mgn_k) == (0.0, 0.0, 0.0, 0.0, 0.0, 0.7), d
-assert not hasattr(et, "strands") and not hasattr(et, "skip_fine")
+assert "strands" not in vars(et) and "skip_fine" not in vars(et)  # (the stand-in answers any hasattr)
 assert "strands" not in d.__dataclass_fields__ and "mgn_skip_fine" not in d.__dataclass_fields__
 et.flatten.setValue(0.6)
 assert et.params().blend["fnrgf_n"] == 0.4 and et.params().flatten == 0.6
