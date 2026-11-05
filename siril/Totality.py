@@ -1847,7 +1847,7 @@ class EarthshineTab(StepTab):
         self.limb_glare.setChecked(True)
         f.addRow(self.limb_glare)
         self.source_glare = QCheckBox("Remove the glare fanning out from a bright prominence")
-        self.source_glare.setChecked(True)
+        self.source_glare.setChecked(False)
         f.addRow(self.source_glare)
         self.limb_shape = QCheckBox("Keep maria by the limb (glare only fades inward)")
         self.limb_shape.setChecked(True)
@@ -1887,9 +1887,9 @@ class EarthshineTab(StepTab):
         # Only for the separate earthshine layer (pasting it in, or Photoshop).
         layer_box = QGroupBox("Earthshine layer for Photoshop / pasting only")
         fl = QFormLayout(layer_box)
-        self.keep_glare = spin(0.0, 1.0, 0.05, 0.5)
+        self.keep_glare = spin(0.0, 1.0, 0.05, 0.1)
         fl.addRow("Keep glare (glow):", self.keep_glare)
-        self.limb_soften = spin(0.0, 6.0, 0.5, 1.5, " px")
+        self.limb_soften = spin(0.0, 6.0, 0.5, 0.0, " px")
         fl.addRow("Soften the limb:", self.limb_soften)
         fl.addRow(QLabel("Not used by the final image below: there the limb is the stack's own."))
         self.layer_box = layer_box
@@ -1993,8 +1993,9 @@ class EarthshineTab(StepTab):
              "raw glare.")
         _tip(self.source_glare, "A bright prominence throws a fan of glare, with diffraction spikes, onto the "
              "Moon. It is fitted from the prominence itself (a pattern of directions times a fall-off with "
-             "distance), which the lunar surface does not follow, and taken away. Off, the fan was covered with a "
-             "smooth patch instead.")
+             "distance), which the lunar surface does not follow, and taken away.\n\nOff (default): the fan and its "
+             "spikes stay, as the data has them. Removing them cannot bring back what lies under the fan (a mare "
+             "there comes out as noise, not as the mare), so off nothing is inferred.")
         _tip(self.albedo_path, "Optional: a map of the Moon's surface brightness, in the usual 2:1 world-map "
              "layout with 0 degrees longitude in the middle (for example lroc_color_2k.jpg from NASA's CGI Moon "
              "Kit, svs.gsfc.nasa.gov/4720). It helps tell maria near the limb from glare. It is turned to match your "
@@ -2026,11 +2027,12 @@ class EarthshineTab(StepTab):
              "shading; this gives back a brighter middle and keeps the noisier last pixels by the edge dim.", f)
         _tip(self.keep_glare, "How much of the glare that was taken away is put back as a soft glow just inside "
              "the edge of the Moon, fading inward: the inner corona's light spilling over the dark Moon, as the eye "
-             "sees it at totality. 0 = none, 0.5 = a soft glow (default), 1 = all of it (compressed so it cannot "
-             "clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
+             "sees it at totality. 0 = none, 0.1 = a faint glow (default: blends best when pasting), 0.5 = a soft "
+             "glow, 1 = all of it (compressed so it cannot clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
              "softness, not a drawn circle.", fl)
         _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "
-             "has in your frames. Default 1.5; 0 = none."
+             "has in your frames. Default 0 (none): the edge as your frames have it, which blends best when "
+             "pasting."
              "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
              "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
              "smaller pixels, raise them in proportion; with a shorter lens, lower them.", fl)

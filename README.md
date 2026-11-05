@@ -717,9 +717,10 @@ fall-off only allowed to decrease, so a mare in the fan is not taken for
 glare), which the maria do not follow. The prominence's place on the limb
 (on it or just outside) is searched within 2 degrees for the fit that leaves
 least behind. Up to four such sources are fitted, brightest first. On the 2024 stack this removed the fan
-at 74 degrees. `--no-prominence-glare` (or the checkbox on the tab) turns it
-off: the fan and its spikes then stay in the lunar surface as the data has
-them. Removing them cannot bring back what is under them (on the 2024 Moon a
+at 74 degrees. It is **off by default** (since Nov 2026); `--prominence-glare`
+(or **Remove the glare fanning out from a bright prominence** on the tab)
+turns it on. Off, the fan and its spikes stay in the lunar surface as the
+data has them. Removing them cannot bring back what is under them (on the 2024 Moon a
 mare: removal leaves noise there, not the mare), so with it off nothing is
 inferred.
 
@@ -772,8 +773,10 @@ looks pasted in, so the layer is built like a photograph of the limb:
   to full brightness. The edge therefore has the Moon's own outline
   (mountains, valleys) and softness, and runs into the corona; the layer
   hands over to the corona layers 2 px past their black disc.
-  `--limb-soften` (1.5 px) adds a little extra softness.
-* *A glow.* `--keep-glare` (0.5) of the glare that was taken away is put back
+  `--limb-soften` adds extra softness (default 0, none: the edge as the frames
+  have it, which blends best when pasting).
+* *A glow.* `--keep-glare` (default 0.1, a faint glow; it blends best when
+  pasting) of the glare that was taken away is put back
   as a glow fading inward from the limb (the inner corona's light spilling
   over the dark Moon), on the same logarithmic scale, so it cannot clip.
 * *Colour.* The layer is in colour (`--no-colour` for grey): the glow and
@@ -787,7 +790,7 @@ looks pasted in, so the layer is built like a photograph of the limb:
   (`--no-edge-grain` to leave them smooth).
 
 **Pixel settings.** Smoothing (1 px), edge smoothing (3 px), edge softening
-(1.5 px) and the suggested edge-preserving smoothing (3-5 px) are in
+(0 by default) and the suggested edge-preserving smoothing (3-5 px) are in
 pixels, and so are two internal widths (the layer reaches 6 px past the
 limb; the corona layers' black disc ends 1.5 px past it). They were chosen
 for a 400 mm lens on a 45-megapixel full-frame camera, where the Sun is
@@ -1192,7 +1195,8 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `project` | project file (run 'totality stack' on it first) |
 | `--stops` | use frames within this many stops of the longest exposure (default 6) |
 | `--no-limb-glare` | do not model the steep glare just inside the limb (shows as a bright rim) |
-| `--no-prominence-glare` | do not fit and remove the fan of glare (and spikes) round a bright prominence |
+| `--prominence-glare` | fit and remove the fan of glare (and spikes) round a bright prominence (default off: the fan is shown as the data has it; removing it cannot bring back what is under it) |
+| `--no-prominence-glare` | the default since Nov 2026; kept so older command lines still run |
 | `--no-limb-shape` | do not fit the limb glare as light fading inward (that fit keeps maria by the limb) |
 | `--channel` | colour channels to make the earthshine from (default auto: chosen on the stack; the red channel carries most of the chromosphere glare) |
 | `--albedo-map` | lunar albedo map (2:1, 0 deg longitude centred, e.g. lroc_color_2k.jpg from NASA's CGI Moon Kit) to guide the glare removal near the limb |
@@ -1201,8 +1205,8 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--smooth` | smoothing of the layer in pixels (default 1, 0 = none) |
 | `--brightness` | brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona) |
 | `--limb-darkening` | vignette: how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit) |
-| `--keep-glare` | how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.5) |
-| `--limb-soften` | extra softening of the limb in px, on top of the real one (default 1.5, 0 = none) |
+| `--keep-glare` | earthshine layer for pasting: how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1) |
+| `--limb-soften` | earthshine layer for pasting: extra softening of the limb in px, on top of the real one (default 0 = none) |
 | `--no-colour` | make the earthshine layer grey (default: natural colour, so a prominence at the limb stays red on the Moon side too) |
 | `--no-edge-grain` | leave the filled last pixels by the limb smooth (default: grain like the rest) |
 | `--vignette-shape` | how the darkening falls from the centre: 1 = straight line, 1.5 (default) = gentle in the middle, 3 = the middle stays bright longer |

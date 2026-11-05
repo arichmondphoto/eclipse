@@ -142,7 +142,7 @@ def test_detail_is_kept_near_the_limb(disc):
     lunar contrast. Measured away from the bright prominence: its fan of glare used to count as
     "detail" here (1.2 x the middle's contrast with it, 0.66 without)."""
     lum, weight, good, cx, cy, r, rr, phi = disc
-    detail, *_ = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
+    detail, *_ = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5, source_glare=True))
     big = ndimage.gaussian_filter(detail, 4)
     band = good & (rr > r - 60) & (rr < r - 15) & (np.abs(np.degrees(phi) - 74) > 25)
     body = good & (rr < r * 0.6)
@@ -156,7 +156,7 @@ def test_prominence_fan_is_taken_away(disc):
     """The bright prominence at the bottom right throws a fan onto the Moon; once removed, nothing
     there stands far above the range of the lunar surface, and there is no fan of streaks."""
     lum, weight, good, cx, cy, r, rr, phi = disc
-    on = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
+    on = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5, source_glare=True))
     off = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5, source_glare=False))
     assert any("prominence" in n for n in on[4])
     body = good & (rr < 0.8 * r)

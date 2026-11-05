@@ -478,7 +478,8 @@ def test_layer_keeps_the_colour_at_the_limb():
     good = rr < r - 5
     weight = (rr < r + 8).astype(np.float32)
     detail, glare = remove_glare(lum, good, cx, cy, r, EarthshineParams(limb_shape=False))
-    p = EarthshineParams(limb_darkening=0.0)
+    # A clear glow (the defaults before Nov 2026), so its colour can be measured.
+    p = EarthshineParams(limb_darkening=0.0, keep_glare=0.5, limb_soften=1.5)
     tint = np.array([0.9, 1.0, 1.1], np.float32)
     layer = compose_layer(detail, good, weight, cx, cy, r, p, keep_from=6.0, linear=lum, glare=glare,
                           rgb=rgb, white=(1.0, 1.0, 1.0), tint=tint)
@@ -858,3 +859,20 @@ def test_the_filled_edge_band_is_named_in_the_log(run):
     line = [n for n in res.notes if "filled" in n and "inside the limb" in n]
     assert line, res.notes
     assert "% of the radius" in line[0] and ("minimum" in line[0] or "noise" in line[0]), line[0]
+
+
+def test_defaults_as_andy_uses_them():
+    """Nov 2026, from Andy's work on the 2024 Moon: a faint glow (0.10) and no extra softening are
+    what blend best when pasting, and the prominence glare is left as the data has it (removing it
+    cannot bring back what is under it). The command line has the same defaults."""
+    import sys
+    from pathlib import Path
+
+    p = EarthshineParams()
+    assert (p.keep_glare, p.limb_soften, p.source_glare) == (0.1, 0.0, False)
+    sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+    from cli_reference import parser
+
+    sp = parser()._subparsers._group_actions[0].choices["earthshine"]
+    a = sp.parse_args(["proj.json"])
+    assert (a.keep_glare, a.limb_soften, a.prominence_glare) == (0.1, 0.0, False)

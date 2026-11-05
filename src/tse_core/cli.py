@@ -218,8 +218,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="use frames within this many stops of the longest exposure (default 6)")
     p.add_argument("--no-limb-glare", action="store_true",
                    help="do not model the steep glare just inside the limb (shows as a bright rim)")
+    p.add_argument("--prominence-glare", action="store_true",
+                   help="fit and remove the fan of glare (and spikes) round a bright prominence (default off: the "
+                        "fan is shown as the data has it; removing it cannot bring back what is under it)")
     p.add_argument("--no-prominence-glare", action="store_true",
-                   help="do not fit and remove the fan of glare (and spikes) round a bright prominence")
+                   help="the default since Nov 2026; kept so older command lines still run")
     p.add_argument("--no-limb-shape", action="store_true",
                    help="do not fit the limb glare as light fading inward (that fit keeps maria by the limb)")
     p.add_argument("--channel", default="auto", choices=["auto", "all", "green", "green+blue", "blue"],
@@ -237,10 +240,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona)")
     p.add_argument("--limb-darkening", type=float, default=0.6,
                    help="vignette: how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit)")
-    p.add_argument("--keep-glare", type=float, default=0.5,
-                   help="how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.5)")
-    p.add_argument("--limb-soften", type=float, default=1.5,
-                   help="extra softening of the limb in px, on top of the real one (default 1.5, 0 = none)")
+    p.add_argument("--keep-glare", type=float, default=0.1,
+                   help="earthshine layer for pasting: how much of the removed glare to keep as a glow inside the "
+                        "limb, 0-1 (default 0.1)")
+    p.add_argument("--limb-soften", type=float, default=0.0,
+                   help="earthshine layer for pasting: extra softening of the limb in px, on top of the real one "
+                        "(default 0 = none)")
     p.add_argument("--no-colour", action="store_true",
                    help="make the earthshine layer grey (default: natural colour, so a prominence at the limb "
                         "stays red on the Moon side too)")
@@ -803,7 +808,7 @@ def cmd_earthshine(args) -> int:
 
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
                               brightness=args.brightness, limb_glare=not args.no_limb_glare,
-                              source_glare=not args.no_prominence_glare,
+                              source_glare=args.prominence_glare and not args.no_prominence_glare,
                               limb_darkening=args.limb_darkening, vignette_shape=args.vignette_shape,
                               keep_glare=args.keep_glare, limb_soften=args.limb_soften,
                               edge_grain=not args.no_edge_grain, colour=not args.no_colour,

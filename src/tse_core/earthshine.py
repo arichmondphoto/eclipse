@@ -52,16 +52,19 @@ class EarthshineParams:
     edge_smooth: float = 3.0  # most smoothing where the noise is high near the limb, px
     limb_glare: bool = True  # also model the steep glare just inside the limb
     limb_shape: bool = True  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
-    source_glare: bool = True  # glare round a bright prominence (a fan with diffraction spikes), fitted from the prominence
+    # Glare round a bright prominence (a fan with diffraction spikes), fitted from the prominence and
+    # taken away. Off by default (Nov 2026): it cannot bring back what is under the fan (on the 2024
+    # Moon a mare: removal left noise there), so the fan is shown as the data has it.
+    source_glare: bool = False
     channel: str = "auto"  # colour channels to use: auto, all, green, green+blue, blue
     albedo_map: str = ""  # lunar albedo map (equirectangular, 0 deg longitude centred) to guide the glare removal
     albedo_strength: float = 0.5  # how much the map guides it, 0..1 (only used with a map)
     albedo_min_match: float = 0.6  # the map is not used if it matches the middle of the disc less well than this
     limb_px: float = 1.5  # the corona layers' black disc reaches this far past the limb (enhance's margin)
     feather_px: float = 1.0  # soft edge of the disc in the layer (only without a measured limb)
-    keep_glare: float = 0.5  # how much of the removed glare is kept as a glow inside the limb, 0..1
+    keep_glare: float = 0.1  # how much of the removed glare is kept as a glow inside the limb, 0..1
     limb_reach: float = 6.0  # px past the limb the stack and layer reach: the real limb, from the data
-    limb_soften: float = 1.5  # extra softening of the limb, px (Gaussian), on top of the real one
+    limb_soften: float = 0.0  # extra softening of the limb, px (Gaussian), on top of the real one
     # Edge-preserving smoothing of the lunar surface (px, 0 = off): averages only across similar
     # brightness, so the maria keep crisp edges while the noise inside them goes.
     surface_denoise: float = 0.0
