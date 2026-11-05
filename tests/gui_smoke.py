@@ -2,7 +2,10 @@ import sys, json, numpy as np
 from pathlib import Path
 T = Path(sys.argv[1]); T.mkdir(exist_ok=True)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "siril"))
-import SolarEclipseToolkit as G
+import Totality as G
+# The window title: name, version and the commit, so the user can see which code is running.
+import re as _re
+assert _re.fullmatch(r"Totality - A Solar Eclipse Toolkit \d+\.\d+\.\d+( \([0-9a-f]{7}\))?", G.window_title()), G.window_title()
 from PyQt6.QtWidgets import QMessageBox
 from tse_core.fits import write_fits
 from tse_core.project import EventProject

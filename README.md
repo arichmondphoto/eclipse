@@ -93,7 +93,9 @@ totality elements-update --from ~/Downloads/eclipse_besselian_from_mysqldump2.cs
 
 1. In Siril, open **Preferences → Scripts** and add this repository's
    `siril` folder to the script paths.
-2. Run **Scripts → SolarEclipseToolkit**. On first run Siril installs
+2. Run **Scripts → Totality** (the script is `siril/Totality.py`; the window
+   is titled "Totality - A Solar Eclipse Toolkit", with the version and the
+   commit). On first run Siril installs
    PyQt6, numpy, scipy, exifread, rawpy, tifffile, Pillow, certifi and
    truststore into its own Python environment.
 
@@ -101,8 +103,9 @@ The script finds the core package in `../src`, so keep the folders together.
 
 To update, pull the repository (`git pull`) and run the script again. The
 window title shows the version and the commit it is running (for example
-`Solar Eclipse Toolkit 0.1.0 (8e54fa8)`), so you can check an update took
-effect.
+`Totality - A Solar Eclipse Toolkit 0.1.0 (8e54fa8)`), so you can check an
+update took effect. (Until Nov 2026 the script was `SolarEclipseToolkit.py`;
+if Siril still lists it, remove that old copy from your scripts folder.)
 
 The window has one tab per step, and each step saves into the project file:
 

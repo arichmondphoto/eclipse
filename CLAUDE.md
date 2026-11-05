@@ -8,7 +8,7 @@ user documentation and describes every method in detail; this file covers how to
 Processing for DSLR photographs of total solar eclipses, RAW files to finished pictures:
 alignment on the corona, Moon-aware linear HDR stacking, coronal enhancement (natural, NRGF,
 FNRGF, FNRGF-N, adaptive layers), an earthshine Moon, and prominences. It runs as a PyQt6 script
-inside Siril 1.4+ (`siril/SolarEclipseToolkit.py`) and from the command line as `totality`
+inside Siril 1.4+ (`siril/Totality.py`) and from the command line as `totality`
 (`src/tse_core/cli.py`). Both drive the same functions in `src/tse_core/workflow.py`, and every
 step saves its results into one project file (`<event>/<event>.json`).
 
@@ -40,7 +40,7 @@ step saves its results into one project file (`<event>/<event>.json`).
 | `src/tse_core/moonmap.py` | Optional albedo map as a guide for the glare removal |
 | `src/tse_core/prominences.py` | Prominences found by colour |
 | `src/tse_core/viewzoom.py` | Zoom and pan arithmetic for the GUI's picture views (no Qt) |
-| `siril/SolarEclipseToolkit.py` | The Siril window, one tab per step |
+| `siril/Totality.py` | The Siril window, one tab per step |
 | `tools/cli_reference.py` | Generates README's command-line reference from the parser |
 | `tests/` | pytest; `tests/qtstub` is a stand-in for PyQt6; `tests/data` holds binned real 2024 data |
 

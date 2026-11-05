@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
-"""Solar Eclipse Toolkit: Siril script entry point.
+"""Totality - A Solar Eclipse Toolkit: Siril script entry point.
 
 Run from Siril (Scripts menu, Siril 1.4 or later) or on its own with any
 Python 3.10+ that has PyQt6:
 
-    python SolarEclipseToolkit.py            # GUI
-    python SolarEclipseToolkit.py --help     # command-line options (same as 'totality')
+    python Totality.py            # GUI
+    python Totality.py --help     # command-line options (same as 'totality')
 
 Four tabs, one per step, each saving into the event's project file:
 
@@ -54,6 +54,13 @@ def _git_version() -> str:
 
 
 BUILD = _git_version()
+APP_NAME = "Totality - A Solar Eclipse Toolkit"
+
+
+def window_title() -> str:
+    """'Totality - A Solar Eclipse Toolkit 0.1.0 (<commit>)': the commit shows which code is running."""
+    return f"{APP_NAME} {VERSION}" + (f" ({BUILD})" if BUILD else "")
+
 
 # The core package lives in ../src when the script runs from the repository.
 _SRC = Path(__file__).resolve().parent.parent / "src"
@@ -409,7 +416,7 @@ class FramesTab(QWidget):
         if not files:
             QMessageBox.warning(self, "No RAW files", f"No RAW files were found in:\n{folder}")
             return
-        self.link.log(f"Solar Eclipse Toolkit: reading {len(files)} RAW files")
+        self.link.log(f"Totality: reading {len(files)} RAW files")
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             self.inventory = Inventory.from_paths(files, use_exiftool=self.use_exiftool.isChecked())
@@ -484,7 +491,7 @@ class FramesTab(QWidget):
         try:
             con = compute_contacts(self.inventory.frames, p.latitude, p.longitude, p.elevation_m,
                                    p.camera_utc_offset_h, p.clock_error_s, p.eclipse_date,
-                                   say=lambda m: self.link.log("Solar Eclipse Toolkit: " + m))
+                                   say=lambda m: self.link.log("Totality: " + m))
         except ValueError as exc:
             QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, "Compute contacts", str(exc))
@@ -493,7 +500,7 @@ class FramesTab(QWidget):
         self.c2.setText(con.c2_camera.isoformat(timespec="seconds"))
         self.c3.setText(con.c3_camera.isoformat(timespec="seconds"))
         self.event_report = con.describe()
-        self.link.log("Solar Eclipse Toolkit: " + con.describe().replace("\n", "\n  "))
+        self.link.log("Totality: " + con.describe().replace("\n", "\n  "))
         self.apply_settings()
 
     def apply_settings(self) -> None:
@@ -636,7 +643,7 @@ class FramesTab(QWidget):
             write_synthetic_flat(out_dir / name, f.width, f.height, fc.lens_terms, f.crop_factor or 1.0,
                                  fc.profile_crop, fc.channel_terms, f.cfa_pattern)
             written.add(key)
-            self.link.log(f"Solar Eclipse Toolkit: wrote {name}")
+            self.link.log(f"Totality: wrote {name}")
         QMessageBox.information(self, "Lensfun flat", f"Wrote {len(written)} synthetic flat(s) to\n{out_dir}")
 
     def update_lensfun(self) -> None:
@@ -649,7 +656,7 @@ class FramesTab(QWidget):
             QMessageBox.warning(self, "Update lensfun", f"Download failed:\n{exc}")
             return
         QApplication.restoreOverrideCursor()
-        self.link.log(f"Solar Eclipse Toolkit: lensfun database updated ({len(self.db.lenses)} lenses) in {path}")
+        self.link.log(f"Totality: lensfun database updated ({len(self.db.lenses)} lenses) in {path}")
         self._refresh_lens_choices()
         self.replan()
 
@@ -666,7 +673,7 @@ class FramesTab(QWidget):
         self.project.store_inventory(self.inventory)
         self.project.save(path)
         self.project_path = path
-        self.link.log(f"Solar Eclipse Toolkit: project saved to {path}")
+        self.link.log(f"Totality: project saved to {path}")
 
     def open_project(self) -> None:
         name, _ = QFileDialog.getOpenFileName(self, "Open project", str(self.project_dir()), "Project (*.json)")
@@ -792,7 +799,7 @@ class StepTab(QWidget):
         for b in self.run_buttons:
             b.setEnabled(False)
         self.cancel_btn.setEnabled(True)
-        self.main.link.log(f"Solar Eclipse Toolkit: {label}")
+        self.main.link.log(f"Totality: {label}")
         self.worker.start()
 
     def cancel(self) -> None:
@@ -822,7 +829,7 @@ class StepTab(QWidget):
         self.status.setText(msg.splitlines()[0][:120])
         self.log.appendPlainText(msg)
         if msg != "Cancelled.":
-            QMessageBox.warning(self, "Solar Eclipse Toolkit", msg[:2000])
+            QMessageBox.warning(self, "Totality", msg[:2000])
 
 
 # ---------------------------------------------------------------------------
@@ -2642,8 +2649,7 @@ class MainWindow(QMainWindow):
     def __init__(self, link: SirilLink) -> None:
         super().__init__()
         self.link = link
-        self.setWindowTitle(f"Solar Eclipse Toolkit {VERSION}" + (f" ({BUILD})" if BUILD else "")
-                            + ("" if link.connected else " (not connected to Siril)"))
+        self.setWindowTitle(window_title() + ("" if link.connected else " (not connected to Siril)"))
         self.resize(1280, 820)
         self.tabs = QTabWidget()
         self.frames_tab = FramesTab(link)
@@ -2676,7 +2682,7 @@ class MainWindow(QMainWindow):
     def ensure_saved(self) -> Path | None:
         ft = self.frames_tab
         if not ft.inventory.frames and ft.project_path is None:
-            QMessageBox.information(self, "Solar Eclipse Toolkit",
+            QMessageBox.information(self, "Totality",
                                     "Read the RAW folder on the Frames tab first (or open a saved project).")
             return None
         if ft.project_path is None:
@@ -2730,19 +2736,19 @@ class MainWindow(QMainWindow):
         self._title(path)
 
     def _title(self, path) -> None:
-        self.setWindowTitle(f"Solar Eclipse Toolkit {VERSION}" + (f" ({BUILD})" if BUILD else "") + f" – {Path(path).name}"
+        self.setWindowTitle(window_title() + f" – {Path(path).name}"
                             + ("" if self.link.connected else " (not connected to Siril)"))
 
     def open_in_siril(self, path: str) -> None:
         if not path:
             return
         if not self.link.connected:
-            QMessageBox.information(self, "Solar Eclipse Toolkit", f"Not connected to Siril. The file is:\n{path}")
+            QMessageBox.information(self, "Totality", f"Not connected to Siril. The file is:\n{path}")
             return
         try:
             self.link.siril.cmd("load", f'"{path}"')
         except Exception as exc:
-            QMessageBox.warning(self, "Solar Eclipse Toolkit", f"Siril could not open the file:\n{exc}")
+            QMessageBox.warning(self, "Totality", f"Siril could not open the file:\n{exc}")
 
 
 def _with_ext(fname: str, filt: str = "") -> Path:
