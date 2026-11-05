@@ -157,3 +157,29 @@ def test_cli_inventory_uses_project_folder(tmp_path, monkeypatch, capsys):
     project = EventProject.load(root / "ev.json")
     assert project.dark_files and project.dark_files[0].endswith("D1.NEF")
     assert Path(project.raw_folder) == (root / "lights").resolve()
+
+
+@pytest.mark.skipif(not DATA.exists(), reason="real-data fixture not present")
+def test_earthshine_white_balance_without_written_enhance_layers(tmp_path):
+    """The earthshine's colour is white balanced like the corona. Before 5 Nov 2026 the white balance
+    was only read from the Enhance step's written layers, so without them the Moon kept the camera's
+    raw colour: on the 2024 stack (R, G, B) = 0.68, 1.33, 0.99, green. It is now measured on the HDR
+    stack itself, as the Enhance step does."""
+    from tse_core.enhance import prepare
+    from tse_core.fits import write_fits
+    from tse_core.project import EventProject
+
+    z = np.load(DATA)
+    hdr = np.ascontiguousarray(np.moveaxis(z["hdr"].astype(np.float32) * float(z["scale"]), 0, -1))
+    header = {k: float(z[k]) for k in ("SUNX", "SUNY", "SUNR", "MOONX", "MOONY", "MOONR")}
+    weight = (np.abs(hdr).sum(axis=2) > 0).astype(np.float32)
+    write_fits(tmp_path / "e_hdr.fit", np.moveaxis(hdr, -1, 0), header)
+    write_fits(tmp_path / "e_weight.fit", weight)
+    p = EventProject(name="e")
+    p.parameters["stack"] = {"hdr": "e_hdr.fit", "weight": "e_weight.fit"}
+    p.save(tmp_path / "e.json")
+    white, where = W._corona_white(tmp_path / "e.json", EventProject.load(tmp_path / "e.json"))
+    expect = prepare(hdr.copy(), weight, header, EnhanceParams()).wb
+    assert white is not None and np.allclose(white, expect, rtol=0.03), (white, expect)
+    assert "HDR stack" in where
+    assert white[0] > 1.3 and white[2] > 1.1  # the raw camera colour is green: red and blue are raised

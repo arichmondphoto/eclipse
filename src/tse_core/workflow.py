@@ -678,17 +678,29 @@ def enhance_project(project_path, params, hdr_file: Optional[str] = None, output
 # ---------------------------------------------------------------------------
 
 
-def _corona_white(path, project) -> Optional[list]:
-    """The corona layers' white balance (from the Enhance step), so the earthshine's colour matches."""
+def _corona_white(path, project) -> tuple:
+    """The corona layers' white balance, so the earthshine's colour matches: (white, where from).
+
+    From the Enhance step's written layers when there are any (their settings), otherwise measured
+    on the HDR stack itself the way the Enhance step does it (inner corona white), so the Moon is
+    never left in the camera's raw colour. (None, why) if neither can be had."""
+    from .enhance import prepare
+
     info_path = resolve(path, project.parameters.get("enhance", {}).get("info"))
     if info_path:
         try:
             white = json.loads(Path(info_path).read_text(encoding="utf-8")).get("white")
             if white and len(white) == 3:
-                return [float(v) for v in white]
+                return [float(v) for v in white], "from the Enhance step's written layers"
         except (OSError, ValueError):
             pass
-    return None
+    try:
+        data = reduce_for_preview(load_hdr(path), max_side=1400)
+    except (WorkflowError, OSError, ValueError) as exc:
+        return None, f"no white balance ({exc})"
+    params = _scaled_params(enhance_params_from_project(path, project), 1.0 / data.binning)
+    frame = prepare(data.hdr, data.weight, data.header, params)
+    return [float(v) for v in frame.wb], "measured on the HDR stack (Enhance layers not written yet)"
 
 
 def earthshine(project_path, params=None, include_rejected: bool = False, output: Optional[str] = None,
@@ -740,11 +752,15 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
         raise WorkflowError(str(exc)) from exc
     calibs = {fc.frame_index: fc for fc in plan.frames}
     out_dir = Path(output) if output else path.parent
+    white, where = _corona_white(path, project)
+    say("white balance for the earthshine's colour (R, G, B): "
+        + (", ".join(f"{v:.3f}" for v in white) + f", {where}" if white is not None
+           else f"none, {where}: the colour is the camera's raw colour"))
     try:
         result, _lum, _detail = stack_earthshine(use, lambda f: read_mosaic(frames[f.index].path), calibs, matches,
                                                  moon_xy, moon_r, canvas, p, out_dir=out_dir,
                                                  name=name or path.stem, image_crop=crop_factor, progress=say,
-                                                 fmt=fmt, white=_corona_white(path, project))
+                                                 fmt=fmt, white=white)
     except (RuntimeError, ValueError) as exc:
         raise WorkflowError(str(exc)) from exc
     project.parameters["earthshine"] = {**result.outputs, "frames": result.frames}

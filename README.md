@@ -758,7 +758,9 @@ looks pasted in, so the layer is built like a photograph of the limb:
   over the dark Moon), on the same logarithmic scale, so it cannot clip.
 * *Colour.* The layer is in colour (`--no-colour` for grey): the glow and
   the limb keep the colour measured in the stack, white balanced like the
-  corona layers (from the Enhance step), so a prominence or the pink
+  corona layers (the Enhance step's white balance from its written layers, or,
+  if none are written yet, measured on the HDR stack the same way; the log
+  names which), so a prominence or the pink
   chromosphere stays red where it spills over the limb; the surface takes
   the earthshine's own tint, measured from how strongly the lunar pattern
   shows in each channel (on the 2024 stack R, G, B = 1.06, 0.97, 0.97).
