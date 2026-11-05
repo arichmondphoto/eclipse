@@ -756,6 +756,9 @@ class StepTab(QWidget):
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self.cancel)
+        _tip(self.cancel_btn, "Stops the step that is running at its next progress message (usually within "
+             "seconds). A step stopped part-way may already have written some of its files (Write full-size layers "
+             "writes one layer at a time): run it again before using them.")
         row.addWidget(self.status, 1)
         row.addWidget(self.cancel_btn)
         ll.addLayout(row)
@@ -863,6 +866,9 @@ class AlignTab(StepTab):
              "off when the rotation is small (equatorial mounts, a short totality).")
         run = QPushButton("Align frames")
         run.clicked.connect(self.run)
+        _tip(run, "Measures every light frame's shift and rotation against the reference frame on the corona, "
+             "finds the Sun's true centre from the Moon's path, and saves the result with the project "
+             "(<name>_align.json). Nothing is resampled yet: Stack uses it. Takes several minutes for a full bracket.")
         self.run_buttons.append(run)
         self.settings_layout.addWidget(run)
         self.settings_layout.addStretch(1)
@@ -957,7 +963,6 @@ class StackTab(StepTab):
         f = QFormLayout(opts)
         self.moon_frame = QComboBox()
         self.moon_frame.addItem("Alignment reference", None)
-        self.moon_frame.setToolTip("The frame whose Moon (and earthshine) is kept inside the lunar disc")
         f.addRow("Moon from frame:", self.moon_frame)
         self.include_rejected = QCheckBox("Include frames flagged as off the Moon's track")
         self.hot = QCheckBox("Fix isolated hot pixels")
@@ -985,7 +990,7 @@ class StackTab(StepTab):
              "got). Master flat: divide by the average of your flats, pixel by pixel, which corrects vignetting "
              "AND dust shadows; best when the flats were taken the same day without changing or cleaning "
              "anything. Smooth profile: fit only the lens's smooth vignetting to the flats and ignore dust; use it "
-             "if the dust may have moved since (it can then add dark rings instead of removing them). Master flat "
+             "if the dust may have moved since (a master flat would then add dark rings where the dust was). Master flat "
              "+ compare: the master flat, and the log reports how much it differs from the smooth profile; "
              "a FITS image of the difference is saved next to the stack (dark spots in it are dust). Darks and "
              "bias frames from the Frames tab are always used when they match. Changing this needs a re-stack.",
@@ -994,10 +999,15 @@ class StackTab(StepTab):
              "prominences, which cover several pixels, are left alone.")
         run = QPushButton("Stack frames")
         run.clicked.connect(self.run)
+        _tip(run, "Calibrates (darks, bias, flats), aligns and merges every light frame into one linear HDR stack "
+             "(<name>_hdr.fit) with its weights and a preview, matching each frame's brightness to the others. "
+             "Needs Align first. Re-run it after changing anything on the Frames tab or here.")
         self.run_buttons.append(run)
         self.settings_layout.addWidget(run)
         self.open_btn = QPushButton("Open HDR stack in Siril")
         self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.hdr_path))
+        _tip(self.open_btn, "Loads the HDR stack (linear, 32-bit) into Siril's main window, for example to look "
+             "at it with Siril's own stretches.")
         self.settings_layout.addWidget(self.open_btn)
         self.settings_layout.addStretch(1)
         self.hdr_path = ""
@@ -1153,7 +1163,6 @@ class EnhanceTab(StepTab):
         tf.addRow("Saturation:", self.saturation)
         self.white = QComboBox()
         self.white.addItems(["corona", "camera", "none"])
-        self.white.setToolTip("corona: the inner corona is made white; camera: as-shot white balance")
         self.white.currentIndexChanged.connect(self.changed)
         tf.addRow("White balance:", self.white)
         self.keep_sky = QCheckBox("Keep the sky (don't model and remove it)")
@@ -1205,10 +1214,8 @@ class EnhanceTab(StepTab):
         fn = QGroupBox("FNRGF (Fourier Normalizing-Radial-Graded Filter)")
         ff = QFormLayout(fn)
         self.order = self._spin(1, 20, 10, "")
-        self.order.setToolTip("Fourier order of the circle statistics (paper: 10)")
         ff.addRow("Order:", self.order)
         self.segments = self._spin(12, 200, 50, "")
-        self.segments.setToolTip("Angular segments per circle (paper: 50)")
         ff.addRow("Segments:", self.segments)
         self.noise_m = self._dspin(0.0, 0.99, 0.7, 0.05, "FNRGF-N noise compensation (0 = plain FNRGF)")
         ff.addRow("Noise compensation:", self.noise_m)
@@ -1225,6 +1232,8 @@ class EnhanceTab(StepTab):
         self.settings_layout.addLayout(btns)
         self.auto = QCheckBox("Update the preview when a setting changes")
         self.auto.setChecked(True)
+        _tip(self.auto, "Redraws the picture shown (the whole picture, or the detail box) a moment after a "
+             "setting changes. Untick to change several settings first and then click Preview.")
         self.settings_layout.addWidget(self.auto)
         self.settings_layout.addStretch(1)
 
@@ -1240,6 +1249,8 @@ class EnhanceTab(StepTab):
         top.addWidget(self.box_label, 1)
         self.open_btn = QPushButton("Open layer in Siril")
         self.open_btn.clicked.connect(self._open_layer)
+        _tip(self.open_btn, "Loads the shown layer, as last written by 'Write full-size layers', into Siril's main "
+             "window.")
         top.addWidget(self.open_btn)
         self.results_layout.addLayout(top)
         self.view = ImageView(boxes=True)
@@ -1257,8 +1268,9 @@ class EnhanceTab(StepTab):
         self._box_text()
 
         layer_tips = {
-            "natural": "Natural: a logarithmic (log) stretch with most of the brightness fall-off from the Sun removed. The closest to what "
-                       "the eye saw, and the base layer of the blend. Keeps the colour.",
+            "natural": "Natural: a logarithmic (log) stretch, with as much of the brightness fall-off from the Sun "
+                       "removed as Flatten says (0 by default: a plain log stretch). The closest to what the eye "
+                       "saw, and the base layer of the blend. Keeps the colour.",
             "nrgf": "NRGF = Normalizing-Radial-Graded Filter (Morgan, Habbal & Woo 2006). 'Radial-graded': it "
                     "works outward from the Sun, circle by circle. 'Normalizing': every circle is brought to "
                     "the same average brightness and contrast. Simple and honest; bright streamers stay brighter than "
@@ -1280,7 +1292,7 @@ class EnhanceTab(StepTab):
             "adaptive": "Fine detail (loops, plumes, streamer edges) at several scales and every direction. "
                         "Method: MGN = Multi-scale Gaussian Normalization (Morgan & Druckmüller 2014), the "
                         "published successor to Druckmüller's ACHF = Adaptive Circular High-pass Filter. "
-                        "Use lightly; it flattens the overall brightness.",
+                        "It normalizes the local contrast, so in the blend it also flattens the overall brightness.",
         }
         for i in range(self.show_layer.count()):
             k = self.show_layer.itemData(i)
@@ -1289,16 +1301,16 @@ class EnhanceTab(StepTab):
         _tip(self.show_layer, "Which layer the preview shows. Blend = the suggested mix of the layers. "
              "Rest the mouse on a layer name in the list, or on its checkbox, for what it is.")
         for k, c in self.layer_checks.items():
-            _tip(c, layer_tips[k] + "\n\nTicked layers are written as 16-bit TIFFs by 'Write full-size layers'. "
-                 "The preview always shows every layer.")
+            _tip(c, layer_tips[k] + "\n\nTicked layers are written by 'Write full-size layers'. The preview "
+                 "shows every layer whatever is ticked, except Adaptive (ACHF): that one only when it is ticked, "
+                 "blended or shown (it is slow).")
         blend_tip = ("How strongly this layer is applied over the natural layer in the blend, like layer "
                      "opacity in Photoshop. 0 % leaves it out. The mode beside it picks Soft Light, Overlay or Linear (paper).\n\n"
                      "Soft Light and Overlay treat mid-grey as 'no change', so the filter layers add structure without "
-                     "lifting the dark sky (up to 100 %). With Linear (paper) the strength is the layer's weight "
-                     "against the natural layer's 100 % (up to 1000 %). Default 0 % for every layer (the blend is "
-                     "then the natural layer); "
-                     "try FNRGF-N 50-70 % and adaptive 50-80 %, Soft Light. Each strength plays the papers' K2 (MGN: 1 - h), "
-                     "the weight of the filtered image against the original.")
+                     "lifting the dark sky (up to 100 %). With Linear (paper) the strength is the papers' K2 (MGN: "
+                     "(1 - h) / h), the layer's weight against the natural layer's 100 % (up to 1000 %). Default 0 % "
+                     "for every layer (the blend is then the natural layer); try FNRGF-N 50-70 % and adaptive "
+                     "50-80 %, Soft Light.")
         for k, sp in self.blend.items():
             _tip(sp, f"{LAYER_NAMES[k]}: " + blend_tip, bf)
             _tip(self.blend_mode[k], "How this layer is applied.\n\nSoft Light (default): Photoshop's mode; gentle, "
@@ -1385,9 +1397,12 @@ class EnhanceTab(StepTab):
              "sunlight scattered by electrons, so it really is white, which makes this the most reliable "
              "choice.\n\ncamera: the camera's as-shot white balance.\n\nnone: raw camera colour (looks green).",
              tf)
-        _tip(self.keep_sky, "By default the sky (twilight glow, its gradient across the frame and small "
-             "black-level offsets) is modelled for each colour and removed before filtering; otherwise the "
-             "filters turn it into arcs and colour casts. Tick this to compare without it.")
+        _tip(self.keep_sky, "By default the sky (twilight glow, its gradient across the frame and small black-level "
+             "offsets) is modelled for each colour and removed before filtering; otherwise the filters turn it "
+             "into arcs and colour casts. Tick this to keep the sky (for example its blue). The natural layer's "
+             "black point is then the darkest sky, so corners darkened by vignetting or the sky's gradient go "
+             "towards black. Stacks made before Nov 2026 had too little red in the sky (fixed in the Stack "
+             "step): re-stack before judging it.")
         _tip(self.order, "How closely FNRGF's 'local average' follows brightness changes around each circle.\n\n"
              "Lower (3-6): bright streamers stay clearly brighter than dark coronal holes; closer to plain NRGF, "
              "with more of the corona's overall shape.\n\nHigher (14-20): faint regions are boosted to match "
@@ -1405,8 +1420,9 @@ class EnhanceTab(StepTab):
              "far out. Higher (0.8-0.95): more faint streamers and plumes, and more grain.\n\nDefault 0.7. This "
              "is the main setting to try: compare 0.5 and 0.9 in the preview. Stacks of many frames can go "
              "higher; noisier ones may need 0.3-0.5.", ff)
-        _tip(self.preview_btn, "Runs every layer on a reduced copy of the stack (about 1400 px wide), in seconds. "
-             "Nothing is written.")
+        _tip(self.preview_btn, "Draws the picture shown: on the 'Whole picture' tab every layer on a reduced copy of "
+             "the stack (about 1400 px wide), in seconds; on the 'Detail box' tab the box at full resolution. "
+             "Adaptive (ACHF) is computed only when it is ticked, blended or shown. Nothing is written.")
         _tip(self.save_settings_btn, "Saves every setting on this tab to a file you name: the layers to write, the "
              "blend, the natural layer and colour, and the MGN, ACHF and FNRGF settings. Load it again on any "
              "project, or use it on the command line with 'totality enhance --settings <file>'. The ACHF sizes are "
@@ -1417,8 +1433,11 @@ class EnhanceTab(StepTab):
              "made with). Settings the file does not have stay as they are, and the log lists them. A file "
              "from before Nov 2026: the filter layers' display changed then (Adaptive (MGN) shows weaker with "
              "the same strength), so the picture can differ from the one made with it.")
-        _tip(self.run_btn, "Runs the ticked layers at full resolution and writes them, plus the blend, as "
-             "16-bit TIFFs next to the project file. Takes a few minutes for a full frame.")
+        _tip(self.run_btn, "Runs the ticked layers at full resolution and writes them, plus the blend, under a name "
+             "and in a folder you choose (each layer as <name>_<layer>), as TIFF (16-bit), PNG (16-bit) or JPG "
+             "(8-bit), with <name>_enhance.json holding the settings used (Load settings… reads it; the Earthshine "
+             "tab's final image uses the last run's settings). Takes a few minutes for a full frame, more with "
+             "Adaptive (ACHF).")
 
     def _spin(self, lo, hi, val, suffix) -> QSpinBox:
         sp = QSpinBox()
@@ -1785,6 +1804,7 @@ class EarthshineTab(StepTab):
         self.albedo_path.setPlaceholderText("none (optional)")
         abrowse = QPushButton("Browse…")
         abrowse.clicked.connect(self._pick_albedo)
+        _tip(abrowse, "Choose an albedo map of the Moon (optional; see the field beside it).")
         arow.addWidget(self.albedo_path, 1)
         arow.addWidget(abrowse)
         f.addRow("Albedo map:", arow)
@@ -1825,10 +1845,14 @@ class EarthshineTab(StepTab):
         self.settings_layout.addWidget(box)
         run = QPushButton("Stack earthshine (makes the Moon and its surface)")
         run.clicked.connect(self.run)
+        _tip(run, "Stacks the longer exposures aligned on the Moon instead of the corona, removes the glare, and "
+             "writes the earthshine layer and the lunar surface used by the final image. Needs Stack first. "
+             "Re-run it after changing any setting above.")
         self.run_buttons.append(run)
         self.settings_layout.addWidget(run)
         self.open_btn = QPushButton("Open earthshine layer in Siril")
         self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.layer_path))
+        _tip(self.open_btn, "Loads the earthshine layer just written into Siril's main window.")
         self.settings_layout.addWidget(self.open_btn)
 
         final = QGroupBox("3  Final image: Moon and corona together")
@@ -1852,23 +1876,30 @@ class EarthshineTab(StepTab):
         self.mode.addItems(["screen", "lighten", "add"])
         ff.addRow("Blend mode (pasting only):", self.mode)
         self.mode.setEnabled(False)
-        _tip(self.base, "Blend or Natural: the Moon-aligned stack goes into the HDR stack inside the lunar disc, "
-             "and Moon and corona are stretched together with the settings of your last Enhance run, so the limb "
-             "is the stack's own: one curve, one colour, no seam. The seas and highlands are then added inside. "
-             "'Paste into a file' is the older way: the earthshine layer pasted into any image with a blend mode.",
-             ff)
-        _tip(self.strength, "Brightness of the seas and highlands added inside the Moon, 1 = as made by the "
-             "earthshine step (its Brightness setting).", ff)
+        _tip(self.base, "Blend or Natural (Enhance settings): the Moon-aligned stack goes into the HDR stack inside "
+             "the lunar disc, and Moon and corona are stretched together with the settings of your last 'Write "
+             "full-size layers' run, so the limb is the stack's own: one curve, one colour, no seam. The seas and "
+             "highlands are then added inside. Blend gives that run's blend, Natural the natural layer alone.\n\n"
+             "'Paste into a file…' is the older way: the earthshine layer pasted into an image you choose, with the "
+             "Blend mode below. The image must be the full size of the HDR stack (not cropped or resized), so the "
+             "Moon lines up.", ff)
+        _tip(self.strength, "Brightness of the seas and highlands added inside the Moon: 1 (default) = as made by "
+             "the earthshine step (its Brightness setting), 0 = none, above 1 brightens a faint Moon (and its "
+             "noise).", ff)
         fb = QHBoxLayout()
         self.final_preview_btn = QPushButton("Preview")
         self.final_preview_btn.clicked.connect(self.preview_final)
         self.final_btn = QPushButton("Write final image")
         self.final_btn.clicked.connect(self.write_final)
+        _tip(self.final_preview_btn, "Shows the final picture, reduced, with the choices above. Nothing is written.")
+        _tip(self.final_btn, "Writes the final picture full size; you choose the name and format (see the box's "
+             "own help).")
         fb.addWidget(self.final_preview_btn)
         fb.addWidget(self.final_btn)
         ff.addRow(fb)
         self.open_final_btn = QPushButton("Open final image in Siril")
         self.open_final_btn.clicked.connect(lambda: self.main.open_in_siril(self.final_path))
+        _tip(self.open_final_btn, "Loads the final image just written into Siril's main window.")
         ff.addRow(self.open_final_btn)
         self.settings_layout.addWidget(final)
         self.settings_layout.addWidget(self.layer_box)
@@ -1883,20 +1914,14 @@ class EarthshineTab(StepTab):
             w.valueChanged.connect(self._final_changed)
         for w in (self.base, self.mode):
             w.currentIndexChanged.connect(self._final_changed)
-        _tip(final, "Puts the earthshine into the lunar disc of one of the enhanced corona layers and writes the "
-             "finished picture as a 16-bit TIFF (<project>_final.tif), so Photoshop is optional. Needs the "
-             "full-size layers from the Enhance tab and the earthshine stack above.")
-        _tip(self.base, "The corona picture the earthshine goes into.\n\nLast-written blend (default): the blend "
-             "most recently written on the Enhance tab.\n\nLast-written Natural: the natural layer alone, for a picture "
-             "without the filter layers.\n\nFrom file…: pick any "
-             "image, for example a blend you saved earlier under another name, or one you finished elsewhere. "
-             "It must be the full size of the HDR stack (not cropped or resized), so the Moon lines up.", ff)
-        _tip(self.strength, "How bright the earthshine is in the final picture: 1 = as stacked, 0 = a black "
-             "Moon, above 1 brightens a faint Moon (and its noise).", ff)
-        _tip(self.mode, "How the two are combined, as Photoshop's layer modes. The corona is black inside the "
-             "disc and the earthshine black outside it, so they differ only at the soft edge of the limb. "
-             "screen (default): smooth and never clips; lighten: the brighter of the two; add: the sum "
-             "(can clip at the limb).", ff)
+        _tip(final, "The finished picture with the Moon in it, written as TIFF (16-bit), PNG (16-bit) or JPG "
+             "(8-bit), so Photoshop is optional. Needs the earthshine stack above and, for Blend or Natural, one "
+             "'Write full-size layers' run on the Enhance tab: its settings (not the tab's current ones, and not "
+             "its files) are used to draw the corona and the Moon together.")
+        _tip(self.mode, "Used only with 'Paste into a file…': how the earthshine layer is combined with that "
+             "image, as Photoshop's layer modes. The corona is black inside the disc and the earthshine black "
+             "outside it, so they differ only at the soft edge of the limb. screen (default): smooth and never "
+             "clips; lighten: the brighter of the two; add: the sum (can clip at the limb).", ff)
         self.settings_layout.addStretch(1)
         self.layer_path = ""
         self.view = ImageView()
@@ -1923,7 +1948,7 @@ class EarthshineTab(StepTab):
              "Moon automatically and only guides the glare removal: nothing from the map is added to your picture.",
              f)
         _tip(self.albedo_strength, "How much the albedo map guides the glare removal near the limb, from 0 (not at "
-             "all) to 1. Where your data can tell maria from glare, it overrides the map; the map only decides what "
+             "all) to 1 (default 0.5). Where your data can tell maria from glare, it overrides the map; the map only decides what "
              "the data cannot, in the outer ~30 px. On tests a mare the map has but the Moon does not came through "
              "at about 15-20% of this strength 25 px inside the limb, and not at all further in.", f)
         _tip(self.limb_shape, "Glare from just outside the Moon can only get fainter going inward, while a sea "
@@ -1949,7 +1974,7 @@ class EarthshineTab(StepTab):
              "clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
              "softness, not a drawn circle.", fl)
         _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "
-             "has in your frames. 0 = none.", fl)
+             "has in your frames. Default 1.5; 0 = none.", fl)
         _tip(self.colour, "Keep the colour of the light at the edge of the Moon, so a prominence or the pink "
              "chromosphere stays red where it spills over the limb, and give the lunar surface the earthshine's "
              "own measured tint (white balanced like the corona). Off: a grey layer.")
@@ -1968,7 +1993,7 @@ class EarthshineTab(StepTab):
              "0 (default) = off, your data only. 1 = the map's detail at your Moon's own contrast.")
         _tip(self.edge_smooth, "The last pixels by the limb are much noisier (the long exposures are saturated "
              "there), so they get extra smoothing, up to this many pixels where the noise is highest. The rest "
-             "of the Moon only gets the Smoothing above. Lower it to keep more grain at the edge.", f)
+             "of the Moon only gets the Smoothing above. Default 3; lower it to keep more grain at the edge.", f)
         _tip(self.brightness, "How bright the brightest lunar surface is in the layer, from 0 to 1. Earthshine is "
              "much fainter than the corona, so the default 0.6 keeps it subdued; adjust to taste in Photoshop.", f)
         _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken; "
@@ -2154,6 +2179,8 @@ class ProminencesTab(StepTab):
         self.preview_btn = QPushButton("Preview")
         self.preview_btn.clicked.connect(self.preview)
         self.write_btn = QPushButton("Write prominence layer")
+        _tip(self.preview_btn, "Shows the prominences found with these settings over a dim view of the inner corona, "
+             "to check what is picked up. Nothing is written.")
         self.write_btn.clicked.connect(self.write_layer)
         row.addWidget(self.preview_btn)
         row.addWidget(self.write_btn)
@@ -2182,11 +2209,16 @@ class ProminencesTab(StepTab):
         self.final_preview_btn.clicked.connect(self.preview_final)
         self.final_btn = QPushButton("Write final image")
         self.final_btn.clicked.connect(self.write_final)
+        _tip(self.final_preview_btn, "Shows the prominences on the chosen picture, reduced, with the strength and "
+             "mode above. Nothing is written.")
+        _tip(self.final_btn, "Writes the picture with the prominences on top, full size, as TIFF (16-bit), PNG "
+             "(16-bit) or JPG (8-bit); you choose the name. Needs the prominence layer (Write prominence layer).")
         r2.addWidget(self.final_preview_btn)
         r2.addWidget(self.final_btn)
         tf.addRow(r2)
         self.open_btn = QPushButton("Open final image in Siril")
         self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.final_path))
+        _tip(self.open_btn, "Loads the picture with the prominences just written into Siril's main window.")
         tf.addRow(self.open_btn)
         self.settings_layout.addWidget(top)
         self.settings_layout.addStretch(1)
