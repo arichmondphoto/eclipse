@@ -76,11 +76,18 @@ class FrameInfo:
 @dataclass
 class Match:
     index: int
-    gain: float  # g_i
-    offset: float  # c_i
+    gain: float  # g_i (the exposure ratio: the same for every colour)
+    offset: float  # c_i, mean of the colours (shown in the log)
     nominal: float
     stops_vs_nominal: float
     pixels: int
+    # c_i per colour (R, G, B): the light that does not scale with exposure (changing twilight,
+    # scattered light, black-level differences) has a colour of its own. None in stacks made before
+    # Nov 2026, which used the one offset for every colour.
+    offsets: Optional[tuple] = None
+
+    def colour_offsets(self) -> np.ndarray:
+        return np.asarray(self.offsets if self.offsets is not None else (self.offset,) * 3, dtype=np.float32)
 
 
 @dataclass
@@ -95,9 +102,11 @@ class StackResult:
     def describe(self) -> str:
         lines = [f"Output: {self.crop[2]} x {self.crop[3]} px from reference ({self.crop[0]}, {self.crop[1]})",
                  f"Moon from frame #{self.moon_frame}",
-                 f"{'#':>3}  {'gain':>10}  {'offset':>9}  {'vs nominal':>10}  {'pixels':>7}"]
+                 f"{'#':>3}  {'gain':>10}  {'offset R, G, B':>29}  {'vs nominal':>10}  {'pixels':>7}"]
         for m in self.matches:
-            lines.append(f"{m.index:>3}  {m.gain:10.5f}  {m.offset:+9.5f}  {m.stops_vs_nominal:+9.2f}EV  {m.pixels:7d}")
+            o = m.colour_offsets()
+            lines.append(f"{m.index:>3}  {m.gain:10.5f}  {o[0]:+9.5f} {o[1]:+9.5f} {o[2]:+9.5f}  "
+                         f"{m.stops_vs_nominal:+9.2f}EV  {m.pixels:7d}")
         for k, v in self.outputs.items():
             lines.append(f"{k}: {v}")
         lines += [f"Note: {n}" for n in self.notes]
@@ -258,27 +267,42 @@ def pair_gain(vi: np.ndarray, vj: np.ndarray, strong: float = 0.02,
 
 def match_exposures(reduced: dict[int, tuple[np.ndarray, np.ndarray]], infos: dict[int, FrameInfo], ref: int,
                     params: StackParams, say: Say) -> dict[int, Match]:
-    """Chain robust fits between neighbouring exposures to get g_i and c_i relative to ``ref``."""
+    """Chain robust fits between neighbouring exposures to get g_i and c_i relative to ``ref``.
+
+    ``reduced`` holds (h, w, 3) colour frames (or (h, w) grey ones). The gain comes from the mean
+    of the colours (an exposure ratio is the same for all); the offset is then fitted per colour
+    with that gain, over the same pixels."""
     order = sorted(reduced, key=lambda i: infos[i].nominal_ratio)
     pos = {i: k for k, i in enumerate(order)}
     lo_v, hi_v = params.match_range
     gains = {ref: 1.0}
-    offsets = {ref: 0.0}
+    offsets = {ref: np.zeros(3)}
     pixels = {ref: 0}
 
-    def pair(i: int, j: int) -> tuple[float, float, int]:
+    def pair(i: int, j: int) -> tuple[float, np.ndarray, int]:
         vi, oki = reduced[i]
         vj, okj = reduced[j]
         both = oki & okj
+        ci = vi if vi.ndim == 3 else vi[..., None]
+        cj = vj if vj.ndim == 3 else vj[..., None]
         if params.match_smooth > 0:
             # Blur both frames identically (same mask) to even out sharpness differences, and
             # keep only pixels whose blur kernel lies wholly inside the common mask.
             sm = params.match_smooth
-            vi = ndimage.gaussian_filter(np.where(both, vi, 0.0), sm)
-            vj = ndimage.gaussian_filter(np.where(both, vj, 0.0), sm)
+            ci = np.stack([ndimage.gaussian_filter(np.where(both, ci[..., c], 0.0), sm) for c in range(ci.shape[2])], -1)
+            cj = np.stack([ndimage.gaussian_filter(np.where(both, cj[..., c], 0.0), sm) for c in range(cj.shape[2])], -1)
             both = ~ndimage.binary_dilation(~both, iterations=int(math.ceil(3 * sm)))
-        return pair_gain(vi[both].astype(np.float64), vj[both].astype(np.float64), params.match_strong,
-                         params.match_range)
+        xi = ci[both].astype(np.float64)
+        xj = cj[both].astype(np.float64)
+        li, lj = xi.mean(axis=1), xj.mean(axis=1)
+        a, b, n = pair_gain(li, lj, params.match_strong, params.match_range)
+        if not (math.isfinite(a) and a > 0):
+            return a, np.full(3, b), n
+        # Per colour, with the common gain, over the pixels the offset fit uses (by mean brightness).
+        lo, hi = params.match_range
+        sel = (li > lo) & (li < hi) & (lj > lo) & (lj < hi)
+        bc = np.array([float(np.median(xj[sel, c] - a * xi[sel, c])) for c in range(xi.shape[1])])
+        return a, (bc if bc.size == 3 else np.full(3, bc[0])), n
 
     k = pos[ref]
     for direction in (1, -1):
@@ -291,7 +315,7 @@ def match_exposures(reduced: dict[int, tuple[np.ndarray, np.ndarray]], infos: di
             if not (math.isfinite(a) and a > 0):
                 nominal = infos[cur].nominal_ratio / infos[prev].nominal_ratio
                 say(f"  frame {cur}: too little overlap with frame {prev}; using the nominal exposure ratio")
-                a, b, n = nominal, 0.0, 0
+                a, b, n = nominal, np.zeros(3), 0
             gains[cur] = a * gains[prev]
             offsets[cur] = a * offsets[prev] + b
             pixels[cur] = n
@@ -300,7 +324,9 @@ def match_exposures(reduced: dict[int, tuple[np.ndarray, np.ndarray]], infos: di
     out = {}
     for i in order:
         nom = infos[i].nominal_ratio
-        out[i] = Match(i, gains[i], offsets[i], nom, math.log2(gains[i] / nom) if nom > 0 else float("nan"), pixels[i])
+        o = [float(v) for v in offsets[i]]
+        out[i] = Match(i, gains[i], float(np.mean(o)), nom, math.log2(gains[i] / nom) if nom > 0 else float("nan"),
+                       pixels[i], tuple(o))
     return out
 
 
@@ -359,12 +385,13 @@ def stack_frames(
         wb = wb or mos.wb
         bx, by, bw, bh = source_box(f.matrix, crop)
         fr = region(mos, bx, by, bw, bh, calibs.get(f.index), image_crop, hot_pixels=False)
-        lum = fr.rgb.mean(axis=2)
-        v = warp_region(lum, f.matrix, crop, (fr.x0, fr.y0), order=1, scale=1)
+        # Each colour (the offsets are fitted per colour; the gain on their mean).
+        v = np.stack([warp_region(fr.rgb[..., c], f.matrix, crop, (fr.x0, fr.y0), order=1, scale=1)
+                      for c in range(3)], axis=-1)
         sat = warp_region(fr.saturated.astype(np.float32), f.matrix, crop, (fr.x0, fr.y0), order=1, scale=1, cval=1.0)
         ny, nx = ch // sc, cw // sc
-        nan = ~np.isfinite(v[: ny * sc, : nx * sc])
-        v = np.nan_to_num(v[: ny * sc, : nx * sc], nan=0.0).reshape(ny, sc, nx, sc).mean(axis=(1, 3))
+        nan = ~np.isfinite(v[: ny * sc, : nx * sc]).all(axis=2)
+        v = np.nan_to_num(v[: ny * sc, : nx * sc], nan=0.0).reshape(ny, sc, nx, sc, 3).mean(axis=(1, 3))
         bad = ((sat[: ny * sc, : nx * sc] > 0.01) | nan).reshape(ny, sc, nx, sc).any(axis=(1, 3))
         ok = ~bad & ~moon_mask(crop, f, margin + 2 * sc, sc)
         reduced[f.index] = (v.astype(np.float32), ok)
@@ -408,7 +435,7 @@ def stack_frames(
         w = np.nan_to_num(w * taper * (sat < 0.01), nan=0.0).astype(np.float32)
         del vmax, taper, sat
         radiance = v  # converted in place to save memory on full frames
-        radiance -= m.offset
+        radiance -= m.colour_offsets()[None, None, :]
         radiance /= m.gain
         covered = moon_mask(crop, f, margin)
         if f.index == moon_frame:

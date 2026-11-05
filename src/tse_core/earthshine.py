@@ -769,9 +769,10 @@ def stack_earthshine(
         taper = np.clip((p.saturation_level - np.nan_to_num(vmax, nan=1.0)) / p.saturation_taper, 0.0, 1.0)
         w = (m.gain**2) / (np.clip(np.nan_to_num(v, nan=0.0), 0, None) + p.noise_floor) * taper * (sat < 0.01)
         w = np.where(np.isfinite(v) & stacked, w, 0.0)
-        total += np.nan_to_num((v - m.offset) / m.gain) * w
+        off = m.colour_offsets()
+        total += np.nan_to_num((v - float(off.mean())) / m.gain) * w
         for c in range(3):
-            total_c[c] += np.nan_to_num((vc[c] - m.offset) / m.gain) * w
+            total_c[c] += np.nan_to_num((vc[c] - off[c]) / m.gain) * w
         weight += w
         say(f"earthshine: {f.file_name} (gain {m.gain:.3g}, Moon shifted {math.hypot(*shifts[f.index]):.1f} px)")
     lum = np.where(weight > 0, total / np.maximum(weight, 1e-30), 0.0).astype(np.float32)

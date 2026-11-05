@@ -303,7 +303,17 @@ gain is a weighted ratio of sums, so differences in noise or sharpness
 long bracket. It is compared with the shutter's true time behind its
 rounded label (1/30 s is really 1/32 s); frames more than 0.3 EV off are
 reported. If two neighbours share too few usable pixels, the shutter speeds
-are used instead and the log says so.
+are used instead and the log says so. The gain is one number per frame (an
+exposure ratio is the same for every colour), measured on the mean of the
+colours; the offset, the light that does not scale with exposure (twilight
+that changes during totality, scattered light, small black-level
+differences), is then fitted **per colour** with that gain, because that
+light has a colour of its own: the eclipse sky is blue. Stacks made before
+Nov 2026 took one offset, fitted on the mean colour, off red, green and blue
+alike; with blue light that over-corrected red, and on the 2024 stack red
+was below zero over almost all the sky beyond 6 solar radii (hidden when
+the sky is removed, a cyan sky with corners falling to black with **Keep the
+sky**). The stack log's table lists the offsets per colour.
 
 **Merging.** Each pixel is the inverse-variance weighted mean of the frames'
 radiance estimates. Weights fall to zero approaching saturation and inside
