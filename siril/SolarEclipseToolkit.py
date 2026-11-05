@@ -207,9 +207,9 @@ class FramesTab(QWidget):
         ef.addRow("Camera time zone:", self.tz)
         ef.addRow("Camera clock error:", self.clock_error)
         self.c2 = QLineEdit()
-        self.c2.setPlaceholderText("camera clock, e.g. 2024-04-08T12:56:37")
+        self.c2.setPlaceholderText("camera clock, YYYY-MM-DDThh:mm:ss")
         self.c3 = QLineEdit()
-        self.c3.setPlaceholderText("camera clock, e.g. 2024-04-08T13:00:48")
+        self.c3.setPlaceholderText("camera clock, YYYY-MM-DDThh:mm:ss")
         ef.addRow("Second contact:", self.c2)
         ef.addRow("Third contact:", self.c3)
         self.compute_btn = QPushButton("Compute contacts")
@@ -333,7 +333,7 @@ class FramesTab(QWidget):
              "as if the clock were right, and the Align step works the error out within the range that keeps "
              "every frame inside totality. Used for the contacts and for the Sun's centre.", ef)
         _tip(self.c2, "Second contact (start of totality) in the CAMERA's clock, as the RAW files record time, "
-             "for example 2024-04-08T12:56:37. Compute contacts fills it in; you can also type it. Frames taken "
+             "in the form YYYY-MM-DDThh:mm:ss. Compute contacts fills it in; you can also type it. Frames taken "
              "before it are marked 'partial' and left out when you click Apply. Needs the third contact too.", ef)
         _tip(self.c3, "Third contact (end of totality) in the camera's clock. Frames taken after it are marked "
              "'partial' and left out. Frames marked by hand as excluded stay excluded.", ef)
@@ -507,7 +507,7 @@ class FramesTab(QWidget):
             try:
                 t2, t3 = datetime.fromisoformat(c2), datetime.fromisoformat(c3)
             except ValueError:
-                QMessageBox.warning(self, "Contact times", "Use the form 2024-04-08T12:56:37 for contact times.")
+                QMessageBox.warning(self, "Contact times", "Use the form YYYY-MM-DDThh:mm:ss (date, T, time) for contact times.")
                 return
             t2, t3 = t2.replace(tzinfo=None), t3.replace(tzinfo=None)
             fit = check_fit(self.inventory.frames, t2, t3, self.project.clock_error_s or 0.0)
@@ -1329,23 +1329,24 @@ class EnhanceTab(StepTab):
             _tip(size, "Adaptive (ACHF) only: the width (sigma) of this scale's kernel in pixels of your full-size "
                  "stack; the structure about this size and finer is brought out. The thesis uses 0.5-64 px. Kept as "
                  "a fraction of the Sun's radius, so the same setting suits another lens or camera (the pixels shown "
-                 "follow the open stack). Defaults 0.5, 1, 3 and 10 px on the 2024 D850 frames at 400 mm, and 10% "
-                 "and 20% of the Sun's radius (41 and 83 px there) for the last two, which start switched off.\n\n"
+                 "follow the open stack). Defaults: 0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius, then 10% "
+                 "and 20% for the last two, which start switched off; the boxes show what that is in pixels of the "
+                 "open stack.\n\n"
                  "The preview is a reduced copy (about 1/6 for a full frame): scales under about 6 px are finer than "
                  "its pixels and hardly show there; they show in 'Write full-size layers'.", self._achf_form)
             _tip(sp, "Adaptive (ACHF) only: how much this scale counts, like the frequency sliders of Druckmüller's "
                  "Corona program. 0 leaves the scale out (and saves its time); only the ratios matter (all at 2 is "
                  "the same as all at 1). Defaults: 1 for the first four scales, 0 for the last two.\n\nThe finest "
-                 "scales are mostly noise in a typical stack (on the 2024 stack structure stood about 2x above the "
-                 "noise at 2.5 px, 9x and more from 10 px up): lower them if the layer is grainy. The bright glow by "
-                 "the Moon comes from the large scales.", self._achf_form)
+                 "scales are mostly noise in a typical stack: lower them if the layer is grainy (judge it in the "
+                 "detail box, at full resolution). The bright glow by the Moon comes from the large scales.", self._achf_form)
         _tip(self.achf_parts, "Adaptive (ACHF) only: requirement (d) of the method (Druckmüllerová's thesis, "
              "section 5.2). A pixel this many times brighter or darker than the corona at its height (a "
              "prominence, mostly) is treated as a separate part of the picture: its kernels use only its own "
              "pixels, and the corona's kernels leave it out. Without it a bright prominence darkens the corona "
              "beside it (a dark fringe round it). Default 2; 0 switches the rule off. Lower picks out fainter "
-             "features as parts; much lower starts to split real coronal structure. On the 2024 crop, 2 made "
-             "247 pixels (the prominences) a part of their own. Costs some time: about 3x the plain filter.",
+             "features as parts; much lower starts to split real coronal structure. At 2, bright prominences "
+             "usually become parts of their own and the corona does not. Costs some time: about 3x the plain "
+             "filter.",
              self._achf_form)
         _tip(self.achf_contrast, "Adaptive (ACHF) only: how strongly the layer shows its detail (the thesis's "
              "K2, the weight of the filtered image), set by eye as in Druckmüller's own software.\n\nAt 1 (default), "
@@ -1985,7 +1986,8 @@ class EarthshineTab(StepTab):
              "stays bright longer and the darkening gathers towards the edge.", f)
         _tip(self.surface_denoise, "Smooths the lunar surface only across similar brightness, so the noise inside "
              "the maria goes while their edges stay crisp (unlike Smoothing, which blurs edges too). Size in pixels; "
-             "0 (default) = off. 3-5 suits a 400 mm frame. Needs Stack earthshine again.")
+             "0 (default) = off. Start at about 1% of the Sun's radius in pixels (the Align log's 'Sun centre' "
+             "line gives the radius). Needs Stack earthshine again.")
         _tip(self.albedo_texture, "Adds the albedo map's own craters and rays to the lunar surface, scaled to your "
              "Moon's contrast. This is a COMPOSITE: that fine detail comes from the map (a spacecraft mosaic), not "
              "from your photographs; a typical earthshine stack is mostly noise at that scale. Needs an albedo map "

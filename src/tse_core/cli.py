@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--project", help="create or update this project file (.json)")
     p.add_argument("--lens", help="force this lensfun lens profile")
     p.add_argument("--no-exiftool", action="store_true", help="do not use exiftool even if installed")
-    p.add_argument("--eclipse", help="the eclipse, by its date, e.g. 2024-04-08 (default: the frames' date)")
+    p.add_argument("--eclipse", help="the eclipse, by its date, YYYY-MM-DD (default: the frames' date)")
     p.add_argument("--lat", type=float, help="site latitude in degrees, north positive (saved in the project)")
     p.add_argument("--lon", type=float, help="site longitude in degrees, east positive (west is negative)")
     p.add_argument("--elev", type=float, help="site elevation in metres")
@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="the camera clock's time zone in hours, e.g. -6, when the files do not record one")
     p.add_argument("--clock-error", type=float,
                    help="seconds the camera clock was behind true time (true minus camera), when known")
-    p.add_argument("--c2", help="second contact typed in, e.g. 2024-04-08T13:47:33, in the camera's clock "
+    p.add_argument("--c2", help="second contact typed in, YYYY-MM-DDThh:mm:ss, in the camera's clock "
                                 "(or in true time with --clock-offset); default: computed from the eclipse and site")
     p.add_argument("--c3", help="third contact typed in (with --c2)")
     p.add_argument("--clock-offset", help="with --c2/--c3 typed in another clock: add this to the camera clock to "
@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
 
     p = sub.add_parser("eclipse", help="eclipse circumstances (contacts, duration) for a site")
-    p.add_argument("--date", required=True, help="eclipse date, e.g. 2024-04-08")
+    p.add_argument("--date", required=True, help="eclipse date, YYYY-MM-DD")
     p.add_argument("--lat", type=float, required=True, help="latitude, degrees north")
     p.add_argument("--lon", type=float, required=True, help="longitude, degrees east (west is negative)")
     p.add_argument("--elev", type=float, default=0.0, help="elevation, metres")
@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--achf-scales",
                    help="Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in %% of "
                         "the Sun's radius (default " + ",".join(f"{100 * v:.4g}" for v in ACHF_SCALES)
-                        + ": 0.5, 1, 3 and 10 px on the 2024 stack's Sun of 413 px, then 10%% and 20%%)")
+                        + "; the last two start at strength 0)")
     p.add_argument("--achf-weights", default=",".join(f"{v:g}" for v in ACHF_WEIGHTS),
                    help="Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out "
                         "(default %(default)s)")

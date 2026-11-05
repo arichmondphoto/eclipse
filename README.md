@@ -111,7 +111,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper); **Natural layer and colour:** Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k) and Noise gate (off); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.5, 1, 3, 10 px on the 2024 frames at strength 1; two larger scales at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
+| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper); **Natural layer and colour:** Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k) and Noise gate (off); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -501,11 +501,12 @@ over the scales by their strengths) shows at 82% grey; at 2, half that
 difference does (see the fixed output scales below). Its six scales each have a size and a strength (**Adaptive layer (ACHF):
 size and strength of each scale** on the Enhance tab; `--achf-scales` in %
 of the Sun's radius and `--achf-weights`, finest first), as the sliders of
-Druckmüller's Corona program did. Defaults (Andy's choice): sizes of 0.5, 1,
-3 and 10 px on the 2024 frames (Sun radius 413 px; within the thesis's 0.5-64 px)
-at strength 1, and 10% and 20% of the Sun's radius at strength 0. Sizes are
-kept as fractions of the Sun's radius, so they suit any lens; the window
-shows them in pixels of the open stack. 0 leaves a scale out and saves its
+Druckmüller's Corona program did. Defaults: sizes of 0.121%, 0.242%, 0.726%
+and 2.42% of the Sun's radius at strength 1, and 10% and 20% at strength 0
+(on a Sun of 400-450 px in radius the first four are about 0.5, 1, 3 and
+10 px, within the thesis's 0.5-64 px). Sizes are kept as fractions of the
+Sun's radius, so they suit any lens; the window shows them in pixels of the
+open stack. 0 leaves a scale out and saves its
 time; only the ratios of the strengths matter. The 2006 paper's one
 published setting (its Figure 9, rising to 20x for the finest detail)
 likewise rests on scales of about 0.5-1 px; on a typical stack the finest
@@ -963,13 +964,13 @@ read every RAW file in a folder and report brackets and calibration.
 | `--project` | create or update this project file (.json) |
 | `--lens` | force this lensfun lens profile |
 | `--no-exiftool` | do not use exiftool even if installed |
-| `--eclipse` | the eclipse, by its date, e.g. 2024-04-08 (default: the frames' date) |
+| `--eclipse` | the eclipse, by its date, YYYY-MM-DD (default: the frames' date) |
 | `--lat` | site latitude in degrees, north positive (saved in the project) |
 | `--lon` | site longitude in degrees, east positive (west is negative) |
 | `--elev` | site elevation in metres |
 | `--camera-utc-offset` | the camera clock's time zone in hours, e.g. -6, when the files do not record one |
 | `--clock-error` | seconds the camera clock was behind true time (true minus camera), when known |
-| `--c2` | second contact typed in, e.g. 2024-04-08T13:47:33, in the camera's clock (or in true time with --clock-offset); default: computed from the eclipse and site |
+| `--c2` | second contact typed in, YYYY-MM-DDThh:mm:ss, in the camera's clock (or in true time with --clock-offset); default: computed from the eclipse and site |
 | `--c3` | third contact typed in (with --c2) |
 | `--clock-offset` | with --c2/--c3 typed in another clock: add this to the camera clock to get that clock, e.g. +1:04:08, -45s, 1h |
 | `--bias` | folder of bias frames |
@@ -1031,7 +1032,7 @@ eclipse circumstances (contacts, duration) for a site.
 
 | Option | What it does |
 | --- | --- |
-| `--date` | eclipse date, e.g. 2024-04-08 |
+| `--date` | eclipse date, YYYY-MM-DD |
 | `--lat` | latitude, degrees north |
 | `--lon` | longitude, degrees east (west is negative) |
 | `--elev` | elevation, metres |
@@ -1118,7 +1119,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--std-att` | FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0) |
 | `--noise-m` | FNRGF-N noise compensation, 0..0.99 (default 0.7) |
 | `--adaptive-k` | adaptive layer: strength of the local contrast at each scale, k in arctan(k C) (default 0.7, as in Morgan & Druckmueller 2014) |
-| `--achf-scales` | Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in % of the Sun's radius (default 0.121,0.242,0.7259,2.42,10,20: 0.5, 1, 3 and 10 px on the 2024 stack's Sun of 413 px, then 10% and 20%) |
+| `--achf-scales` | Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in % of the Sun's radius (default 0.121,0.242,0.7259,2.42,10,20; the last two start at strength 0) |
 | `--achf-weights` | Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out (default 1,1,1,1,0,0) |
 | `--achf-part-limit` | Adaptive (ACHF): a pixel this many times brighter or darker than the corona at its height (a prominence) is a separate part, left out of the corona's kernels and filtered with its own pixels only, so no dark fringe forms round it; 0 = off (default 2) |
 | `--achf-contrast` | Adaptive (ACHF): contrast of the layer (the thesis's K2): at 1, a pixel about 1.1% brighter than its local mean (averaged over the scales by their strengths) shows at 82% grey, 1.1% darker at 18%; at 2, half that difference does; set by eye (default 1) |
