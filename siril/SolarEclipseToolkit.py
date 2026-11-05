@@ -1275,7 +1275,8 @@ class EnhanceTab(StepTab):
                      "opacity in Photoshop. 0 % leaves it out. The mode beside it picks Soft Light or Overlay.\n\n"
                      "Both modes treat mid-grey as 'no change', so the filter layers add structure without "
                      "lifting the dark sky. Default 0 % for every layer (the blend is then the natural layer); "
-                     "try FNRGF-N 50-70 % and adaptive 30-50 %, Soft Light.")
+                     "try FNRGF-N 50-70 % and adaptive 50-80 %, Soft Light. Each strength plays the papers' K2 (MGN: 1 - h), "
+                     "the weight of the filtered image against the original.")
         for k, sp in self.blend.items():
             _tip(sp, f"{LAYER_NAMES[k]}: " + blend_tip, bf)
             _tip(self.blend_mode[k], "How this layer is applied, as Photoshop's layer modes. Both treat mid-grey "

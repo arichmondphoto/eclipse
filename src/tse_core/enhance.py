@@ -186,29 +186,38 @@ def _attenuation(values: Optional[Sequence[float]], order: int) -> np.ndarray:
     return a
 
 
-# Fixed output scales of the filter layers: a zero-centred output y is shown as
-# 0.5 + arctan(1.6 y / s) / pi, so y = s shows at 82% grey, y = -s at 18%, y = 0 at mid-grey.
-# Fixed, not measured on each image (so a detail box gives exactly the full-size result), and
-# defined in each method's own units, the same for any camera, lens or eclipse:
-#   NRGF     y = (pixel - circle mean) / circle standard deviation: s = 3.5 standard deviations
-#   FNRGF    the same with the local (Fourier) mean and deviation: s = 6.8 local deviations
-#   FNRGF-N  the deviation less Noise compensation x the noise: s = 20 of those
-#   MGN      the mean over the scales of arctan(k C): s = 1.0 radian (0.6 with the noise gate)
-#   ACHF     Contrast x the strength-weighted mean over the scales of ln(pixel / local mean):
-#            s = 0.0106, a pixel about 1.1% brighter than its local mean (at Contrast 1)
-# These are display units, not fitted to any one eclipse; each user sets the look by eye (blend
-# strengths, ACHF Contrast), as with Druckmueller's own software.
+# How the filter layers are shown, as the papers combine them (linearly, with the user's weights)
+# and with fixed scales, never measured on each image (so a detail box gives exactly the full-size
+# result), in each method's own units, the same for any camera, lens or eclipse:
+#   NRGF, FNRGF, FNRGF-N (Morgan, Habbal & Woo 2006; Druckmuellerova, Morgan & Habbal 2011): Y, the
+#     pixel less the local mean over the local deviation, on a straight line about mid-grey,
+#     0.5 + Y / (2 s), clipped to 0..1: Y = +s is white, -s black. The papers combine Z = K1 X + K2 Y
+#     with the same K2 for every image; the blend strength plays K2. s in standard deviations
+#     (FNRGF-N: deviations less Noise compensation x the noise).
+#   MGN (Morgan & Druckmueller 2014): the mean over the scales of arctan(k C), whose range is
+#     (-pi/2, pi/2), as 0.5 + mean / pi: no constant of ours.
+#   ACHF (thesis eq. 5.2 has h = K1 f + K2 g, K2 the user's): Contrast x the strength-weighted mean
+#     of ln(pixel / local mean) through a soft arctan curve, 0.5 + arctan(1.6 y / s) / pi, so
+#     y = s shows at 82% grey; s = 0.0106, about 1.1% brighter than the local mean at Contrast 1.
 NRGF_SPREAD = 3.5
 FNRGF_SPREAD = 6.8
 FNRGF_N_SPREAD = 20.0
-MGN_SPREAD = 1.0
-MGN_GATED_SPREAD = 0.6
 ACHF_SPREAD = 0.0106
 
 
 def to_fixed(y: np.ndarray, spread: float) -> np.ndarray:
-    """A zero-centred filter output to 0..1 with a soft arctan curve and a fixed scale."""
+    """A zero-centred filter output to 0..1 with a soft arctan curve and a fixed scale (ACHF)."""
     return (0.5 + np.arctan(1.6 * y / spread) / math.pi).astype(np.float32)
+
+
+def to_linear(y: np.ndarray, spread: float) -> np.ndarray:
+    """A zero-centred filter output on a straight line about mid-grey: +spread white, -spread black."""
+    return np.clip(0.5 + y / np.float32(2.0 * spread), 0.0, 1.0).astype(np.float32)
+
+
+def mgn_unit(acc: np.ndarray) -> np.ndarray:
+    """MGN's mean of arctan(k C) over the scales, range (-pi/2, pi/2), to 0..1 on a straight line."""
+    return np.clip(0.5 + acc / np.float32(math.pi), 0.0, 1.0).astype(np.float32)
 
 
 def roll_off(y: np.ndarray, shoulder: float) -> np.ndarray:
@@ -847,9 +856,10 @@ def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: floa
         acc += np.arctan(k * gain * d / np.sqrt(np.maximum(sd2, 1e-12)))
         del d, sd2, dn, n2, s2, gain
     acc /= len(scales)
-    # A fixed scale, not the image's own spread: stretching to the spread would bring noise back
-    # up to full contrast wherever there is little real structure.
-    out = to_fixed(acc, MGN_GATED_SPREAD)
+    # The paper's straight mapping, as the plain filter (never stretched to the image's spread, which
+    # would bring noise back up wherever there is little real structure): the gate only lowers each
+    # scale's share.
+    out = mgn_unit(acc)
     out[~valid] = 0.0
     return out
 
@@ -1033,7 +1043,7 @@ def _achf_reach(scales: Sequence[float], weights: Sequence[float], part_limit: f
 def mgn(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float,
         origin: tuple[int, int] = (0, 0)) -> np.ndarray:
     """Multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of log(X); local part only,
-    on a fixed output scale (:data:`MGN_SPREAD`), as the paper's mapping is fixed."""
+    on the paper's own scale: 0.5 + (mean of arctan(k C)) / pi (see :func:`mgn_unit`)."""
     b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
     # Fill invalid pixels with their surroundings so the Moon and frame edges do not ring.
     m = valid.astype(np.float32)
@@ -1045,7 +1055,7 @@ def mgn(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, flo
         sd = np.sqrt(np.maximum(blur(d * d, w, origin), 1e-12))
         acc += np.arctan(k * d / sd)
     acc /= len(scales)
-    out = to_fixed(acc, MGN_SPREAD)
+    out = mgn_unit(acc)
     out[~valid] = 0.0
     return out
 
@@ -1388,11 +1398,11 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
         elif name_l in ("nrgf", "fnrgf", "fnrgf_n"):
             stats = _ring_cache(frame, p)
             if name_l == "nrgf":
-                y = to_fixed(nrgf(lum, r, valid, stats), NRGF_SPREAD)
+                y = to_linear(nrgf(lum, r, valid, stats), NRGF_SPREAD)
             elif name_l == "fnrgf":
-                y = to_fixed(fnrgf(lum, r, phi, valid, stats, mean_att, std_att), FNRGF_SPREAD)
+                y = to_linear(fnrgf(lum, r, phi, valid, stats, mean_att, std_att), FNRGF_SPREAD)
             else:
-                y = to_fixed(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), FNRGF_N_SPREAD)
+                y = to_linear(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), FNRGF_N_SPREAD)
         elif name_l == "achf":
             y = achf(lum, valid, [g.sun_r * f for f in p.achf_scales], frame.nlev, cx, cy,
                      list(p.achf_weights), p.achf_part_limit, ref_sigma=0.1 * g.sun_r, r_ref=g.moon_r,

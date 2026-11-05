@@ -365,7 +365,7 @@ High-pass Filter; HDR = High Dynamic Range (the merged exposures).
 
 The layers are already stretched: each filter maps the linear data to
 display brightness itself (a log stretch for `natural` and `adaptive`, the
-filter's own normalization and a soft S-curve for the NRGF family). Run
+filter's own normalization for the NRGF family). Run
 `totality enhance` on the linear HDR stack, never on a stretched copy, and use
 only gentle curves or levels on the results.
 
@@ -421,8 +421,9 @@ level (from its weights) and spatial spectrum (measured in the faint corona:
 demosaicing and resampling correlate neighbouring pixels), put through the
 same steps. A test checks that pure noise gives under 0.4x the texture of
 the plain filter and of real strands. Off by default (the filter as
-published); the gated output keeps a fixed scale, so where there is little
-real structure it stays flat instead of being stretched back up.
+published); the gated output is on the same fixed scale as the plain
+filter (the paper's, below), so where there is little real structure it
+stays flat instead of being stretched back up.
 `--adaptive-k` (**Strength** in the **Adaptive layer (MGN)** box, steps of
 0.01) is k in the paper's arctan(k C): how hard local contrast is brought
 out at each scale. The default, 0.7, is the paper's value.
@@ -521,18 +522,34 @@ second one only:
    image, so a box sees the same values as the full picture.
 
 For this the filter layers have **fixed output scales** instead of being
-stretched to each picture's own spread. Each layer's output y is shown as
-0.5 + arctan(1.6 y / s) / pi: y = s at 82% grey, -s at 18%, 0 at mid-grey.
-The scale s is set in the method's own units, so it means the same on any
-camera, lens or eclipse:
+stretched to each picture's own spread, set in each method's own units, so
+they mean the same on any camera, lens or eclipse. The NRGF family and
+Adaptive (MGN) are shown as the papers combine them, on a straight line
+about mid-grey with nothing added:
 
-| Layer | Output y | s (shows at 82% grey) |
+| Layer | Output y | Shown as |
 | --- | --- | --- |
-| NRGF | (pixel - circle mean) / circle standard deviation | 3.5 standard deviations |
-| FNRGF | the same with the local (Fourier) mean and deviation | 6.8 local deviations |
-| FNRGF-N | the same, the deviation less **Noise compensation** x the noise | 20 of those |
-| Adaptive (MGN) | mean over the scales of arctan(k C) | 1.0 radian (0.6 with the noise gate) |
-| Adaptive (ACHF) | **Contrast** x the strength-weighted mean over the scales of ln(pixel / local mean) | 0.0106: about 1.1% brighter than the local mean at Contrast 1 |
+| NRGF | (pixel - circle mean) / circle standard deviation | 0.5 + y / 7: white at +3.5 standard deviations, black at -3.5 |
+| FNRGF | the same with the local (Fourier) mean and deviation | 0.5 + y / 13.6: white at +6.8 local deviations |
+| FNRGF-N | the same, the deviation less **Noise compensation** x the noise | 0.5 + y / 40: white at +20 of those |
+| Adaptive (MGN) | mean over the scales of arctan(k C), range -pi/2 to pi/2 | 0.5 + y / pi (the paper's, no constant of ours; also with the noise gate) |
+| Adaptive (ACHF) | **Contrast** x the strength-weighted mean over the scales of ln(pixel / local mean) | 0.5 + arctan(1.6 y / 0.0106) / pi: 82% grey at about 1.1% brighter than the local mean, at Contrast 1 |
+
+The papers combine the filtered image Y with the original X linearly, Z =
+K1 X + K2 Y (FNRGF: "if we want to process two original images X1 and X2
+in the same manner, factors K2 should be the same for both images"; MGN:
+h times the global image plus 1 - h times the mean of arctan(k C)); here the
+natural layer is X and each layer's blend strength plays K2 (or 1 - h).
+NRGF-family values beyond the ends clip to white or black: on the 2024
+crop about 0.5% of pixels, two thirds of them in the crop's far corners
+(where circles are completed from further in), the rest single pixels
+(stars, noise peaks) and a few prominences. Until 4 Nov 2026 these layers
+went through an extra arctan S-curve of ours (1.6x the contrast near
+mid-grey, compressed towards black and white); NRGF and FNRGF keep the
+same contrast near mid-grey without it, while Adaptive (MGN) is now 0.63x
+as strong there (0.38x with the noise gate, which had its own scale): raise
+its blend strength or **Strength** (k) for the earlier look. ACHF keeps a
+soft curve: the thesis gives no mapping for its unnormalized output.
 
 These are display units, not fitted to any one eclipse: a corona with
 little structure looks flatter than one with much, as it is, where a
