@@ -1016,7 +1016,8 @@ def achf_parts(b: np.ndarray, valid: np.ndarray, cx: float, cy: float, limit: fl
 
 def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float,
          cx: float, cy: float, weights: Optional[Sequence[float]] = None, part_limit: float = 2.0,
-         ref_sigma: Optional[float] = None, r_ref: Optional[float] = None, contrast: float = 1.0) -> np.ndarray:
+         ref_sigma: Optional[float] = None, r_ref: Optional[float] = None, contrast: float = 1.0,
+         raw: bool = False) -> np.ndarray:
     """Adaptive (ACHF): Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin &
     Minarovjech 2006; defined in Druckmüllerová 2013, section 5.2). For each scale sigma the
     filtered image is the pixel minus its local mean under the circular kernel (:func:`achf_mean`),
@@ -1050,12 +1051,23 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
                 mean[m] = achf_mean(b, m.astype(np.float64), cx, cy, float(s), r_ref=r_ref)[m]
             acc += ks * np.where(valid, b - mean, 0.0)
     if sum(ws) <= 0:
+        if raw:
+            return np.zeros(b.shape, np.float32)
         out = np.where(valid, 0.5, 0.0).astype(np.float32)
         return out
     acc /= sum(ws)
+    if raw:  # the filtered image before Contrast and the display scale (see achf_display)
+        return np.where(valid, acc, 0.0).astype(np.float32)
     # A fixed output scale (the thesis's K2 is the Contrast setting): measured over the whole image
     # it would make a detail box differ from the full-size result.
     out = to_fixed((acc * contrast).astype(np.float32), ACHF_SPREAD)
+    out[~valid] = 0.0
+    return out
+
+
+def achf_display(acc: np.ndarray, valid: np.ndarray, contrast: float) -> np.ndarray:
+    """ACHF's filtered image (``achf(..., raw=True)``) as the layer: Contrast, then the fixed scale."""
+    out = to_fixed((acc * np.float32(contrast)).astype(np.float32), ACHF_SPREAD)
     out[~valid] = 0.0
     return out
 
@@ -1380,14 +1392,34 @@ def _gated_cache(frame: Frame) -> dict:
     return frame.cache["gated"]
 
 
+# The settings each layer depends on (besides the prepared frame); see render(cache=True).
+LAYER_SETTINGS = {
+    "natural": ("flatten", "even", "shoulder", "midtone"),
+    "nrgf": ("segments", "order", "ring_smooth"),
+    "fnrgf": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation"),
+    "fnrgf_n": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation", "noise_m"),
+    "adaptive": ("mgn_scales", "mgn_k", "noise_gate"),
+    "achf": ("achf_scales", "achf_weights", "achf_part_limit"),  # Contrast is applied after (achf_display)
+}
+
+
+def layer_key(name: str, p: EnhanceParams) -> tuple:
+    def h(v):
+        return tuple(h(x) for x in v) if isinstance(v, (list, tuple)) else v
+
+    return tuple(h(getattr(p, k)) for k in LAYER_SETTINGS[name])
+
+
 def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[tuple] = None,
            keep: Optional[set] = None, progress: Optional[Say] = None,
-           emit: Optional[Callable[[str, np.ndarray], None]] = None) -> dict:
+           emit: Optional[Callable[[str, np.ndarray], None]] = None, cache: bool = False) -> dict:
     """The coloured layers ({name: (h, w, 3) float32 0..1}) of ``box`` = (y0, y1, x0, x1) of the
     whole image (default: all of it), exactly as in the full-size picture: whole-image measurements
     come from ``frame`` (and are kept in ``frame.cache``), the local filters run on the box plus
     their reach. With ``emit``, each coloured layer is handed to it as soon as it is made and not
-    kept (a full 45 MP colour layer is half a gigabyte)."""
+    kept (a full 45 MP colour layer is half a gigabyte). With ``cache`` (previews), each layer's
+    result for this area is kept in ``frame.cache`` with its own settings (:func:`layer_key`) and
+    used again while they stay the same, so a change redraws only the layers it concerns."""
     say = progress or (lambda _m: None)
     p = params or EnhanceParams()
     g = frame.g
@@ -1398,68 +1430,112 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
     if y1 <= y0 or x1 <= x0:
         raise ValueError(f"empty box {box}")
     need = needed_layers(p)
-    m = 0 if box is None else render_margin(p, g, need)
-    Y0, Y1, X0, X1 = max(0, y0 - m), min(H, y1 + m), max(0, x0 - m), min(W, x1 + m)
-    reg = (slice(Y0, Y1), slice(X0, X1))
-    origin = (Y0, X0)
-    lum, valid, show, noise = frame.lum[reg], frame.valid[reg], frame.show[reg], frame.noise[reg]
-    r, phi = polar((Y1 - Y0, X1 - X0), g, origin)
-    cx, cy = g.sun_x - X0, g.sun_y - Y0
+    whole = box is None
+    inner_box = (y0, y1, x0, x1)
+    store = frame.cache.setdefault("layers", {}) if cache else None
+
+    def region(m):
+        """The box plus ``m`` px (inside the image): slices, origin, and the box within it."""
+        Y0, Y1, X0, X1 = max(0, y0 - m), min(H, y1 + m), max(0, x0 - m), min(W, x1 + m)
+        return ((slice(Y0, Y1), slice(X0, X1)), (Y0, X0),
+                (slice(y0 - Y0, y1 - Y0), slice(x0 - X0, x1 - X0)), (Y1 - Y0, X1 - X0))
+
+    box_reg = (slice(y0, y1), slice(x0, x1))
+    valid, show = frame.valid[box_reg], frame.show[box_reg]
     fade = None
     if frame.moon is not None:
-        yy = (np.arange(Y0, Y1, dtype=np.float64) - g.moon_y).astype(np.float32)[:, None]
-        xx = (np.arange(X0, X1, dtype=np.float64) - g.moon_x).astype(np.float32)[None, :]
+        yy = (np.arange(y0, y1, dtype=np.float64) - g.moon_y).astype(np.float32)[:, None]
+        xx = (np.arange(x0, x1, dtype=np.float64) - g.moon_x).astype(np.float32)[None, :]
         t = np.clip((np.sqrt(xx * xx + yy * yy) - g.moon_r - frame.moon_margin_px) / 4.0, 0.0, 1.0)
         fade = (t * t * (3 - 2 * t)).astype(np.float32)
         del xx, yy, t
 
-    mean_att = _attenuation(p.mean_attenuation, p.order)
-    std_att = _attenuation(p.std_attenuation, p.order)
-    scales = _mgn_scales(p, g)
+    def compute(name_l):
+        """One grey layer for the box, on the box plus that layer's own reach (so it is exact
+        whatever the other layers need)."""
+        if name_l == "adaptive":
+            m = _mgn_reach(_mgn_scales(p, g), p.noise_gate > 0)
+        elif name_l == "achf":
+            m = _achf_reach([g.sun_r * f for f in p.achf_scales], list(p.achf_weights), p.achf_part_limit,
+                            0.1 * g.sun_r)
+        else:
+            m = 0  # natural and the NRGF family are per pixel, from whole-image statistics
+        reg, origin, inner, shape = region(0 if whole else m)
+        lum, rvalid = frame.lum[reg], frame.valid[reg]
+        r, phi = polar(shape, g, origin)
+        if name_l == "natural":
+            st = _natural_cache(frame, p)
+            loc = None if st.loc is None else tuple(a_[reg] for a_ in st.loc)
+            y = natural_apply(lum, r, st, p.flatten, p.shoulder, p.even, g.sun_r, p.midtone, loc=loc,
+                              show=frame.show[reg])
+        elif name_l in ("nrgf", "fnrgf", "fnrgf_n"):
+            stats = _ring_cache(frame, p)
+            mean_att = _attenuation(p.mean_attenuation, p.order)
+            std_att = _attenuation(p.std_attenuation, p.order)
+            if name_l == "nrgf":
+                y = to_linear(nrgf(lum, r, rvalid, stats), NRGF_SPREAD)
+            elif name_l == "fnrgf":
+                y = to_linear(fnrgf(lum, r, phi, rvalid, stats, mean_att, std_att), FNRGF_SPREAD)
+            else:
+                y = to_linear(fnrgf(lum, r, phi, rvalid, stats, mean_att, std_att, p.noise_m), FNRGF_N_SPREAD)
+        elif name_l == "achf":
+            # Raw (before Contrast), so a Contrast change needs no filtering: see below.
+            y = achf(lum, rvalid, [g.sun_r * f for f in p.achf_scales], frame.nlev, g.sun_x - origin[1],
+                     g.sun_y - origin[0], list(p.achf_weights), p.achf_part_limit, ref_sigma=0.1 * g.sun_r,
+                     r_ref=g.moon_r, raw=True)
+        else:
+            scales = _mgn_scales(p, g)
+            if p.noise_gate > 0:
+                say(f"adaptive: noise gate {p.noise_gate:g}")
+                prep = _gated_cache(frame)
+                y = mgn_gated(lum, rvalid, scales, p.mgn_k, frame.nlev, frame.noise[reg], g.sun_r, p.noise_gate,
+                              prep=dict(prep, bf=prep["bf"][reg]), origin=origin)
+            else:
+                y = mgn(lum, rvalid, scales, p.mgn_k, frame.nlev, origin=origin)
+        y = np.ascontiguousarray(y[inner])
+        if name_l != "achf":
+            y[~(show if name_l == "natural" else valid)] = 0.0
+        return y
+
     layers: dict[str, np.ndarray] = {}
     for name_l in LAYERS:
         if name_l not in need:
             continue
+        key = layer_key(name_l, p)
+        hit = store.get((name_l, inner_box)) if store is not None else None
+        if hit is not None and hit[0] == key:
+            say(f"layer {name_l} (unchanged)" if name_l != "achf" else "layer achf (unchanged; Contrast applied)")
+            layers[name_l] = hit[1]
+            continue
         say(f"layer {name_l}")
-        if name_l == "natural":
-            st = _natural_cache(frame, p)
-            loc = None if st.loc is None else tuple(a[reg] for a in st.loc)
-            y = natural_apply(lum, r, st, p.flatten, p.shoulder, p.even, g.sun_r, p.midtone, loc=loc, show=show)
-        elif name_l in ("nrgf", "fnrgf", "fnrgf_n"):
-            stats = _ring_cache(frame, p)
-            if name_l == "nrgf":
-                y = to_linear(nrgf(lum, r, valid, stats), NRGF_SPREAD)
-            elif name_l == "fnrgf":
-                y = to_linear(fnrgf(lum, r, phi, valid, stats, mean_att, std_att), FNRGF_SPREAD)
-            else:
-                y = to_linear(fnrgf(lum, r, phi, valid, stats, mean_att, std_att, p.noise_m), FNRGF_N_SPREAD)
-        elif name_l == "achf":
-            y = achf(lum, valid, [g.sun_r * f for f in p.achf_scales], frame.nlev, cx, cy,
-                     list(p.achf_weights), p.achf_part_limit, ref_sigma=0.1 * g.sun_r, r_ref=g.moon_r,
-                     contrast=p.achf_contrast)
-        else:
-            if p.noise_gate > 0:
-                say(f"adaptive: noise gate {p.noise_gate:g}")
-                prep = _gated_cache(frame)
-                y = mgn_gated(lum, valid, scales, p.mgn_k, frame.nlev, noise, g.sun_r, p.noise_gate,
-                              prep=dict(prep, bf=prep["bf"][reg]), origin=origin)
-            else:
-                y = mgn(lum, valid, scales, p.mgn_k, frame.nlev, origin=origin)
-        y[~(show if name_l == "natural" else valid)] = 0.0
-        layers[name_l] = y
+        layers[name_l] = compute(name_l)
+        if store is not None:
+            store[(name_l, inner_box)] = (key, layers[name_l])
+    if "achf" in layers:
+        layers["achf"] = achf_display(layers["achf"], valid, p.achf_contrast)
+    if store is not None:  # only the latest area is kept
+        for k in [k for k in store if k[1] != inner_box]:
+            del store[k]
     blend_w = {k: float(v) for k, v in p.blend.items() if v and k in layers}
     if blend_w:
         layers["blend"] = soft_light_blend(layers, blend_w, valid, p.blend_modes, show=show, fade=fade,
                                            shoulder=p.shoulder)
-    col = chroma(frame.rgb[reg], lum, show, noise, p.saturation, colour_floor=frame.colour_floor)
-    inner = (slice(y0 - Y0, y1 - Y0), slice(x0 - X0, x1 - X0))
-    col = col[inner]
+    ckey = ("chroma", inner_box)
+    hit = store.get(ckey) if store is not None else None
+    if hit is not None and hit[0] == float(p.saturation):
+        col = hit[1]
+    else:
+        reg, _, inner, _ = region(0 if whole else _blur_reach(3.0))
+        col = chroma(frame.rgb[reg], frame.lum[reg], frame.show[reg], frame.noise[reg], p.saturation,
+                     colour_floor=frame.colour_floor)[inner]
+        if store is not None:
+            store[ckey] = (float(p.saturation), col)
     moon = frame.moon
     out = {}
     for k in layers:
         if keep is not None and k not in keep:
             continue
-        img = layers[k][inner][..., None] * col
+        img = layers[k][..., None] * col
         if p.shoulder > 0:  # keep the hue where a colour would go past white (a bright prominence)
             img = img / np.maximum(img.max(axis=2, keepdims=True), 1.0)
         img = np.clip(img, 0.0, 1.0)

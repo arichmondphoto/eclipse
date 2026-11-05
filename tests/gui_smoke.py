@@ -88,6 +88,34 @@ assert Path(et.outputs["blend"]).name == "custom_blend.tif" and Path(et.outputs[
 print("written:", sorted(et.outputs))
 assert "nrgf" not in et.outputs and "blend" in et.outputs and all(Path(v).exists() for v in et.outputs.values())
 assert "enhance" in EventProject.load(path).parameters
+# Changing an ACHF setting redraws only ACHF (and the blend mixes again); the reduced stack is
+# prepared once and kept until a setting it depends on (Keep the sky, White balance) changes.
+et._view_changed(0)
+et.blend["achf"].setValue(100)
+et.preview()
+small_frame = et.small_frame
+assert small_frame is not None
+mark = len(et.log.toPlainText())
+et.achf_parts.setValue(2.5)
+et.preview()
+new_log = et.log.toPlainText()[mark:]
+assert "layer achf" in new_log and "layer achf (unchanged" not in new_log, new_log
+for k in ("natural", "fnrgf_n", "adaptive"):
+    assert f"layer {k} (unchanged)" in new_log, (k, new_log)
+mark = len(et.log.toPlainText())
+et.achf_contrast.setValue(1.6)  # only rescales: nothing filtered again
+et.preview()
+assert "layer achf (unchanged; Contrast applied)" in et.log.toPlainText()[mark:]
+et.achf_parts.setValue(2.0)
+assert et.small_frame is small_frame
+et.keep_sky.setChecked(not et.keep_sky.isChecked())
+et.preview()
+assert et.small_frame is not small_frame
+et.keep_sky.setChecked(not et.keep_sky.isChecked())
+et.achf_contrast.setValue(1.0)
+et.blend["achf"].setValue(0)
+et.preview()
+
 # Save settings... and Load settings...: every control comes back as saved.
 import os
 from dataclasses import replace as _replace

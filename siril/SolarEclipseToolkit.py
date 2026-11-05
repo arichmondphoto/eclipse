@@ -1096,6 +1096,8 @@ class EnhanceTab(StepTab):
         self.box = None
         self.frame = None
         self.frame_key = None
+        self.small_frame = None  # the reduced stack prepared for the whole-picture preview
+        self.small_frame_key = None
         self.detail_layers: dict = {}
         self.detail_mode = False  # the Detail box view is the one shown
         self._stale = {"whole", "detail"}
@@ -1490,6 +1492,7 @@ class EnhanceTab(StepTab):
         self.small = None
         self.frame = None  # the full-size stack (gigabytes on a full frame)
         self.frame_key = None
+        self.small_frame, self.small_frame_key = None, None
         self.preview_layers, self.detail_layers = {}, {}
         self._stale = {"whole", "detail"}
 
@@ -1662,14 +1665,20 @@ class EnhanceTab(StepTab):
             self.start("Detail box", job, self._preview_done, reload=False)
             return
         cached = self.small
+        # The reduced stack, prepared (sky, white balance, noise) once while those settings stay; each
+        # layer is then drawn again only when its own settings change.
+        key = W.preview_frame_key(p)
+        if key != self.small_frame_key:
+            self.small_frame, self.small_frame_key = None, None
+        small_frame = self.small_frame
 
         def job(path, say, cancel):
             small = cached
             if small is None:
                 say("Reading the HDR stack for the preview…")
                 small = W.reduce_for_preview(W.load_hdr(path), max_side=1400)
-            result, layers = W.enhance_preview(small, p, say, cancel)
-            return "whole", small, result, layers
+            fr, result, layers = W.enhance_whole_preview(small, p, small_frame, say, cancel)
+            return "whole", small, result, layers, fr, key
 
         self.start("Preview", job, self._preview_done, reload=False)
 
@@ -1680,7 +1689,7 @@ class EnhanceTab(StepTab):
             self._box_text()
             self._stale.discard("detail")
         else:
-            _, self.small, result, self.preview_layers = out
+            _, self.small, result, self.preview_layers, self.small_frame, self.small_frame_key = out
             self.log.appendPlainText(result.describe())
             self._stale.discard("whole")
             self._outline()

@@ -574,7 +574,13 @@ The preview is a reduced copy, so fine settings (the ACHF scales, the noise
 gate, Noise compensation) cannot be judged on it. Hold **Shift** and drag a
 box on the whole picture: the **Detail box (full resolution)** tab shows that
 part of the full-size stack, at most 2000 px a side, and redraws it when a
-setting changes. It is exactly what **Write full-size layers** writes there
+setting changes. Both previews redraw only what a change concerns: each
+layer keeps its last result while its own settings stay the same (an ACHF
+size, strength or parts setting redraws only Adaptive (ACHF), and its
+Contrast, a blend strength or mode no layer at all: the blend is just mixed
+again; on a 2000 px box of the 2024 crop a first draw took 54 s, an ACHF
+strength change 33 s, a Contrast, blend or Flatten change under 1 s), and the prepared stack (sky, white
+balance, noise) is kept until **White balance** or **Keep the sky** changes. It is exactly what **Write full-size layers** writes there
 (tests compare boxes through the limb, at a frame corner and in the outer
 corona of the 2024 stack with the full-size result, every layer and the
 blend, to a thousandth of the range; the window's own check matches the

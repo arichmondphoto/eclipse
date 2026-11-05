@@ -448,6 +448,30 @@ def enhance_preview(data: HdrData, params, say: Optional[Say] = None, cancel=Non
     return enhance(data.hdr.copy(), data.weight, data.header, p, out_dir=None, progress=say)
 
 
+def preview_frame_key(params) -> tuple:
+    """What a prepared stack depends on: the sky and white balance settings (and the Moon margin)."""
+    return (bool(params.neutral_background), str(params.white), float(params.moon_margin_px))
+
+
+def enhance_whole_preview(data: HdrData, params, frame=None, say: Optional[Say] = None, cancel=None) -> tuple:
+    """The reduced preview of every layer, from ``frame`` (the reduced stack prepared earlier with the
+    same :func:`preview_frame_key`) or a newly prepared one. Each layer is drawn again only when its
+    own settings changed. Returns (frame, result, layers)."""
+    from .enhance import LAYERS, EnhanceResult, _mgn_scales, prepare, render
+
+    say = reporter(say, cancel)
+    p = _scaled_params(params, 1.0 / data.binning)
+    if frame is None:
+        frame = prepare(data.hdr.copy(), data.weight, data.header, p, progress=say)
+    layers = render(frame, p, progress=say, cache=True)
+    notes = []
+    unknown = set(p.blend) - set(LAYERS)
+    if unknown:
+        notes.append(f"unknown blend layer(s) ignored: {', '.join(sorted(unknown))}")
+    result = EnhanceResult({}, frame.wb.tolist(), frame.nlev, frame.bg.tolist(), _mgn_scales(p, frame.g), notes)
+    return frame, result, layers
+
+
 def _scaled_params(params, scale: float):
     """Pixel-sized settings follow the binning so the preview matches the full-size result."""
     from dataclasses import replace
@@ -619,7 +643,7 @@ def enhance_detail(frame, params, box, say: Optional[Say] = None, cancel=None) -
     b = detail_box(box, frame.shape)
     say(f"detail box {b[3] - b[2]} x {b[1] - b[0]} px at x {b[2]}, y {b[0]} (full size), with "
         f"{render_margin(params, frame.g)} px round it for the filters")
-    return b, render(frame, params, box=b, progress=say)
+    return b, render(frame, params, box=b, progress=say, cache=True)
 
 
 def enhance_project(project_path, params, hdr_file: Optional[str] = None, output: Optional[str] = None,
