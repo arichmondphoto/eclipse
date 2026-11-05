@@ -690,8 +690,8 @@ Crisium survive; only within ~20 px of the limb, where the glare is many
 times the earthshine, is most detail flattened. Before that, in short arcs round the limb, light that fades inward
 (a sum of decaying exponentials with strengths of one sign) is fitted and
 taken away: glare can only fade inward, while a mare near the limb is a dip
-and highlands a bump, which such a fit cannot take (`--no-limb-shape` turns
-it off). The earthshine is made from the colour channels that suit the
+and highlands a bump, which such a fit cannot take (off by default; `--limb-shape`
+turns it on). The earthshine is made from the colour channels that suit the
 stack best (`--channel auto`): much of the glare that changes quickly round
 the limb is red light from the chromosphere and prominences, and a colour
 camera has twice as many green pixels, so all of green, green + blue and the
@@ -1175,7 +1175,8 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--no-limb-glare` | do not model the steep glare just inside the limb (shows as a bright rim) |
 | `--prominence-glare` | fit and remove the fan of glare (and spikes) round a bright prominence (default off: the fan is shown as the data has it; removing it cannot bring back what is under it) |
 | `--no-prominence-glare` | the default since Nov 2026; kept so older command lines still run |
-| `--no-limb-shape` | do not fit the limb glare as light fading inward (that fit keeps maria by the limb) |
+| `--limb-shape` | fit the limb glare as light fading inward, round the limb, which keeps maria by the limb (default off) |
+| `--no-limb-shape` | the default since Nov 2026; kept so older command lines still run |
 | `--channel` | colour channels to make the earthshine from (default auto: chosen on the stack; the red channel carries most of the chromosphere glare) |
 | `--glare-order` | smoothness of the glare removed from the disc: polynomial order, 1-6 (default 6, the most flexible; 2 = a gentle gradient) |
 | `--smooth` | smoothing of the layer in pixels (default 0 = none) |

@@ -223,8 +223,11 @@ def main(argv: list[str] | None = None) -> int:
                         "fan is shown as the data has it; removing it cannot bring back what is under it)")
     p.add_argument("--no-prominence-glare", action="store_true",
                    help="the default since Nov 2026; kept so older command lines still run")
+    p.add_argument("--limb-shape", action="store_true",
+                   help="fit the limb glare as light fading inward, round the limb, which keeps maria by the limb "
+                        "(default off)")
     p.add_argument("--no-limb-shape", action="store_true",
-                   help="do not fit the limb glare as light fading inward (that fit keeps maria by the limb)")
+                   help="the default since Nov 2026; kept so older command lines still run")
     p.add_argument("--channel", default="auto", choices=["auto", "all", "green", "green+blue", "blue"],
                    help="colour channels to make the earthshine from (default auto: chosen on the stack; the red "
                         "channel carries most of the chromosphere glare)")
@@ -800,7 +803,7 @@ def cmd_earthshine(args) -> int:
                               keep_glare=args.keep_glare, limb_soften=args.limb_soften,
                               edge_grain=not args.no_edge_grain, colour=not args.no_colour,
                               edge_smooth=args.edge_smooth, surface_denoise=args.surface_denoise,
-                              limb_shape=not args.no_limb_shape, channel=args.channel)
+                              limb_shape=args.limb_shape and not args.no_limb_shape, channel=args.channel)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,
                         output=args.output, name=args.name, profile_dir=args.profile_dir,
                         lensfun_db=args.lensfun_db, fmt=args.format, quiet=args.quiet)

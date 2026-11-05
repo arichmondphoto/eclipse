@@ -49,7 +49,7 @@ class EarthshineParams:
     brightness: float = 1.0  # brightest lunar surface in the layer, 0..1
     edge_smooth: float = 0.0  # most smoothing where the noise is high near the limb, px
     limb_glare: bool = True  # also model the steep glare just inside the limb
-    limb_shape: bool = True  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
+    limb_shape: bool = False  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
     # Glare round a bright prominence (a fan with diffraction spikes), fitted from the prominence and
     # taken away. Off by default (Nov 2026): it cannot bring back what is under the fan (on the 2024
     # Moon a mare: removal left noise there), so the fan is shown as the data has it.

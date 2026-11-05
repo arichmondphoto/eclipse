@@ -1850,7 +1850,7 @@ class EarthshineTab(StepTab):
         self.source_glare.setChecked(False)
         f.addRow(self.source_glare)
         self.limb_shape = QCheckBox("Keep maria by the limb (glare only fades inward)")
-        self.limb_shape.setChecked(True)
+        self.limb_shape.setChecked(False)
         f.addRow(self.limb_shape)
         self.smooth = spin(0.0, 5.0, 0.5, 0.0, " px")
         f.addRow("Smoothing:", self.smooth)
@@ -1981,7 +1981,9 @@ class EarthshineTab(StepTab):
              "there comes out as noise, not as the mare), so off nothing is inferred.")
         _tip(self.limb_shape, "Glare from just outside the Moon can only get fainter going inward, while a sea "
              "(mare) near the edge is a dark dip and highlands a bright bump. With this on, only light that "
-             "fades inward is taken away around the edge, so seas near the limb such as Crisium survive.")
+             "fades inward is taken away around the edge, so seas near the limb such as Crisium survive.\n\nOff "
+             "(default): the limb glare is taken away without that condition. Turn it on if seas by the edge "
+             "come out flattened.")
         _tip(self.channel, "Which colour channels the earthshine is made from. Much of the glare that changes "
              "quickly around the edge is deep red light from the pink chromosphere and prominences, and a colour "
              "camera has twice as many green pixels, so green usually gives a cleaner Moon than the average of all "

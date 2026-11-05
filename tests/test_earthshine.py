@@ -857,6 +857,7 @@ def test_defaults_as_andy_uses_them():
     p = EarthshineParams()
     assert (p.keep_glare, p.limb_soften, p.source_glare) == (0.1, 0.0, False)
     assert (p.smooth, p.edge_smooth, p.surface_denoise, p.brightness, p.glare_order) == (0.0, 0.0, 0.0, 1.0, 6)
+    assert p.limb_shape is False
     sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
     from cli_reference import parser
 
@@ -864,3 +865,4 @@ def test_defaults_as_andy_uses_them():
     a = sp.parse_args(["proj.json"])
     assert (a.keep_glare, a.limb_soften, a.prominence_glare) == (0.1, 0.0, False)
     assert (a.smooth, a.edge_smooth, a.surface_denoise, a.brightness, a.glare_order) == (0.0, 0.0, 0.0, 1.0, 6)
+    assert a.limb_shape is False and sp.parse_args(["proj.json", "--limb-shape"]).limb_shape is True
