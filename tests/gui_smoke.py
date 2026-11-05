@@ -116,6 +116,16 @@ et.achf_contrast.setValue(1.0)
 et.blend["achf"].setValue(0)
 et.preview()
 
+# Adaptive (MGN): the paper's six scales and weights, adjustable.
+assert et.params().mgn_scales == (1.25, 2.5, 5.0, 10.0, 20.0, 40.0) and et.params().mgn_weights == (1.0,) * 6
+assert all(len(w.toolTip()) > 100 for w in et.mgn_size + et.mgn_w)
+et.mgn_size[0].setValue(2.0)
+et.mgn_w[5].setValue(0.0)
+assert et.params().mgn_scales[0] == 2.0 and et.params().mgn_weights[5] == 0.0
+et.preview()
+et.mgn_size[0].setValue(1.25)
+et.mgn_w[5].setValue(1.0)
+
 # Save settings... and Load settings...: every control comes back as saved.
 import os
 from dataclasses import replace as _replace
@@ -124,7 +134,8 @@ _stub_env = {k: os.environ.get(k) for k in ("STUB_SAVE", "STUB_OPEN")}
 os.environ["STUB_SAVE"] = str(Path(sys.argv[1]) / "look")
 et.save_settings()
 assert (Path(sys.argv[1]) / "look.json").exists()
-other = _replace(saved_params, flatten=0.15, saturation=0.4, white="none", neutral_background=not saved_params.neutral_background,
+other = _replace(saved_params, mgn_scales=(2.0, 3.0, 6.0, 12.0, 24.0, 48.0), mgn_weights=(0.5, 1, 1, 1, 1, 0),
+                 flatten=0.15, saturation=0.4, white="none", neutral_background=not saved_params.neutral_background,
                  achf_contrast=2.2, blend={"natural": 1.0, "nrgf": 0.3}, blend_modes={"nrgf": "overlay"},
                  achf_scales=tuple(v * 1.5 for v in saved_params.achf_scales), layers=("natural",))
 assert et.set_params(other) == [] and et.params() == other  # (the stand-in's controls take any value)

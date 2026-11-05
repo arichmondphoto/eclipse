@@ -111,7 +111,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper); **Natural layer and colour:** Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k) and Noise gate (off); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
+| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper); **Natural layer and colour:** Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k), Noise gate (off) and the size and strength of each of its six scales (the paper's 1.25, 2.5, 5, 10, 20, 40 px at strength 1); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -476,6 +476,25 @@ stays flat instead of being stretched back up.
 0.01) is k in the paper's arctan(k C): how hard local contrast is brought
 out at each scale. The default, 0.7, is the paper's value.
 
+Its six scales each have a size and a strength (**Adaptive layer (MGN)**
+box; `--mgn-scales` in px of the full-size stack and `--mgn-weights`,
+finest first). The defaults are the paper's: kernel widths of 1.25, 2.5, 5,
+10, 20 and 40 px ("Values used throughout this work are w = 1.25, 2.5, 5,
+10, 20, 40") at weight 1, the plain mean the paper allows ("the g_i can be
+set equal for all scales"). The weights are the paper's g_i: the layer is
+(1/6) times the sum of g_i arctan(k C_i), so lowering one weakens the layer
+as well as that scale's share (unlike ACHF, where only the ratios count),
+and 0 leaves the scale out. The paper sets smaller weights for the finest
+scales to keep noise down; the noise gate does that from the data. The
+sizes are pixels, as the paper gives them: a frame of reference is a 400 mm
+lens on a 45-megapixel full-frame camera (Sun about 410 px in radius); raise
+them in proportion with a longer lens or smaller pixels. The reduced
+preview divides them by its reduction. Until 5 Nov 2026 the scales were 0.6%
+to 20% of the Sun's radius (about 2.5 to 83 px on that setup) with equal
+weights; on the 2024 crop the paper's scales give a little more contrast
+overall and a finer grain (the 1.25 px scale is mostly noise there), with
+the noise gate on a little less.
+
 Adaptive (ACHF): Druckmüller's adaptive circular high-pass filter, as
 defined in H. Druckmüllerová's PhD thesis (*Application of Adaptive Filters
 in Processing of Solar Corona Images*, Brno University of Technology, 2013),
@@ -559,8 +578,9 @@ file; options typed on the same line take its place for what they set (for
 example `--settings look.json --saturation 0.8`).
 
 The ACHF sizes are kept as fractions of the Sun's radius, so on a stack with
-a bigger or smaller Sun they stay the same size against the Sun; the other
-settings are in the methods' own units. Not saved: the detail box (it
+a bigger or smaller Sun they stay the same size against the Sun; the MGN
+sizes are kept in pixels, as the paper gives them; the other settings are
+in the methods' own units. Not saved: the detail box (it
 belongs to the project) and three internal widths in pixels. Settings a
 file does not have stay as they were, settings since removed from the
 toolkit are skipped, and the log lists both. A file from before 4 Nov 2026
@@ -1136,6 +1156,8 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--noise-m` | FNRGF-N noise compensation, 0..0.99 (default 0.7) |
 | `--adaptive-k` | adaptive layer: strength of the local contrast at each scale, k in arctan(k C) (default 0.7, as in Morgan & Druckmueller 2014) |
 | `--achf-scales` | Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in % of the Sun's radius (default 0.121,0.242,0.7259,2.42,10,20; the last two start at strength 0) |
+| `--mgn-scales` | Adaptive (MGN): the width (kernel sigma) of each of its six scales, finest first, in px of the full-size stack (default 1.25,2.5,5,10,20,40, the paper's; a frame of reference: a 400 mm lens on a 45-megapixel full-frame camera; raise them with a longer lens or smaller pixels) |
+| `--mgn-weights` | Adaptive (MGN): the weight g_i of each scale, 0-1, finest first (default 1,1,1,1,1,1: the plain mean); the layer is 1/6 of the weighted sum, as in the paper, so lowering one weakens it; 0 leaves the scale out |
 | `--achf-weights` | Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out (default 1,1,1,1,0,0) |
 | `--achf-part-limit` | Adaptive (ACHF): a pixel this many times brighter or darker than the corona at its height (a prominence) is a separate part, left out of the corona's kernels and filtered with its own pixels only, so no dark fringe forms round it; 0 = off (default 2) |
 | `--achf-contrast` | Adaptive (ACHF): contrast of the layer (the thesis's K2): at 1, a pixel about 1.1% brighter than its local mean (averaged over the scales by their strengths) shows at 82% grey, 1.1% darker at 18%; at 2, half that difference does; set by eye (default 1) |

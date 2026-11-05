@@ -60,3 +60,38 @@ def test_nrgf_and_fnrgf_layers_are_y_on_a_straight_line(real=None):
     for k, (y, s) in ys.items():
         expect = np.clip(0.5 + y / (2 * s), 0.0, 1.0)
         assert np.abs(out[k][..., 0][v] - expect[v]).max() < 1e-5, k
+
+
+def test_mgn_default_scales_and_weights_are_the_papers():
+    """Morgan & Druckmueller (2014): "w = 1.25, 2.5, 5, 10, 20, 40" px; the weights g_i "may be
+    adjusted", or "set equal for all scales so that a straightforward mean" results."""
+    p = E.EnhanceParams()
+    assert tuple(p.mgn_scales) == (1.25, 2.5, 5.0, 10.0, 20.0, 40.0)
+    assert tuple(p.mgn_weights) == (1.0,) * 6
+
+
+def test_mgn_scale_weights_as_in_the_paper():
+    """(1 - h) / n * sum g_i C'_i: each scale's arctan times its weight, over the number of scales;
+    a weight of 0 leaves the scale out (and lowers the layer, as in the paper)."""
+    rng = np.random.default_rng(5)
+    x = np.exp(ndimage.gaussian_filter(rng.normal(size=(120, 150)), 1.5)).astype(np.float32)
+    valid = np.ones(x.shape, bool)
+    scales, k, g = [1.5, 3.0, 6.0], 0.7, [0.25, 1.0, 0.0]
+    b = np.log(x + 1e-6).astype(np.float32)
+    acc = np.zeros_like(b)
+    for w, gi in zip(scales, g):
+        d = b - ndimage.gaussian_filter(b, w, mode="reflect")
+        sd = np.sqrt(np.maximum(ndimage.gaussian_filter(d * d, w, mode="reflect"), 1e-12))
+        acc += gi * np.arctan(k * d / sd)
+    expect = 0.5 + acc / len(scales) / np.pi
+    assert np.abs(E.mgn(x, valid, scales, k, 1e-6, weights=g) - expect).max() < 1e-5
+    gated = E.mgn_gated(x, valid, scales, k, 1e-6, np.zeros_like(x), 50.0, gate=0.0, weights=g)
+    assert np.abs(gated - expect).max() < 1e-5
+
+
+def test_mgn_scales_follow_the_preview_reduction():
+    """The sizes are full-size pixels: the reduced preview divides them by its reduction."""
+    from tse_core import workflow as W
+
+    p = W._scaled_params(E.EnhanceParams(), 1 / 6)
+    assert np.allclose(p.mgn_scales, [v / 6 for v in (1.25, 2.5, 5, 10, 20, 40)])

@@ -52,6 +52,8 @@ DEFAULT_LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive")
 # Andy's choice (4 Nov 2026) of 0.5, 1, 3 and 10 px on his 2024 frames (Sun radius 413.29 px, from
 # the stack's SUNR; not the Moon's 435.92), within the thesis's 0.5-64 px, plus 10% and 20% of the
 # radius switched off (strength 0).
+MGN_SCALES = (1.25, 2.5, 5.0, 10.0, 20.0, 40.0)
+MGN_WEIGHTS = (1.0,) * 6
 SUN_R_2024 = 413.29
 ACHF_SCALES = tuple(v / SUN_R_2024 for v in (0.5, 1.0, 3.0, 10.0)) + (0.1, 0.2)
 ACHF_WEIGHTS = (1.0, 1.0, 1.0, 1.0, 0.0, 0.0)
@@ -81,7 +83,10 @@ class EnhanceParams:
     # Midtones: above 0, a gamma puts the inner corona's median brightness (1.05-2.5 solar radii)
     # at this level (e.g. 0.6 for a light grey corona). 0 = off.
     midtone: float = 0.0
-    mgn_scales: Optional[Sequence[float]] = None  # px; default from the Sun's radius
+    # Adaptive (MGN): the paper's six kernel widths (px of the full-size stack) and their weights g_i
+    # (Morgan & Druckmueller 2014: "w = 1.25, 2.5, 5, 10, 20, 40"; g_i "may be adjusted").
+    mgn_scales: Optional[Sequence[float]] = MGN_SCALES
+    mgn_weights: Sequence[float] = MGN_WEIGHTS
     # Adaptive (ACHF): the six scales (kernel widths sigma) as fractions of the Sun's radius, finest
     # first, and the strength of each.
     achf_scales: Sequence[float] = ACHF_SCALES
@@ -856,7 +861,7 @@ def gated_prep(x: np.ndarray, valid: np.ndarray, floor: float, sun_r: float, see
 
 def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float,
               noise: np.ndarray, sun_r: float, gate: float = 3.0, seed: int = 0, prep: Optional[dict] = None,
-              origin: tuple[int, int] = (0, 0)) -> np.ndarray:
+              origin: tuple[int, int] = (0, 0), weights: Optional[Sequence[float]] = None) -> np.ndarray:
     """:func:`mgn` with the noise kept down: each scale's detail weighted by how far it stands above
     the noise at that scale (a Wiener gain; the noise at each scale comes from a noise image with
     the stack's measured noise and correlation). Pure noise gives almost no contrast.
@@ -873,7 +878,12 @@ def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: floa
     nz = np.where(valid, nz, 0.0).astype(np.float32)
     acc = np.zeros_like(bf)
     g2 = gate * gate
-    for w in scales:
+    gs = [1.0] * len(scales) if weights is None else [max(float(v), 0.0) for v in weights]
+    if len(gs) != len(scales):
+        raise ValueError(f"Adaptive (MGN) needs one strength per scale ({len(scales)}), got {len(gs)}")
+    for w, gi in zip(scales, gs):
+        if gi <= 0:
+            continue
         d = bf - blur(bf, w, origin)
         sd2 = blur(d * d, w, origin)
         dn = nz - blur(nz, w, origin)
@@ -883,7 +893,7 @@ def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: floa
         n2 = blur(dn * dn, wide, origin)
         s2 = blur(d * d, wide, origin)
         gain = np.maximum(s2 - n2, 0.0) / np.maximum(s2 + (g2 - 1.0) * n2, 1e-12) if gate > 0 else 1.0
-        acc += np.arctan(k * gain * d / np.sqrt(np.maximum(sd2, 1e-12)))
+        acc += np.float32(gi) * np.arctan(k * gain * d / np.sqrt(np.maximum(sd2, 1e-12)))
         del d, sd2, dn, n2, s2, gain
     acc /= len(scales)
     # The paper's straight mapping, as the plain filter (never stretched to the image's spread, which
@@ -1083,19 +1093,25 @@ def _achf_reach(scales: Sequence[float], weights: Sequence[float], part_limit: f
 
 
 def mgn(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float,
-        origin: tuple[int, int] = (0, 0)) -> np.ndarray:
+        origin: tuple[int, int] = (0, 0), weights: Optional[Sequence[float]] = None) -> np.ndarray:
     """Multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of log(X); local part only,
-    on the paper's own scale: 0.5 + (mean of arctan(k C)) / pi (see :func:`mgn_unit`)."""
+    on the paper's own scale: 0.5 + (1/n sum g_i arctan(k C_i)) / pi (see :func:`mgn_unit`), the
+    weights g_i (default all 1, the plain mean) as in the paper's eq. 5; a scale at 0 is skipped."""
     b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
     # Fill invalid pixels with their surroundings so the Moon and frame edges do not ring.
     m = valid.astype(np.float32)
     fill = blur(b * m, 8.0, origin) / np.maximum(blur(m, 8.0, origin), 1e-6)
     b = np.where(valid, b, fill).astype(np.float32)
     acc = np.zeros_like(b)
-    for w in scales:
+    gs = [1.0] * len(scales) if weights is None else [max(float(v), 0.0) for v in weights]
+    if len(gs) != len(scales):
+        raise ValueError(f"Adaptive (MGN) needs one strength per scale ({len(scales)}), got {len(gs)}")
+    for w, gi in zip(scales, gs):
+        if gi <= 0:
+            continue
         d = b - blur(b, w, origin)
         sd = np.sqrt(np.maximum(blur(d * d, w, origin), 1e-12))
-        acc += np.arctan(k * d / sd)
+        acc += np.float32(gi) * np.arctan(k * d / sd)
     acc /= len(scales)
     out = mgn_unit(acc)
     out[~valid] = 0.0
@@ -1347,8 +1363,13 @@ def prepare(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
 
 
 def _mgn_scales(p: EnhanceParams, g: Geometry) -> list:
-    scales = list(p.mgn_scales) if p.mgn_scales else [g.sun_r * f for f in (0.006, 0.012, 0.025, 0.05, 0.1, 0.2)]
-    return sorted(scales)
+    """The MGN kernel widths in px of the image rendered (the paper's by default)."""
+    return list(p.mgn_scales) if p.mgn_scales else list(MGN_SCALES)
+
+
+def _mgn_used(p: EnhanceParams, g: Geometry) -> list:
+    """The widths of the scales with a strength above 0 (for the margin a box needs)."""
+    return [w for w, gi in zip(_mgn_scales(p, g), p.mgn_weights) if gi > 0] or [1.0]
 
 
 def needed_layers(p: EnhanceParams) -> set:
@@ -1360,7 +1381,7 @@ def render_margin(p: EnhanceParams, g: Geometry, need: Optional[set] = None) -> 
     need = needed_layers(p) if need is None else need
     reach = _blur_reach(3.0)  # the colour ratios
     if "adaptive" in need:
-        reach = max(reach, _mgn_reach(_mgn_scales(p, g), p.noise_gate > 0))
+        reach = max(reach, _mgn_reach(_mgn_used(p, g), p.noise_gate > 0))
     if "achf" in need:
         reach = max(reach, _achf_reach([g.sun_r * f for f in p.achf_scales], list(p.achf_weights),
                                        p.achf_part_limit, 0.1 * g.sun_r))
@@ -1398,7 +1419,7 @@ LAYER_SETTINGS = {
     "nrgf": ("segments", "order", "ring_smooth"),
     "fnrgf": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation"),
     "fnrgf_n": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation", "noise_m"),
-    "adaptive": ("mgn_scales", "mgn_k", "noise_gate"),
+    "adaptive": ("mgn_scales", "mgn_weights", "mgn_k", "noise_gate"),
     "achf": ("achf_scales", "achf_weights", "achf_part_limit"),  # Contrast is applied after (achf_display)
 }
 
@@ -1454,7 +1475,7 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
         """One grey layer for the box, on the box plus that layer's own reach (so it is exact
         whatever the other layers need)."""
         if name_l == "adaptive":
-            m = _mgn_reach(_mgn_scales(p, g), p.noise_gate > 0)
+            m = _mgn_reach(_mgn_used(p, g), p.noise_gate > 0)
         elif name_l == "achf":
             m = _achf_reach([g.sun_r * f for f in p.achf_scales], list(p.achf_weights), p.achf_part_limit,
                             0.1 * g.sun_r)
@@ -1489,9 +1510,9 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
                 say(f"adaptive: noise gate {p.noise_gate:g}")
                 prep = _gated_cache(frame)
                 y = mgn_gated(lum, rvalid, scales, p.mgn_k, frame.nlev, frame.noise[reg], g.sun_r, p.noise_gate,
-                              prep=dict(prep, bf=prep["bf"][reg]), origin=origin)
+                              prep=dict(prep, bf=prep["bf"][reg]), origin=origin, weights=list(p.mgn_weights))
             else:
-                y = mgn(lum, rvalid, scales, p.mgn_k, frame.nlev, origin=origin)
+                y = mgn(lum, rvalid, scales, p.mgn_k, frame.nlev, origin=origin, weights=list(p.mgn_weights))
         y = np.ascontiguousarray(y[inner])
         if name_l != "achf":
             y[~(show if name_l == "natural" else valid)] = 0.0

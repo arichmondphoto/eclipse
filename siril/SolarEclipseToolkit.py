@@ -89,7 +89,8 @@ from tse_core import workflow as W  # noqa: E402
 from tse_core.brackets import detect_brackets  # noqa: E402
 from tse_core import imageout as IO  # noqa: E402
 from tse_core.viewzoom import ViewZoom  # noqa: E402
-from tse_core.enhance import ACHF_SCALES, ACHF_WEIGHTS, LAYERS, SUN_R_2024, EnhanceParams  # noqa: E402
+from tse_core.enhance import (  # noqa: E402
+    ACHF_SCALES, ACHF_WEIGHTS, LAYERS, MGN_SCALES, MGN_WEIGHTS, SUN_R_2024, EnhanceParams)
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
 from tse_core.frames import format_exposure  # noqa: E402
 from tse_core.inventory import Inventory, ProjectFolder, find_raw_files  # noqa: E402
@@ -1179,6 +1180,21 @@ class EnhanceTab(StepTab):
         af.addRow("Strength:", self.mgn_k)
         self.noise_gate = self._dspin(0.0, 6.0, 0.0, 0.5, "Adaptive layer: keep noise from becoming texture")
         af.addRow("Noise gate:", self.noise_gate)
+        # The paper's six scales: kernel widths in px of the full-size stack, and their weights g_i.
+        self.mgn_size, self.mgn_w = [], []
+        for i, (wpx, gi) in enumerate(zip(MGN_SCALES, MGN_WEIGHTS)):
+            size = self._dspin(0.1, 1000.0, wpx, 0.25, "Adaptive (MGN): size of this scale")
+            size.setDecimals(2)
+            size.setSuffix(" px")
+            sp = self._dspin(0.0, 1.0, gi, 0.05, "Adaptive (MGN): strength of this scale")
+            sp.setDecimals(2)
+            row = QHBoxLayout()
+            row.addWidget(size, 1)
+            row.addWidget(QLabel("strength"))
+            row.addWidget(sp, 1)
+            af.addRow(f"Scale {i + 1}:", row)
+            self.mgn_size.append(size)
+            self.mgn_w.append(sp)
         self.settings_layout.addWidget(adaptive)
         self._adaptive_form = af
 
@@ -1372,6 +1388,20 @@ class EnhanceTab(StepTab):
         _tip(self.mgn_k, "How strongly the adaptive layer brings out local contrast at each scale: k in the "
              "paper's arctan(k x C) (Morgan & Druckmüller 2014). Default 0.7, the paper's value. Higher gives "
              "harder, more graphic strands; lower is gentler. Steps of 0.01.", af)
+        for size, sp in zip(self.mgn_size, self.mgn_w):
+            _tip(size, "Adaptive (MGN) only: the width (sigma) of this scale's Gaussian kernel in pixels of your "
+                 "full-size stack; the contrast is normalized against the surroundings this wide. Defaults: the "
+                 "paper's 1.25, 2.5, 5, 10, 20 and 40 px (Morgan & Druckmüller 2014). Pixel defaults: a frame of "
+                 "reference is a 400 mm lens on a 45-megapixel full-frame camera (Sun about 410 px in radius; the "
+                 "Align log's 'Sun centre' line gives yours): with a longer lens or smaller pixels, raise the sizes "
+                 "in proportion; with a shorter lens, lower them.\n\nThe preview is a reduced copy (about 1/6 for a "
+                 "full frame): it uses the sizes divided by its reduction, so scales under about 6 px show only in "
+                 "the detail box and the full-size layers.", af)
+            _tip(sp, "Adaptive (MGN) only: the paper's weight g_i for this scale, 0 to 1 (default 1 for all: the plain "
+                 "mean). As in the paper, the layer is the weighted sum over all six scales divided by six, so "
+                 "lowering a weight weakens the layer as well as that scale's share; 0 leaves the scale out (and "
+                 "saves its time). The paper sets smaller weights for the finest scales to keep noise down; the "
+                 "Noise gate above does that from your data.", af)
         _tip(self.noise_gate, "The adaptive filter brings out structure at six scales; at the finest ones a stack is "
              "mostly noise, which it turns into grain. With the gate, each scale's detail counts only as far as it "
              "stands above the noise measured in your stack at that scale (the number is how many times the noise "
@@ -1507,6 +1537,8 @@ class EnhanceTab(StepTab):
                              achf_weights=tuple(sp.value() for sp in self.achf_w),
                              achf_part_limit=self.achf_parts.value(),
                              achf_contrast=self.achf_contrast.value(),
+                             mgn_scales=tuple(sp.value() for sp in self.mgn_size),
+                             mgn_weights=tuple(sp.value() for sp in self.mgn_w),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
                              blend_modes=modes, neutral_background=not self.keep_sky.isChecked(), **self._hidden)
 
@@ -1529,6 +1561,9 @@ class EnhanceTab(StepTab):
             sp.setValue(v)
         self.white.setCurrentIndex(max(self.white.findText(p.white), 0))
         self.keep_sky.setChecked(not p.neutral_background)
+        for size, sp, wpx, gi in zip(self.mgn_size, self.mgn_w, p.mgn_scales or MGN_SCALES, p.mgn_weights):
+            size.setValue(wpx)
+            sp.setValue(gi)
         self.achf_frac = list(p.achf_scales)
         for size, frac, sp, wt in zip(self.achf_size, self.achf_frac, self.achf_w, p.achf_weights):
             size.blockSignals(True)  # only the display: the fractions are the settings

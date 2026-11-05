@@ -15,7 +15,7 @@ from .frames import format_exposure, parse_duration
 from .inventory import Inventory, find_raw_files
 from .lensfun import LensfunDatabase, corner_falloff, download_database, import_database
 from .metadata import ExifToolReader, rawpy_available, read_frames
-from .enhance import ACHF_SCALES, ACHF_WEIGHTS, DEFAULT_BLEND, DEFAULT_LAYERS, LAYERS
+from .enhance import ACHF_SCALES, ACHF_WEIGHTS, DEFAULT_BLEND, DEFAULT_LAYERS, LAYERS, MGN_SCALES, MGN_WEIGHTS
 from .project import EventProject
 from .vignetting_profile import VignettingProfile, fit_profile_from_files, load_profile_library
 
@@ -169,6 +169,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in %% of "
                         "the Sun's radius (default " + ",".join(f"{100 * v:.4g}" for v in ACHF_SCALES)
                         + "; the last two start at strength 0)")
+    p.add_argument("--mgn-scales", default=",".join(f"{v:g}" for v in MGN_SCALES),
+                   help="Adaptive (MGN): the width (kernel sigma) of each of its six scales, finest first, in px of "
+                        "the full-size stack (default %(default)s, the paper's; a frame of reference: a 400 mm lens "
+                        "on a 45-megapixel full-frame camera; raise them with a longer lens or smaller pixels)")
+    p.add_argument("--mgn-weights", default=",".join(f"{v:g}" for v in MGN_WEIGHTS),
+                   help="Adaptive (MGN): the weight g_i of each scale, 0-1, finest first (default %(default)s: the "
+                        "plain mean); the layer is 1/6 of the weighted sum, as in the paper, so lowering one "
+                        "weakens it; 0 leaves the scale out")
     p.add_argument("--achf-weights", default=",".join(f"{v:g}" for v in ACHF_WEIGHTS),
                    help="Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out "
                         "(default %(default)s)")
@@ -706,7 +714,8 @@ ENHANCE_OPTION_SETTINGS = {
     "layers": ("layers",), "segments": ("segments",), "order": ("order",), "mean_att": ("mean_attenuation",),
     "std_att": ("std_attenuation",), "noise_m": ("noise_m",), "flatten": ("flatten",), "shoulder": ("shoulder",),
     "even": ("even",), "midtone": ("midtone",), "noise_gate": ("noise_gate",), "adaptive_k": ("mgn_k",),
-    "achf_weights": ("achf_weights",), "achf_scales": ("achf_scales",), "achf_part_limit": ("achf_part_limit",),
+    "achf_weights": ("achf_weights",), "achf_scales": ("achf_scales",),
+    "mgn_scales": ("mgn_scales",), "mgn_weights": ("mgn_weights",), "achf_part_limit": ("achf_part_limit",),
     "achf_contrast": ("achf_contrast",), "saturation": ("saturation",), "white": ("white",),
     "blend": ("blend", "blend_modes"), "keep_background_colour": ("neutral_background",),
 }
@@ -746,6 +755,8 @@ def enhance_params(args, given: set | None = None):
                            mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
                            noise_m=args.noise_m, flatten=args.flatten, shoulder=args.shoulder, even=args.even, midtone=args.midtone, noise_gate=args.noise_gate,
                            mgn_k=args.adaptive_k, achf_weights=_six(args.achf_weights, "--achf-weights"),
+                           mgn_scales=_six(args.mgn_scales, "--mgn-scales", positive=True),
+                           mgn_weights=_six(args.mgn_weights, "--mgn-weights"),
                            achf_scales=(tuple(ACHF_SCALES) if args.achf_scales is None else
                                         tuple(v / 100.0 for v in _six(args.achf_scales, "--achf-scales", positive=True))),
                            achf_part_limit=args.achf_part_limit, achf_contrast=args.achf_contrast,

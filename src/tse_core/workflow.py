@@ -477,7 +477,7 @@ def _scaled_params(params, scale: float):
     from dataclasses import replace
 
     if params.mgn_scales:
-        return replace(params, mgn_scales=[s * scale for s in params.mgn_scales])
+        return replace(params, mgn_scales=tuple(s * scale for s in params.mgn_scales))
     return params
 
 
@@ -485,9 +485,9 @@ def _scaled_params(params, scale: float):
 
 SETTINGS_KIND = "totality-enhance-settings"
 SETTINGS_VERSION = 1
-# Not saved: sizes in pixels of one stack (the ACHF sizes are fractions of the Sun's radius, so they
-# are saved), and the detail box, which belongs to the project.
-SETTINGS_SKIP = ("mgn_scales", "moon_margin_px", "ring_smooth")
+# Not saved: two internal widths in pixels, and the detail box, which belongs to the project. (The
+# MGN sizes are saved in pixels, as the paper gives them; the ACHF sizes as fractions of the Sun.)
+SETTINGS_SKIP = ("moon_margin_px", "ring_smooth")
 _REMOVED = {"strands": "Smooth along scales (removed Nov 2026)", "mgn_skip_fine": "Skip finest scales (removed Nov 2026)"}
 
 
@@ -557,6 +557,10 @@ def load_enhance_settings(path, base=None):
             if k == "layers":
                 v = tuple(str(x) for x in v)
                 if any(x not in LAYERS for x in v):
+                    raise bad(k, v)
+            elif k in ("mgn_scales", "mgn_weights"):
+                v = tuple(float(x) for x in v)
+                if len(v) != 6 or any(x < 0 for x in v) or (k == "mgn_scales" and min(v) <= 0):
                     raise bad(k, v)
             elif k in ("achf_scales", "achf_weights"):
                 v = tuple(float(x) for x in v)
