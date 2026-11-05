@@ -446,8 +446,10 @@ influence, and the small-scale limit. Not published, so chosen here and
 open to change: the filter works on log brightness, sums its scales with
 the strengths set (an amplification rising with spatial frequency), and is
 centred on mid-grey for the blend on a fixed scale: **Contrast** (`--achf-contrast`,
-default 1) plays the thesis's K2, and 1 is the contrast the layer had on the
-2024 crop at full size with the default scales. Its six scales each have a size and a strength (**Adaptive layer (ACHF):
+default 1) plays the thesis's K2 and is set by eye, as in Druckmüller's own
+software. At 1, a pixel about 1.1% brighter than its local mean (averaged
+over the scales by their strengths) shows at 82% grey; at 2, half that
+difference does (see the fixed output scales below). Its six scales each have a size and a strength (**Adaptive layer (ACHF):
 size and strength of each scale** on the Enhance tab; `--achf-scales` in %
 of the Sun's radius and `--achf-weights`, finest first), as the sliders of
 Druckmüller's Corona program did. Defaults (Andy's choice): sizes of 0.5, 1,
@@ -519,17 +521,26 @@ second one only:
    image, so a box sees the same values as the full picture.
 
 For this the filter layers have **fixed output scales** instead of being
-stretched to each picture's own spread: NRGF 3.5, FNRGF 6.8, FNRGF-N 20,
-Adaptive (MGN) 1.0 and Adaptive (ACHF) 0.0106 (output 0.5 + arctan(1.6 y / s) / pi).
-These are the scales the old per-picture stretch used on the 2024 crop
-(2530 px square round the Sun) at full size with the default settings, so
-the layers look as they did there (checked: within 0.4 of an 8-bit step at
-the 95th percentile). The NRGF, FNRGF and MGN outputs are normalized, so a
-fixed scale suits any stack; for ACHF, **Contrast** adjusts it. The blend
-is no longer re-stretched after mixing and Midtone is no longer re-applied
-to it: with Midtone 0.6 the 2024 crop's blend came out about 3% darker in
-the mid-tones (median 0.478 against 0.507) than before; raise Midtone a
-little to match.
+stretched to each picture's own spread. Each layer's output y is shown as
+0.5 + arctan(1.6 y / s) / pi: y = s at 82% grey, -s at 18%, 0 at mid-grey.
+The scale s is set in the method's own units, so it means the same on any
+camera, lens or eclipse:
+
+| Layer | Output y | s (shows at 82% grey) |
+| --- | --- | --- |
+| NRGF | (pixel - circle mean) / circle standard deviation | 3.5 standard deviations |
+| FNRGF | the same with the local (Fourier) mean and deviation | 6.8 local deviations |
+| FNRGF-N | the same, the deviation less **Noise compensation** x the noise | 20 of those |
+| Adaptive (MGN) | mean over the scales of arctan(k C) | 1.0 radian (0.6 with the noise gate) |
+| Adaptive (ACHF) | **Contrast** x the strength-weighted mean over the scales of ln(pixel / local mean) | 0.0106: about 1.1% brighter than the local mean at Contrast 1 |
+
+These are display units, not fitted to any one eclipse: a corona with
+little structure looks flatter than one with much, as it is, where a
+per-picture stretch would have raised it (and its noise) to the same
+range. Each user sets the look by eye with the blend strengths and the ACHF
+**Contrast**, as in Druckmüller's own software, and the detail box shows
+the result at full resolution. The blend is not re-stretched after mixing,
+and Midtone is applied once, in the natural layer.
 
 ## Earthshine
 
@@ -1009,21 +1020,21 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--output`, `-o` | output folder (default: next to the project) |
 | `--name` | output file name prefix (default: the project name) |
 | `--layers` | comma-separated layers to write, from natural, nrgf, fnrgf, fnrgf_n, adaptive, achf (default: all but achf, which takes minutes on a full frame) |
-| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' (default soft light), e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s) |
+| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' (default soft light), e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
 | `--order` | FNRGF Fourier order (default 10) |
 | `--segments` | FNRGF angular segments (default 50) |
 | `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
 | `--std-att` | FNRGF attenuation S0,S1,... for the deviation (default 1,0.9,...,0) |
 | `--noise-m` | FNRGF-N noise compensation, 0..0.99 (default 0.7) |
 | `--adaptive-k` | adaptive layer: strength of the local contrast at each scale, k in arctan(k C) (default 0.7, as in Morgan & Druckmueller 2014) |
-| `--achf-scales` | Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in %% of the Sun's radius (default %(default)s: 0.5, 1, 3 and 10 px on the 2024 stack's Sun of 413 px, then 10%% and 20%%) |
-| `--achf-weights` | Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out (default %(default)s) |
+| `--achf-scales` | Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in % of the Sun's radius (default 0.121,0.242,0.7259,2.42,10,20: 0.5, 1, 3 and 10 px on the 2024 stack's Sun of 413 px, then 10% and 20%) |
+| `--achf-weights` | Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out (default 1,1,1,1,0,0) |
 | `--achf-part-limit` | Adaptive (ACHF): a pixel this many times brighter or darker than the corona at its height (a prominence) is a separate part, left out of the corona's kernels and filtered with its own pixels only, so no dark fringe forms round it; 0 = off (default 2) |
-| `--achf-contrast` | Adaptive (ACHF): contrast of the layer (the thesis's K2); 1 = the contrast it had on the 2024 stack at full size with the default scales (default 1) |
+| `--achf-contrast` | Adaptive (ACHF): contrast of the layer (the thesis's K2): at 1, a pixel about 1.1% brighter than its local mean (averaged over the scales by their strengths) shows at 82% grey, 1.1% darker at 18%; at 2, half that difference does; set by eye (default 1) |
 | `--noise-gate` | adaptive layer: each scale's detail counts only as far as it stands above the stack's noise at that scale (e.g. 3); 0 = off |
 | `--even` | take out this fraction of the large brightness differences round the Sun (streamers against coronal holes); 0 = off, e.g. 0.7 |
 | `--midtone` | put the inner corona's median brightness at this level with a midtones transfer curve; 0 = off, e.g. 0.6 |
-| `--shoulder` | highlight roll-off: 0 = hard white point (the brightest 0.1%% clip); e.g. 0.3 = the top 30%% of the range rolls off smoothly to white, nothing clips and colours keep their hue |
+| `--shoulder` | highlight roll-off: 0 = hard white point (the brightest 0.1% clip); e.g. 0.3 = the top 30% of the range rolls off smoothly to white, nothing clips and colours keep their hue |
 | `--flatten` | natural layer: how much of the radial fall-off to remove, 0..1; 0 = off (default), e.g. 0.8 |
 | `--saturation` | colour saturation, 0 = monochrome (default 1) |
 | `--white` | white balance: inner corona neutral (default), the camera's as-shot, or none |

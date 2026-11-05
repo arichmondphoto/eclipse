@@ -51,7 +51,9 @@ def reference() -> str:
                 flag = ", ".join(f"`{o}`" for o in a.option_strings)
             else:
                 flag = f"`{a.dest}`"
-            h = (a.help or "").replace("|", "\\|").replace("\n", " ")
+            # As --help prints it: %(default)s filled in, %% as %.
+            h = sp._get_formatter()._expand_help(a) if a.help else ""
+            h = h.replace("|", "\\|").replace("\n", " ")
             if a.default not in (None, False, argparse.SUPPRESS, "") and "default" not in h and a.option_strings:
                 h = (h + f" (default {a.default})").strip()
             rows.append(f"| {flag} | {h} |")

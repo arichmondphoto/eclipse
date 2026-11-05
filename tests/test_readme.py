@@ -22,3 +22,16 @@ def test_every_option_has_help():
                          check=True).stdout
     empty = [line for line in ref.splitlines() if line.startswith("| `") and line.rstrip().endswith("|  |")]
     assert not empty, empty
+
+
+def test_cli_reference_shows_help_as_the_command_line_does():
+    """argparse's %(default)s and %% are expanded, as `totality ... --help` prints them (they were
+    shown raw in the README, e.g. `--achf-weights ... (default %(default)s)`)."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+    from cli_reference import reference
+
+    text = reference()
+    assert "%(" not in text and "%%" not in text
+    assert "in % of the Sun's radius" in text

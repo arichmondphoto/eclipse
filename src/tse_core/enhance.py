@@ -186,17 +186,23 @@ def _attenuation(values: Optional[Sequence[float]], order: int) -> np.ndarray:
     return a
 
 
-# Fixed output scales of the filter layers (zero-centred output y shown as 0.5 + arctan(1.6 y / s) / pi).
-# Fixed, not measured on each image, so a detail box gives exactly the full-size result without
-# rendering the whole image. The values are the scales the earlier per-image stretch (99.5th
-# percentile of |y|; 99.9th for the adaptive layers) used on Andy's full-size 2024 crop (2530 px
-# square round the Sun) at the default settings, so the layers look as they did there. NRGF, FNRGF
-# and MGN outputs are normalized (z-scores, normalized contrast), so they suit any data; the ACHF's
-# is not (its Contrast setting is the thesis's K2).
+# Fixed output scales of the filter layers: a zero-centred output y is shown as
+# 0.5 + arctan(1.6 y / s) / pi, so y = s shows at 82% grey, y = -s at 18%, y = 0 at mid-grey.
+# Fixed, not measured on each image (so a detail box gives exactly the full-size result), and
+# defined in each method's own units, the same for any camera, lens or eclipse:
+#   NRGF     y = (pixel - circle mean) / circle standard deviation: s = 3.5 standard deviations
+#   FNRGF    the same with the local (Fourier) mean and deviation: s = 6.8 local deviations
+#   FNRGF-N  the deviation less Noise compensation x the noise: s = 20 of those
+#   MGN      the mean over the scales of arctan(k C): s = 1.0 radian (0.6 with the noise gate)
+#   ACHF     Contrast x the strength-weighted mean over the scales of ln(pixel / local mean):
+#            s = 0.0106, a pixel about 1.1% brighter than its local mean (at Contrast 1)
+# These are display units, not fitted to any one eclipse; each user sets the look by eye (blend
+# strengths, ACHF Contrast), as with Druckmueller's own software.
 NRGF_SPREAD = 3.5
 FNRGF_SPREAD = 6.8
 FNRGF_N_SPREAD = 20.0
 MGN_SPREAD = 1.0
+MGN_GATED_SPREAD = 0.6
 ACHF_SPREAD = 0.0106
 
 
@@ -843,7 +849,7 @@ def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: floa
     acc /= len(scales)
     # A fixed scale, not the image's own spread: stretching to the spread would bring noise back
     # up to full contrast wherever there is little real structure.
-    out = (0.5 + np.arctan(1.6 * acc / 0.6) / math.pi).astype(np.float32)
+    out = to_fixed(acc, MGN_GATED_SPREAD)
     out[~valid] = 0.0
     return out
 

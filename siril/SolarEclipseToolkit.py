@@ -1305,10 +1305,15 @@ class EnhanceTab(StepTab):
              "247 pixels (the prominences) a part of their own. Costs some time: about 3x the plain filter.",
              self._achf_form)
         _tip(self.achf_contrast, "Adaptive (ACHF) only: how strongly the layer shows its detail (the thesis's "
-             "K2, the weight of the filtered image). 1 (default) is the contrast the layer had on the 2024 stack "
-             "at full size with the default scales. Raise it when the large scales are off and the layer looks "
-             "flat; lower it when it looks harsh or when you add strength to the scales. The layer's contrast is "
-             "fixed, not measured on each picture, so the detail box shows exactly what the full-size layer will.",
+             "K2, the weight of the filtered image), set by eye as in Druckmüller's own software.\n\nAt 1 (default), "
+             "a pixel about 1.1% brighter than its surroundings (averaged over the scales by their strengths) shows "
+             "at 82% grey, and 1.1% darker at 18%; at 2 half that difference does, at 0.5 twice it. The same on "
+             "any camera, lens or eclipse, so a corona with little structure looks flatter, as it is.\n\nThe scale "
+             "strengths only set the mix of sizes; this sets the overall strength. Raise it if the layer looks "
+             "flat (for example after lowering the finest scales against grain); lower it if it looks harsh (for "
+             "example with the large scales on). The contrast is not measured on each picture, so the detail box "
+             "shows exactly what the full-size layer will. Noise is raised as much as detail: judge it in the "
+             "detail box.",
              self._achf_form)
         _tip(self.views, "Whole picture: a reduced copy of the stack (about 1400 px wide), quick to update. "
              "Hold Shift and drag on it to choose a detail box.\n\nDetail box: that box at full resolution, "

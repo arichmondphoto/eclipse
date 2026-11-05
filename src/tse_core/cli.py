@@ -171,8 +171,9 @@ def main(argv: list[str] | None = None) -> int:
                         "(a prominence) is a separate part, left out of the corona's kernels and filtered with its "
                         "own pixels only, so no dark fringe forms round it; 0 = off (default 2)")
     p.add_argument("--achf-contrast", type=float, default=1.0,
-                   help="Adaptive (ACHF): contrast of the layer (the thesis's K2); 1 = the contrast it had on the "
-                        "2024 stack at full size with the default scales (default 1)")
+                   help="Adaptive (ACHF): contrast of the layer (the thesis's K2): at 1, a pixel about 1.1%% brighter "
+                        "than its local mean (averaged over the scales by their strengths) shows at 82%% grey, 1.1%% "
+                        "darker at 18%%; at 2, half that difference does; set by eye (default 1)")
     p.add_argument("--noise-gate", type=float, default=0.0,
                    help="adaptive layer: each scale's detail counts only as far as it stands above the stack's "
                         "noise at that scale (e.g. 3); 0 = off")
