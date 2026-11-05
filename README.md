@@ -110,7 +110,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | Layers to write; each layer's blend strength (all 0 % by default) and Soft Light, Overlay or Linear (paper); **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); **Adaptive (ACHF)** as a layer (not ticked by default: slow) and the size and strength of each of its six scales (0.5, 1, 3, 10 px on the 2024 frames at strength 1; two larger scales at 0) **Separate parts at** (2x) and **Contrast** (1); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers** |
+| 4 Enhance | Layers to write; each layer's blend strength (all 0 % by default) and Soft Light, Overlay or Linear (paper); **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); **Adaptive (ACHF)** as a layer (not ticked by default: slow) and the size and strength of each of its six scales (0.5, 1, 3, 10 px on the 2024 frames at strength 1; two larger scales at 0) **Separate parts at** (2x) and **Contrast** (1); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -523,6 +523,28 @@ or shown.
 
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
+
+### Settings files
+
+**Save settings…** on the Enhance tab writes every setting of the tab to a
+JSON file you name: the layers to write, the blend strengths and modes, the
+natural layer and colour (White balance and Keep the sky too), and the MGN,
+ACHF and FNRGF settings. **Load settings…** sets the tab from such a file, on
+any project, or from the `<name>_enhance.json` written beside full-size
+layers, so the exact settings of an earlier picture can be had back. On the
+command line, `totality enhance <project> --settings <file>` starts from the
+file; options typed on the same line take its place for what they set (for
+example `--settings look.json --saturation 0.8`).
+
+The ACHF sizes are kept as fractions of the Sun's radius, so on a stack with
+a bigger or smaller Sun they stay the same size against the Sun; the other
+settings are in the methods' own units. Not saved: the detail box (it
+belongs to the project) and three internal widths in pixels. Settings a
+file does not have stay as they were, settings since removed from the
+toolkit are skipped, and the log lists both. A file from before 4 Nov 2026
+gives a different picture: the filter layers' display changed then (see
+the fixed output scales below; Adaptive (MGN) shows weaker at the same
+strength).
 
 ### The detail box
 
@@ -1063,6 +1085,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | Option | What it does |
 | --- | --- |
 | `project` | project file (run 'totality stack' on it first) |
+| `--settings` | Enhance settings file to start from (saved with 'Save settings...' on the Enhance tab, or the <name>_enhance.json written beside earlier layers); options given here as well override the file |
 | `--hdr` | HDR FITS file (default: the one saved by 'totality stack') |
 | `--output`, `-o` | output folder (default: next to the project) |
 | `--name` | output file name prefix (default: the project name) |

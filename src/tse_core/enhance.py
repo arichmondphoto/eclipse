@@ -89,7 +89,7 @@ class EnhanceParams:
     # Requirement (d): a pixel this many times brighter or darker than the corona round it (a
     # prominence, the bright rim at the limb) is a part of its own; 0 = off.
     achf_part_limit: float = 2.0
-    # Adaptive (ACHF): contrast of the layer (the thesis's K2); 1 = as tuned on the 2024 stack.
+    # Adaptive (ACHF): contrast of the layer (the thesis's K2), set by eye; see ACHF_SPREAD.
     achf_contrast: float = 1.0
     mgn_k: float = 0.7  # adaptive layer strength: k of arctan(k C), 0.7 as in Morgan & Druckmueller (2014)
     # Adaptive layer, noise-aware (0 = off):

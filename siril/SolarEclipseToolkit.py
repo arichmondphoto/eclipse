@@ -1091,6 +1091,17 @@ class EnhanceTab(StepTab):
         self.timer.setInterval(700)
         self.timer.timeout.connect(self.preview)
 
+        files = QHBoxLayout()
+        self.save_settings_btn = QPushButton("Save settings…")
+        self.save_settings_btn.clicked.connect(self.save_settings)
+        self.load_settings_btn = QPushButton("Load settings…")
+        self.load_settings_btn.clicked.connect(self.load_settings)
+        files.addWidget(self.save_settings_btn)
+        files.addWidget(self.load_settings_btn)
+        self.settings_layout.addLayout(files)
+        # Settings the window has no control for, kept from a loaded file (the FNRGF attenuations).
+        self._hidden: dict = {}
+
         lay = QGroupBox("Layers to write")
         ll = QVBoxLayout(lay)
         self.layer_checks = {}
@@ -1392,6 +1403,16 @@ class EnhanceTab(StepTab):
              "higher; noisier ones may need 0.3-0.5.", ff)
         _tip(self.preview_btn, "Runs every layer on a reduced copy of the stack (about 1400 px wide), in seconds. "
              "Nothing is written.")
+        _tip(self.save_settings_btn, "Saves every setting on this tab to a file you name: the layers to write, the "
+             "blend, the natural layer and colour, and the MGN, ACHF and FNRGF settings. Load it again on any "
+             "project, or use it on the command line with 'totality enhance --settings <file>'. The ACHF sizes are "
+             "saved as fractions of the Sun's radius, so on a stack with a bigger or smaller Sun they keep the same "
+             "size against the Sun. The detail box is not saved (it belongs to this stack).")
+        _tip(self.load_settings_btn, "Sets every setting on this tab from a file saved with 'Save settings…', or "
+             "from the <name>_enhance.json written beside full-size layers (the exact settings those layers were "
+             "made with). Settings the file does not have stay as they are, and the log lists them. A file "
+             "from before Nov 2026: the filter layers' display changed then (Adaptive (MGN) shows weaker with "
+             "the same strength), so the picture can differ from the one made with it.")
         _tip(self.run_btn, "Runs the ticked layers at full resolution and writes them, plus the blend, as "
              "16-bit TIFFs next to the project file. Takes a few minutes for a full frame.")
 
@@ -1459,7 +1480,82 @@ class EnhanceTab(StepTab):
                              achf_part_limit=self.achf_parts.value(),
                              achf_contrast=self.achf_contrast.value(),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
-                             blend_modes=modes, neutral_background=not self.keep_sky.isChecked())
+                             blend_modes=modes, neutral_background=not self.keep_sky.isChecked(), **self._hidden)
+
+    # -- settings files ------------------------------------------------------------------------------
+
+    def set_params(self, p: EnhanceParams) -> list:
+        """Every control set from ``p``; returns the settings the controls could not take as given."""
+        for k, c in self.layer_checks.items():
+            c.setChecked(k in p.layers)
+        for k, sp in self.blend.items():
+            mode = self.blend_mode[k]
+            i = mode.findData(p.blend_modes.get(k, "soft light"))
+            mode.setCurrentIndex(max(i, 0))  # first: it sets the strength's range
+            sp.setValue(int(round(100 * p.blend.get(k, 0.0))))
+        for sp, v in ((self.flatten, p.flatten), (self.shoulder, p.shoulder), (self.even, p.even),
+                      (self.midtone, p.midtone), (self.saturation, p.saturation), (self.mgn_k, p.mgn_k),
+                      (self.noise_gate, p.noise_gate), (self.achf_parts, p.achf_part_limit),
+                      (self.achf_contrast, p.achf_contrast), (self.noise_m, p.noise_m),
+                      (self.order, p.order), (self.segments, p.segments)):
+            sp.setValue(v)
+        self.white.setCurrentIndex(max(self.white.findText(p.white), 0))
+        self.keep_sky.setChecked(not p.neutral_background)
+        self.achf_frac = list(p.achf_scales)
+        for size, frac, sp, wt in zip(self.achf_size, self.achf_frac, self.achf_w, p.achf_weights):
+            size.blockSignals(True)  # only the display: the fractions are the settings
+            size.setValue(round(frac * self.sun_r_full, 2))
+            size.blockSignals(False)
+            sp.setValue(wt)
+        self._hidden = {k: getattr(p, k) for k in ("mean_attenuation", "std_attenuation") if getattr(p, k) is not None}
+        got = self.params()
+        from dataclasses import fields
+
+        off = []
+        for f in fields(EnhanceParams):
+            if f.name in W.SETTINGS_SKIP:
+                continue
+            a, b = getattr(got, f.name), getattr(p, f.name)
+            if isinstance(a, (float, int)) and isinstance(b, (float, int)):
+                same = abs(a - b) <= 1e-9 * max(1.0, abs(b))
+            else:
+                same = a == b or (isinstance(a, (tuple, list)) and list(a) == list(b))
+            if not same:
+                off.append(f"{f.name} {b!r} -> {a!r}")
+        self.changed()
+        return off
+
+    def save_settings(self) -> None:
+        ft = self.main.frames_tab
+        start = ft.project_dir() / f"{ft.project.name}_enhance_settings.json" if ft.project_path else \
+            Path.home() / "enhance_settings.json"
+        name, _ = QFileDialog.getSaveFileName(self, "Save Enhance settings", str(start), "Enhance settings (*.json)")
+        if not name:
+            return
+        try:
+            path = W.save_enhance_settings(self.params(), name)
+        except OSError as exc:
+            self.log.appendPlainText(f"Could not save the settings: {exc}")
+            return
+        self.log.appendPlainText(f"Settings saved to {path}")
+
+    def load_settings(self) -> None:
+        ft = self.main.frames_tab
+        start = str(ft.project_dir()) if ft.project_path else str(Path.home())
+        name, _ = QFileDialog.getOpenFileName(self, "Load Enhance settings", start, "Enhance settings (*.json)")
+        if not name:
+            return
+        try:
+            p, notes = W.load_enhance_settings(name, base=self.params())
+        except W.WorkflowError as exc:
+            self.log.appendPlainText(str(exc))
+            return
+        off = self.set_params(p)
+        self.log.appendPlainText(f"Settings loaded from {name}")
+        for n in notes:
+            self.log.appendPlainText(f"  {n}")
+        if off:
+            self.log.appendPlainText("  outside what the controls here allow, so changed: " + "; ".join(off))
 
     def changed(self, *_args) -> None:
         self._stale = {"whole", "detail"}

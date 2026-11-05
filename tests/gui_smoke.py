@@ -88,6 +88,40 @@ assert Path(et.outputs["blend"]).name == "custom_blend.tif" and Path(et.outputs[
 print("written:", sorted(et.outputs))
 assert "nrgf" not in et.outputs and "blend" in et.outputs and all(Path(v).exists() for v in et.outputs.values())
 assert "enhance" in EventProject.load(path).parameters
+# Save settings... and Load settings...: every control comes back as saved.
+import os
+from dataclasses import replace as _replace
+saved_params = et.params()
+_stub_env = {k: os.environ.get(k) for k in ("STUB_SAVE", "STUB_OPEN")}
+os.environ["STUB_SAVE"] = str(Path(sys.argv[1]) / "look")
+et.save_settings()
+assert (Path(sys.argv[1]) / "look.json").exists()
+other = _replace(saved_params, flatten=0.15, saturation=0.4, white="none", neutral_background=not saved_params.neutral_background,
+                 achf_contrast=2.2, blend={"natural": 1.0, "nrgf": 0.3}, blend_modes={"nrgf": "overlay"},
+                 achf_scales=tuple(v * 1.5 for v in saved_params.achf_scales), layers=("natural",))
+assert et.set_params(other) == [] and et.params() == other  # (the stand-in's controls take any value)
+os.environ["STUB_OPEN"] = str(Path(sys.argv[1]) / "look.json")
+et.load_settings()
+assert et.params() == saved_params, (et.params(), saved_params)
+assert "Settings loaded from" in et.log.toPlainText()
+# The settings beside the layers written above load the same way.
+info = G.W.resolve(path, EventProject.load(path).parameters["enhance"]["info"])
+os.environ["STUB_OPEN"] = info
+et.set_params(other)
+et.load_settings()
+assert f"Settings loaded from {info}" in et.log.toPlainText()
+assert et.params().flatten == json.loads(Path(info).read_text())["params"]["flatten"] != other.flatten
+os.environ["STUB_OPEN"] = ""
+before = et.params()
+et.load_settings()  # no file chosen: nothing happens
+assert et.params() == before
+for k, v in _stub_env.items():  # as the rest of this script expects
+    if v is None:
+        os.environ.pop(k, None)
+    else:
+        os.environ[k] = v
+assert len(et.save_settings_btn.toolTip()) > 100 and len(et.load_settings_btn.toolTip()) > 100
+
 # Detail box: Shift-drag on the reduced picture (here the signal the view sends); the box is rendered
 # at full resolution and is exactly the same pixels as the full-size blend just written.
 import tifffile

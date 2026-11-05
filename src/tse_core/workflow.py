@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -454,6 +455,115 @@ def _scaled_params(params, scale: float):
     if params.mgn_scales:
         return replace(params, mgn_scales=[s * scale for s in params.mgn_scales])
     return params
+
+
+# -- Enhance settings files -------------------------------------------------------------------------
+
+SETTINGS_KIND = "totality-enhance-settings"
+SETTINGS_VERSION = 1
+# Not saved: sizes in pixels of one stack (the ACHF sizes are fractions of the Sun's radius, so they
+# are saved), and the detail box, which belongs to the project.
+SETTINGS_SKIP = ("mgn_scales", "moon_margin_px", "ring_smooth")
+_REMOVED = {"strands": "Smooth along scales (removed Nov 2026)", "mgn_skip_fine": "Skip finest scales (removed Nov 2026)"}
+
+
+def enhance_settings(params) -> dict:
+    """The Enhance settings as saved: every setting but those of one stack (``SETTINGS_SKIP``)."""
+    out = {}
+    for k, v in asdict(params).items():
+        if k in SETTINGS_SKIP:
+            continue
+        out[k] = list(v) if isinstance(v, tuple) else v
+    return out
+
+
+def save_enhance_settings(params, path) -> Path:
+    """Write the Enhance settings to ``path`` (JSON), to load again with :func:`load_enhance_settings`."""
+    from . import __version__ as version
+
+    path = Path(path)
+    if path.suffix.lower() != ".json":
+        path = path.with_suffix(".json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc = {"kind": SETTINGS_KIND, "version": SETTINGS_VERSION, "toolkit": version,
+           "saved": datetime.now().isoformat(timespec="seconds"), "settings": enhance_settings(params)}
+    path.write_text(json.dumps(doc, indent=2, default=float), encoding="utf-8")
+    return path
+
+
+def load_enhance_settings(path, base=None):
+    """Enhance settings from a file written by :func:`save_enhance_settings` or from the
+    ``<name>_enhance.json`` written beside full-size layers. Settings missing from the file keep
+    ``base``'s values (default: the defaults). Returns (EnhanceParams, notes)."""
+    from dataclasses import fields, replace
+
+    from .enhance import EnhanceParams, LAYERS, blend_mode_name
+
+    path = Path(path)
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise WorkflowError(f"Could not read the settings file {path.name}: {exc}") from exc
+    if isinstance(doc, dict) and doc.get("kind") == SETTINGS_KIND:
+        found = doc.get("settings")
+        if int(doc.get("version", 1)) > SETTINGS_VERSION:
+            raise WorkflowError(f"{path.name} was written by a newer version of the toolkit; update it to load this file.")
+    elif isinstance(doc, dict) and isinstance(doc.get("params"), dict):
+        found = doc["params"]  # the info file written with the layers
+    else:
+        raise WorkflowError(f"{path.name} is not an Enhance settings file (nor the _enhance.json written with layers).")
+    if not isinstance(found, dict):
+        raise WorkflowError(f"{path.name} holds no settings.")
+    base = base or EnhanceParams()
+    names = {f.name for f in fields(EnhanceParams)} - set(SETTINGS_SKIP)
+    notes, kw = [], {}
+    ignored = [_REMOVED.get(k, k) for k in found if k not in names and k not in SETTINGS_SKIP]
+    if ignored:
+        notes.append("not used (no longer in the toolkit): " + ", ".join(ignored))
+    missing = sorted(names - set(found))
+    if missing:
+        notes.append("not in the file, left as they were: " + ", ".join(missing))
+
+    def bad(k, v):
+        return WorkflowError(f"{path.name}: setting {k} = {v!r} is not valid")
+
+    for k in names & set(found):
+        v = found[k]
+        try:
+            if k == "layers":
+                v = tuple(str(x) for x in v)
+                if any(x not in LAYERS for x in v):
+                    raise bad(k, v)
+            elif k in ("achf_scales", "achf_weights"):
+                v = tuple(float(x) for x in v)
+                if len(v) != 6 or any(x < 0 for x in v) or (k == "achf_scales" and min(v) <= 0):
+                    raise bad(k, v)
+            elif k in ("mean_attenuation", "std_attenuation"):
+                v = None if v is None else tuple(float(x) for x in v)
+            elif k == "blend":
+                v = {str(a): float(b) for a, b in dict(v).items()}
+                if any(a not in LAYERS for a in v) or any(b < 0 for b in v.values()):
+                    raise bad(k, v)
+            elif k == "blend_modes":
+                v = {str(a): blend_mode_name(b) for a, b in dict(v).items()}
+                if any(m not in ("soft light", "overlay", "linear") for m in v.values()):
+                    raise bad(k, v)
+            elif k == "white":
+                v = str(v)
+                if v not in ("corona", "camera", "none"):
+                    raise bad(k, v)
+            elif k == "neutral_background":
+                v = bool(v)
+            elif k in ("segments", "order"):
+                v = int(v)
+            else:
+                v = float(v)
+        except WorkflowError:
+            raise
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise bad(k, v) from exc
+        kw[k] = v
+    return replace(base, **kw), notes
 
 
 # The detail box: at most this many full-size pixels a side, so it renders in seconds.

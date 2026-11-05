@@ -141,7 +141,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     p = sub.add_parser("enhance", help="reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend")
+    enhance_parser = p
     p.add_argument("project", help="project file (run 'totality stack' on it first)")
+    p.add_argument("--settings", help="Enhance settings file to start from (saved with 'Save settings...' on the "
+                                      "Enhance tab, or the <name>_enhance.json written beside earlier layers); "
+                                      "options given here as well override the file")
     p.add_argument("--hdr", help="HDR FITS file (default: the one saved by 'totality stack')")
     p.add_argument("--output", "-o", help="output folder (default: next to the project)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
@@ -161,10 +165,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--adaptive-k", type=float, default=0.7,
                    help="adaptive layer: strength of the local contrast at each scale, k in arctan(k C) "
                         "(default 0.7, as in Morgan & Druckmueller 2014)")
-    p.add_argument("--achf-scales", default=",".join(f"{100 * v:.4g}" for v in ACHF_SCALES),
+    p.add_argument("--achf-scales",
                    help="Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in %% of "
-                        "the Sun's radius (default %(default)s: 0.5, 1, 3 and 10 px on the 2024 stack's Sun of 413 px, then 10%% "
-                        "and 20%%)")
+                        "the Sun's radius (default " + ",".join(f"{100 * v:.4g}" for v in ACHF_SCALES)
+                        + ": 0.5, 1, 3 and 10 px on the 2024 stack's Sun of 413 px, then 10%% and 20%%)")
     p.add_argument("--achf-weights", default=",".join(f"{v:g}" for v in ACHF_WEIGHTS),
                    help="Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out "
                         "(default %(default)s)")
@@ -319,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stack":
         return cmd_stack(args)
     if args.command == "enhance":
-        return cmd_enhance(args)
+        return cmd_enhance(args, given_options(enhance_parser, sys.argv[1:] if argv is None else argv))
     if args.command == "earthshine":
         return cmd_earthshine(args)
     if args.command == "final":
@@ -697,26 +701,78 @@ def _floats(text):
     return [float(v) for v in text.split(",") if v.strip()] if text else None
 
 
-def cmd_enhance(args) -> int:
-    from .enhance import EnhanceParams
-    from .workflow import WorkflowError, enhance_project, parse_blend, parse_blend_modes, parse_layers
+# Enhance options and the settings they set (the rest, such as --output, are not settings).
+ENHANCE_OPTION_SETTINGS = {
+    "layers": ("layers",), "segments": ("segments",), "order": ("order",), "mean_att": ("mean_attenuation",),
+    "std_att": ("std_attenuation",), "noise_m": ("noise_m",), "flatten": ("flatten",), "shoulder": ("shoulder",),
+    "even": ("even",), "midtone": ("midtone",), "noise_gate": ("noise_gate",), "adaptive_k": ("mgn_k",),
+    "achf_weights": ("achf_weights",), "achf_scales": ("achf_scales",), "achf_part_limit": ("achf_part_limit",),
+    "achf_contrast": ("achf_contrast",), "saturation": ("saturation",), "white": ("white",),
+    "blend": ("blend", "blend_modes"), "keep_background_colour": ("neutral_background",),
+}
+ENHANCE_NOT_SETTINGS = {"help", "project", "hdr", "output", "name", "format", "quiet", "settings"}
 
-    try:
-        layers = parse_layers(args.layers)
-        blend = parse_blend(args.blend)
-        blend_modes = parse_blend_modes(args.blend)
-    except WorkflowError as exc:
-        print(exc)
-        return 1
+
+def given_options(parser: argparse.ArgumentParser, argv: list) -> set:
+    """The ``dest`` of each option typed in ``argv`` (also abbreviated, as argparse allows)."""
+    opts = {s: a.dest for a in parser._actions for s in a.option_strings}
+    given = set()
+    for tok in argv:
+        if not tok.startswith("-") or tok == "-":
+            continue
+        name = tok.split("=", 1)[0]
+        if name in opts:
+            given.add(opts[name])
+        elif name.startswith("--"):
+            hits = {d for s, d in opts.items() if s.startswith(name)}
+            if len(hits) == 1:
+                given |= hits
+    return given
+
+
+def enhance_params(args, given: set | None = None):
+    """The Enhance settings from the command line: from ``--settings`` if given, with every option
+    typed on the command line (``given``) taking its place; without a file, the options alone.
+    Returns (EnhanceParams, notes)."""
+    from dataclasses import replace
+
+    from .enhance import EnhanceParams
+    from .workflow import load_enhance_settings, parse_blend, parse_blend_modes, parse_layers
+
+    layers = parse_layers(args.layers)
+    blend = parse_blend(args.blend)
+    blend_modes = parse_blend_modes(args.blend)
     params = EnhanceParams(layers=layers, segments=args.segments, order=args.order,
                            mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
                            noise_m=args.noise_m, flatten=args.flatten, shoulder=args.shoulder, even=args.even, midtone=args.midtone, noise_gate=args.noise_gate,
                            mgn_k=args.adaptive_k, achf_weights=_six(args.achf_weights, "--achf-weights"),
-                           achf_scales=tuple(v / 100.0 for v in _six(args.achf_scales, "--achf-scales", positive=True)),
+                           achf_scales=(tuple(ACHF_SCALES) if args.achf_scales is None else
+                                        tuple(v / 100.0 for v in _six(args.achf_scales, "--achf-scales", positive=True))),
                            achf_part_limit=args.achf_part_limit, achf_contrast=args.achf_contrast,
                            saturation=args.saturation,
                            white=args.white, blend=blend, blend_modes=blend_modes,
                            neutral_background=not args.keep_background_colour)
+    if not args.settings:
+        return params, []
+    base, notes = load_enhance_settings(args.settings)
+    over = {f: getattr(params, f) for d in (given or set()) for f in ENHANCE_OPTION_SETTINGS.get(d, ())}
+    if over:
+        notes.append("from the command line instead of the file: " + ", ".join(sorted(over)))
+    return replace(base, **over), notes
+
+
+def cmd_enhance(args, given: set | None = None) -> int:
+    from .workflow import WorkflowError, enhance_project
+
+    try:
+        params, loaded = enhance_params(args, given)
+    except WorkflowError as exc:
+        print(exc)
+        return 1
+    if args.settings:
+        print(f"Settings from {args.settings}")
+        for n in loaded:
+            print(f"  {n}")
     out, code = _run(enhance_project, args.project, params, hdr_file=args.hdr, output=args.output,
                      name=args.name, fmt=args.format, quiet=args.quiet)
     if code:
