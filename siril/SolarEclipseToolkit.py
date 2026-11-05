@@ -842,8 +842,6 @@ class AlignTab(StepTab):
         f2 = QFormLayout(opts)
         self.rotation = QComboBox()
         self.rotation.addItems(["drift", "per-frame", "none"])
-        self.rotation.setToolTip("Field rotation: a smooth drift over time (tracking mounts), measured per frame, "
-                                 "or none")
         f2.addRow("Rotation:", self.rotation)
         self.any_angle = QCheckBox("Search any rotation and scale (alt-az mounts)")
         f2.addRow(self.any_angle)
@@ -853,10 +851,16 @@ class AlignTab(StepTab):
              "true centre. They are entered once, on the Frames tab, where they also give the contact times.")
         _tip(self.mirrored, "Tick for telescopes used with a star diagonal, which mirror the image. Camera lenses "
              "do not. It changes where the Sun's centre is computed to be.")
-        _tip(self.rotation, "Field rotation between frames. drift (default): a smooth change over time, right "
-             "for tracking mounts. per-frame: measured separately for each frame. none: no rotation.", f2)
-        _tip(self.any_angle, "Search for large rotations and scale changes, for example from an alt-az mount. "
-             "Slower; leave off for tracking mounts.")
+        _tip(self.rotation, "Field rotation between frames.\n\ndrift (default): one smooth rotation over time, "
+             "fitted to every frame's measurement (frames weighted by how reliable they are) and applied only when "
+             "it is statistically real. Right whenever the camera was not touched during totality, on any mount: "
+             "the sky's own field rotation changes smoothly. The very short and long exposures, whose own "
+             "measurement is shakiest, get the fitted value.\n\nper-frame: each frame keeps its own measured "
+             "rotation, no smoothing and no test. Only for a rotation that jumps: the camera bumped, re-aimed or "
+             "turned between frames.\n\nnone: shifts only.", f2)
+        _tip(self.any_angle, "Search for large rotations and scale changes first (several degrees, for example "
+             "from an alt-az mount or a camera turned between frames), before the fine measurement. Slower; leave "
+             "off when the rotation is small (equatorial mounts, a short totality).")
         run = QPushButton("Align frames")
         run.clicked.connect(self.run)
         self.run_buttons.append(run)

@@ -10,8 +10,9 @@ layer. It runs as a script with its own window inside
 The methods come from Druckmüller (2009, phase correlation alignment),
 Druckmüller, Rušin & Minarovjech (2006, Moon-aware HDR composition),
 Druckmüllerová, Morgan & Habbal (2011, the Fourier normalizing-radial-graded
-filter and the Sun's centre), Morgan, Habbal & Woo (2006, NRGF) and Morgan &
-Druckmüller (2014, multi-scale Gaussian normalization).
+filter and the Sun's centre), Morgan, Habbal & Woo (2006, NRGF), Morgan &
+Druckmüller (2014, multi-scale Gaussian normalization) and H. Druckmüllerová's
+PhD thesis (2013, the adaptive circular high-pass filter).
 
 Works on any total solar eclipse. Eclipse geometry comes from NASA's Besselian
 elements for any eclipse from 1600 to 2400.
@@ -23,7 +24,7 @@ elements for any eclipse from 1600 to 2400.
 | 1 Frames | RAW inventory, bracket detection, lensfun or own-flats vignetting, calibration planning, project folders | done |
 | 2 Align | Lunar limb, phase correlation alignment, field rotation, the Sun's centre | done |
 | 3 Stack | Moon-aware linear HDR stacking with measured brightness matching | done |
-| 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N and adaptive layers; Soft Light / Overlay / Linear (paper) blend | done |
+| 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N, Adaptive (MGN) and Adaptive (ACHF) layers; Soft Light / Overlay / Linear (paper) blend; full-resolution detail box; settings files | done |
 | 5 Earthshine | Moon-aligned stack of the long exposures; glare removed; the Moon put into the HDR stack and stretched with the corona | done (checked on the 2024 data) |
 | 6 Prominences | Found by colour at the limb; transparent layer put on top | done (checked on a reduced copy of real data) |
 
@@ -108,9 +109,9 @@ The window has one tab per step, and each step saves into the project file:
 | Tab | What you do | What you see |
 | --- | --- | --- |
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
-| 2 Align | Whether the optics mirror the image; the rotation model (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
+| 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | Layers to write; each layer's blend strength (all 0 % by default) and Soft Light, Overlay or Linear (paper); **Natural layer and colour:** flatten, highlight roll-off, evenness, midtone (all off by default), saturation, white balance, sky removal; **Adaptive layer (MGN):** strength (0.7, the paper's) and noise gate (off); **Adaptive (ACHF)** as a layer (not ticked by default: slow) and the size and strength of each of its six scales (0.5, 1, 3, 10 px on the 2024 frames at strength 1; two larger scales at 0) **Separate parts at** (2x) and **Contrast** (1); FNRGF order, segments and noise compensation | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
+| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper); **Natural layer and colour:** Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k) and Noise gate (off); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.5, 1, 3, 10 px on the 2024 frames at strength 1; two larger scales at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -159,9 +160,9 @@ The command is `totality` (it was `tse` before 31 Oct 2026; run
 A whole event, from a project folder:
 
 ```bash
-totality inventory "Eclipse 2024"                       # reads lights/, writes "Eclipse 2024/Eclipse 2024.json"
+totality inventory "Eclipse 2024" --lat 36.9422 --lon -90.3343 --elev 110   # reads lights/, writes "Eclipse 2024/Eclipse 2024.json"
 P="Eclipse 2024/Eclipse 2024.json"
-totality align "$P" --lat 36.9422 --lon -90.3343 --elev 110
+totality align "$P"                                      # the site from the project
 totality stack "$P"
 totality enhance "$P" --blend natural=1,fnrgf_n=0.7,adaptive=0.1:overlay
 totality earthshine "$P"
@@ -206,12 +207,26 @@ applies the calibration plan, and then:
    * frames are aligned against a reference that grows from the middle
      exposure outwards, then every frame against all the others, and the
      whole set is re-anchored to the middle exposure at the end.
-3. **Field rotation** is measured against the middle exposure and modelled
-   as a smooth drift over time; it is applied only when statistically
-   significant. Measuring and correcting repeat until nothing significant is
-   left; each frame's note gives the total rotation applied (deg/min and over
-   the sequence) and what was left afterwards. Use `--rotation per-frame` or `--any-angle` for mounts that
-   do not track.
+3. **Field rotation** is measured for every frame against the middle
+   exposure. **drift** (the default, **Rotation** on the Align tab) fits one
+   rotation rate through those measurements (rotation = rate x time since
+   the middle exposure; robust, each frame weighted by how reliable its
+   measurement was) and applies it only when the rate is at least three times
+   its uncertainty; every frame gets the fitted value, so the very short and
+   very long exposures, whose own measurements are the shakiest, borrow
+   accuracy from the rest. Measuring and correcting repeat until nothing
+   significant is left; each frame's note gives the total rotation applied
+   (deg/min and over the sequence) and what was left afterwards. Without the
+   frames' capture times a single median rotation is used. The sky's field
+   rotation changes smoothly on any mount (imperfect polar alignment, an
+   alt-az mount, a fixed tripod), so drift is right whenever the camera was
+   not touched during totality. **per-frame** keeps each frame's own
+   measurement, unsmoothed and untested (a frame whose measurement failed
+   gets none): only for a rotation that jumps, when the camera was bumped,
+   re-aimed or turned between frames. **none** applies shifts only. For a
+   large rotation (several degrees: an alt-az mount over a long totality, a
+   turned camera), also tick **Search any rotation and scale**
+   (`--any-angle`), which finds it coarsely before the fine measurement.
 4. **Finds the Sun's centre** (Druckmüllerová et al. 2011, appendix): the
    Moon's track across the aligned frames is fitted to the eclipse
    geometry computed for your site from NASA Besselian elements. This also
@@ -247,8 +262,9 @@ analysis window follow the Sun's size in the image (tested from a 20 px to a
 diagonal give a mirror image. The Moon's track cannot tell the two apart,
 and the choice moves the computed Sun centre by twice the closest approach
 of the Sun's and Moon's centres: negligible near the central line, tens of
-pixels near the edge of the path. Use `--mirrored` for mirrored optics; the
-tool reports both answers and warns when the difference matters.
+pixels near the edge of the path. Tick **Optics mirror the image** on the
+Align tab (`--mirrored`) for mirrored optics; the tool reports both answers
+and warns when the difference matters.
 
 `inventory` prints the frame table, the detected brackets (step size, range,
 missing shutter speeds), and the calibration plan: which vignetting source
@@ -278,8 +294,7 @@ clock never affects them.
 Each frame leaves out the corona just round its own Moon (the limb is
 blurred there and the Moon moves between frames). That margin is scaled to
 the Moon's size in the image: 0.7% of its radius, at least 2 px, so 3 px for
-the 2024 D850 at 400 mm and about 7.5 px at 1000 mm (`moon_margin_px` sets
-it by hand). The log names it.
+the 2024 D850 at 400 mm and about 7.5 px at 1000 mm. The log names it.
 
 ```bash
 totality stack eclipse2024.json            # uses the alignment saved by 'totality align'
@@ -317,8 +332,8 @@ sky**). The stack log's table lists the offsets per colour.
 
 **Merging.** Each pixel is the inverse-variance weighted mean of the frames'
 radiance estimates. Weights fall to zero approaching saturation and inside
-each frame's own Moon (plus 3 px), so the moving Moon never darkens the
-inner corona. Inside the Moon as it was in the Moon frame (the alignment
+each frame's own Moon (plus the margin above), so the moving Moon never
+darkens the inner corona. Inside the Moon as it was in the Moon frame (the alignment
 reference unless `--moon-frame` says otherwise) the result is that frame's
 data, which keeps the lunar limb sharp. Pixels that are saturated or covered
 in every frame (rare with 1/3-stop brackets) take the shortest exposure that
@@ -346,7 +361,9 @@ A full 45-megapixel frame needs about 3-5 GB of free memory at the peak.
 | `<name>_hdr.fit` | linear 32-bit RGB in units of the reference exposure, camera colour; header has `SUNX/SUNY/SUNR`, `MOONX/MOONY/MOONR`, `PIXSCALE`, `NORTHANG` and the crop origin (0, 0 for the full frame) |
 | `<name>_weight.fit` | sum of weights per pixel (where the data came from) |
 | `<name>_preview.tif` | 16-bit asinh stretch with the camera white balance, for a quick look only |
-| `<name>_stack.json` | gains, offsets and settings |
+| `<name>_stack.json` | each frame's gain and offsets (per colour), and the settings |
+| `<name>_vignetting.fit` | the vignetting correction divided out of the reference frame, 1/8 size (1.0 = the middle) |
+| `<name>_flat_vs_profile_<settings>.fit` | with **Master flat + compare** only: the master flat over the smooth profile (dark spots are dust) |
 
 ## Enhancement (Phase 4)
 
@@ -366,7 +383,7 @@ pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
 | `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the log image: fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
 | `achf` | **Adaptive (ACHF)**: Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; defined in Druckmüllerová 2013): the log image minus its local mean under a kernel that follows the circles round the Sun, at its own six scales (size and strength each), Moon left out. Written only on request (`--layers ...,achf`): a few minutes on a full frame |
-| `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light (or Overlay) at the given opacities; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay`, or `:linear` for the papers' weighted average (below) (`--blend none` to skip); the same thing you would do with layers in Photoshop |
+| `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light, Overlay or Linear (paper) at the given strengths; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay`, or `:linear` for the papers' weighted average (below) (`--blend none` to skip); the same thing you would do with layers in Photoshop |
 
 **Names used:** NRGF = Normalizing-Radial-Graded Filter; FNRGF = Fourier
 Normalizing-Radial-Graded Filter; FNRGF-N = FNRGF with Noise compensation;
@@ -380,7 +397,7 @@ filter's own normalization for the NRGF family). Run
 only gentle curves or levels on the results.
 
 In Photoshop: `natural` at the bottom in Normal mode, `fnrgf_n` above it in
-Soft Light (40-70 %), `adaptive` above that in Soft Light (20-40 %); Overlay
+Soft Light (40-70 %), `adaptive` above that in Soft Light (50-80 %); Overlay
 is a stronger alternative at lower opacity. The filter layers are centred on
 mid-grey, which both modes treat as "no change"; desaturate them so the
 colour comes from the natural layer.
@@ -426,8 +443,8 @@ to grey where the signal is buried in noise or no brighter than the
 uncertainty of the removed sky. The Moon is black in these layers; the
 Earthshine step fills it.
 
-Highlights: by default the natural layer and the blend set a white point
-at the brightest 0.1%, which clips the inner corona by the limb and bright
+Highlights: by default the natural layer sets a white point at the
+brightest 0.1% (the blend keeps it), which clips the inner corona by the limb and bright
 prominences to flat white or flat pink. `--shoulder 0.3` (**Highlight
 roll-off** on the Enhance tab) rolls the top 30% of the range off smoothly
 instead: nothing clips, and colours keep their hue. On the 2024 stack with
@@ -444,7 +461,8 @@ transfer curve, for a light grey corona. Both off by default.
 Noise in the adaptive layer: at its finest scales a stack is mostly noise
 (on the 2024 stack, structure stood only 2x and 3.6x above the noise at
 2.5 and 5 px, against 9-250x at 10-83 px), and the adaptive filter turns it
-into grain. `--noise-gate 3` (**Adaptive noise gate**) weights each scale's
+into grain. `--noise-gate 3` (**Noise gate** in the **Adaptive layer (MGN)**
+box) weights each scale's
 detail by how far it stands above the noise at that scale (a Wiener gain).
 The noise at each scale comes from a noise image with the stack's own noise
 level (from its weights) and spatial spectrum (measured in the faint corona:
@@ -506,7 +524,7 @@ its own; its kernels use only its own part, and the corona's leave it out.
 Without it a bright prominence darkened the corona beside it (a dark fringe;
 seen on the 2024 crop); with it the fringe is gone, while 247 pixels (the
 prominences) were made a part and fine coronal structure was unchanged. It
-costs about 3x the plain filter's time (34 s against 10 s on the crop). A
+costs about 3x the plain filter's time (28 s against 9 s on the crop). A
 thin bright line right at the limb remains: it is in the stack itself (MGN
 shows it too), whose first ~3 px outside the limb hold few frames; the final
 image takes the corona from there out.
@@ -516,10 +534,12 @@ share (K1 in h = K1 f + K2 g). The later refinements in Druckmüller's Corona
 published and not reproduced. It amplifies detail without normalizing its
 contrast, so it keeps more of the difference between bright and faint
 structure than Adaptive (MGN), and more noise in the faint corona. On the
-2024 crop (2530 px square) it took 61 s against 3 s for Adaptive (MGN); a full
-frame takes a few minutes, so it is off unless ticked (Enhance tab) or listed
-in `--layers`, and the preview computes it only when it is ticked, blended
-or shown.
+2024 crop (2530 px square, 6.4 megapixels) it took 28 s at the default
+settings against 4 s for Adaptive (MGN), and 111 s with the two large scales
+on (Nov 2026, on the development machine); a full 45-megapixel frame has 7x
+the pixels, so it is off unless ticked (Enhance tab) or listed in
+`--layers`, and the preview computes it only when it is ticked, blended or
+shown.
 
 FNRGF settings: `--order` (10), `--segments` (50), `--mean-att` and
 `--std-att` (attenuation factors A0..A10 and S0..S10, default 1, 0.9, ..., 0).
@@ -707,8 +727,8 @@ the map, not your data)".
 **How the Moon meets the corona.** A perfectly clean disc cut on a circle
 looks pasted in, so the layer is built like a photograph of the limb:
 
-* *The real limb.* The Moon-aligned stack reaches `--limb-reach` (6) px past
-  the limb, and over the last few pixels and beyond the layer shows that
+* *The real limb.* The Moon-aligned stack reaches 6 px past the limb (an
+  internal setting, not an option), and over the last few pixels and beyond the layer shows that
   data itself, compressed logarithmically so the corona just outside comes
   to full brightness. The edge therefore has the Moon's own outline
   (mountains, valleys) and softness, and runs into the corona; the layer
@@ -791,8 +811,9 @@ you to stack the earthshine again. Enhance does not need running again.
   is turned into a noise level from its own pixel scatter, so the stretch
   knows how good the Moon's pixels are. (With the HDR's one-frame weights the
   colour inside the limb was faded to grey as if it were noise.)
-* *Filter layers.* NRGF, FNRGF and adaptive have no data on the Moon, so in
-  the blend they fade out over the 4 px outside the limb.
+* *Filter layers.* NRGF, FNRGF and both adaptive layers have no data on the
+  Moon, so in the blend they fade out over the 4 px outside the limb (with
+  Linear (paper), their weights do).
 * *The lunar surface.* The seas and highlands (glare removed, from
   `<name>_moon_surface.fit`) are added inside with screen at `--strength`
   (1 = as made by the earthshine step), so near the limb, where the Moon's
@@ -1228,11 +1249,25 @@ added to the tests.
   orientation found, maria by the limb recovered, a false feature hardly
   leaking, a wrong map refused.
 * `tests/test_viewzoom.py` checks the zoom and pan of the picture views.
-* `tests/test_readme.py` checks that the command-line reference below is
+* `tests/test_region.py` checks that a detail box on the real 2024 stack is
+  the full-size result there (through the limb, at a frame corner, in the
+  outer corona; every layer and the blend).
+* `tests/test_paper_mapping.py` checks the MGN and NRGF-family layers
+  against the papers' own formulas, and `tests/test_achf.py` the ACHF
+  against the thesis (circular kernel, the Moon left out, scale strengths,
+  the parts rule).
+* `tests/test_calibration_frames.py` and `tests/test_stack_colour_offsets.py`
+  run the real Stack step on simulated RAW frames: flats, darks and bias
+  used (all three flat modes, an uneven light panel), and blue additive
+  light taken off each colour.
+* `tests/test_enhance_settings.py` checks settings files and `--settings`.
+* `tests/test_readme.py` checks that the command-line reference above is
   complete and up to date.
 * `tests/test_gui.py` runs every tab of the Siril window's logic end to end
   with a small stand-in for PyQt6 (`tests/qtstub`), so it needs no display;
-  layout and rendering are only checked by running it in Siril.
+  `tests/gui_smoke.py` drives the window the same way through whole steps
+  (`PYTHONPATH=src:tests:tests/qtstub python tests/gui_smoke.py <folder>`).
+  Layout, painting and the mouse are only checked by running it in Siril.
 
 ## Licence
 
