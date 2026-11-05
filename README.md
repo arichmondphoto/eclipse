@@ -503,7 +503,8 @@ size and strength of each scale** on the Enhance tab; `--achf-scales` in %
 of the Sun's radius and `--achf-weights`, finest first), as the sliders of
 Druckmüller's Corona program did. Defaults: sizes of 0.121%, 0.242%, 0.726%
 and 2.42% of the Sun's radius at strength 1, and 10% and 20% at strength 0
-(on a Sun of 400-450 px in radius the first four are about 0.5, 1, 3 and
+(for a frame of reference: with a 400 mm lens on a 45-megapixel full-frame
+camera, a Sun about 410 px in radius, the first four are about 0.5, 1, 3 and
 10 px, within the thesis's 0.5-64 px). Sizes are kept as fractions of the
 Sun's radius, so they suit any lens; the window shows them in pixels of the
 open stack. 0 leaves a scale out and saves its
@@ -747,6 +748,15 @@ looks pasted in, so the layer is built like a photograph of the limb:
 * *Grain in the filled edge.* The last pixels, which are only noise and are
   filled from just inside, get grain matching the surface next to them
   (`--no-edge-grain` to leave them smooth).
+
+**Pixel settings.** Smoothing (1 px), edge smoothing (3 px), edge softening
+(1.5 px) and the suggested edge-preserving smoothing (3-5 px) are in
+pixels, and so are two internal widths (the layer reaches 6 px past the
+limb; the corona layers' black disc ends 1.5 px past it). They were chosen
+for a 400 mm lens on a 45-megapixel full-frame camera, where the Sun is
+about 410 px in radius; the Align log's "Sun centre" line gives yours. With
+a longer lens or smaller pixels, raise the settings in proportion; with a
+shorter lens, lower them.
 
 The shown layer gets a little extra smoothing (up to `--edge-smooth`, 3 px)
 only where the noise is high: the last pixels by the limb, where the long

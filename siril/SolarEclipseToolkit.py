@@ -1331,7 +1331,8 @@ class EnhanceTab(StepTab):
                  "a fraction of the Sun's radius, so the same setting suits another lens or camera (the pixels shown "
                  "follow the open stack). Defaults: 0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius, then 10% "
                  "and 20% for the last two, which start switched off; the boxes show what that is in pixels of the "
-                 "open stack.\n\n"
+                 "open stack. For a frame of reference: with a 400 mm lens on a 45-megapixel full-frame camera (Sun "
+                 "about 410 px in radius) the first four are about 0.5, 1, 3 and 10 px.\n\n"
                  "The preview is a reduced copy (about 1/6 for a full frame): scales under about 6 px are finer than "
                  "its pixels and hardly show there; they show in 'Write full-size layers'.", self._achf_form)
             _tip(sp, "Adaptive (ACHF) only: how much this scale counts, like the frequency sliders of Druckmüller's "
@@ -1964,7 +1965,10 @@ class EarthshineTab(StepTab):
              "the corona is a gentle gradient, so 2 (default) is usually right. Higher removes uneven glare but "
              "also starts removing large maria; 1 removes a straight gradient only.", f)
         _tip(self.smooth, "Softens the noise in the layer, in pixels. Earthshine is faint, so a little smoothing "
-             "(default 1) helps; 0 for none, 2-3 for very noisy data.", f)
+             "(default 1) helps; 0 for none, 2-3 for very noisy data."
+             "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
+             "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
+             "smaller pixels, raise them in proportion; with a shorter lens, lower them.", f)
         _tip(self.limb_dark, "A vignette across the Moon: the middle stays at full brightness and it darkens "
              "gradually all the way out to the edge. 0 = evenly lit, 0.6 = the edge at 40% of the middle (the "
              "default), 1 = fading to black at the edge. Removing the glare also removes the Moon's overall "
@@ -1975,7 +1979,10 @@ class EarthshineTab(StepTab):
              "clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
              "softness, not a drawn circle.", fl)
         _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "
-             "has in your frames. Default 1.5; 0 = none.", fl)
+             "has in your frames. Default 1.5; 0 = none."
+             "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
+             "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
+             "smaller pixels, raise them in proportion; with a shorter lens, lower them.", fl)
         _tip(self.colour, "Keep the colour of the light at the edge of the Moon, so a prominence or the pink "
              "chromosphere stays red where it spills over the limb, and give the lunar surface the earthshine's "
              "own measured tint (white balanced like the corona). Off: a grey layer.")
@@ -1986,8 +1993,9 @@ class EarthshineTab(StepTab):
              "stays bright longer and the darkening gathers towards the edge.", f)
         _tip(self.surface_denoise, "Smooths the lunar surface only across similar brightness, so the noise inside "
              "the maria goes while their edges stay crisp (unlike Smoothing, which blurs edges too). Size in pixels; "
-             "0 (default) = off. Start at about 1% of the Sun's radius in pixels (the Align log's 'Sun centre' "
-             "line gives the radius). Needs Stack earthshine again.")
+             "0 (default) = off. Start at about 1% of the Sun's radius in pixels: 3-5 px for a 400 mm lens on a "
+             "45-megapixel full-frame camera (Sun about 410 px in radius; the Align log's 'Sun centre' line gives "
+             "yours). Needs Stack earthshine again.")
         _tip(self.albedo_texture, "Adds the albedo map's own craters and rays to the lunar surface, scaled to your "
              "Moon's contrast. This is a COMPOSITE: that fine detail comes from the map (a spacecraft mosaic), not "
              "from your photographs; a typical earthshine stack is mostly noise at that scale. Needs an albedo map "
@@ -1995,7 +2003,10 @@ class EarthshineTab(StepTab):
              "0 (default) = off, your data only. 1 = the map's detail at your Moon's own contrast.")
         _tip(self.edge_smooth, "The last pixels by the limb are much noisier (the long exposures are saturated "
              "there), so they get extra smoothing, up to this many pixels where the noise is highest. The rest "
-             "of the Moon only gets the Smoothing above. Default 3; lower it to keep more grain at the edge.", f)
+             "of the Moon only gets the Smoothing above. Default 3; lower it to keep more grain at the edge."
+             "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
+             "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
+             "smaller pixels, raise them in proportion; with a shorter lens, lower them.", f)
         _tip(self.brightness, "How bright the brightest lunar surface is in the layer, from 0 to 1. Earthshine is "
              "much fainter than the corona, so the default 0.6 keeps it subdued; adjust to taste in Photoshop.", f)
         _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken; "
