@@ -700,6 +700,11 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
         if ring_ratio[d] > 0 and ring_ratio[d] < 10.0 and np.median(weight_ratio[good & (ri == d)]) < 10.0:
             keep_from = max(float(d), keep_from)
             break
+    minimum = max(p.margin(moon_r), 0.025 * moon_r)
+    why = ("the minimum, 2.5% of the radius: glare left over by the limb" if keep_from <= minimum + 1e-6
+           else "nearer the limb the noise is over 10x that in the middle")
+    notes.append(f"lunar surface shown to {keep_from:.1f} px inside the limb ({100 * keep_from / moon_r:.1f}% of the "
+                 f"radius); the last {keep_from:.1f} px are filled from there ({why})")
     big = ndimage.gaussian_filter(detail, max(3.0, moon_r / 40))
     snr = float((np.percentile(big[good], 95) - np.percentile(big[good], 5)) / (noise / max(3.0, moon_r / 40) + 1e-30))
     if snr < 3:

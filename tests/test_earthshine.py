@@ -847,3 +847,14 @@ def test_albedo_texture_is_added_only_when_asked_and_matched():
     other = make_map(seed=13)
     out2, note2 = ES.albedo_texture(other, detail, shown, good, cx, cy, MR, p)
     assert "not added" in note2 and np.array_equal(out2, shown)
+
+
+def test_the_filled_edge_band_is_named_in_the_log(run):
+    """The last pixels inside the limb are filled from further in; how many, and why, is data-dependent,
+    so the log says it (on the 2024 Moon it was the 2.5% minimum, 10.9 px, and the user could not tell)."""
+    mos, infos, tex, matches, ref = run
+    res, *_ = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
+                               (0, 0, SIZE, SIZE), EarthshineParams())
+    line = [n for n in res.notes if "filled" in n and "inside the limb" in n]
+    assert line, res.notes
+    assert "% of the radius" in line[0] and ("minimum" in line[0] or "noise" in line[0]), line[0]
