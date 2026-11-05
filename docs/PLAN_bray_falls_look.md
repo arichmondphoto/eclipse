@@ -171,6 +171,9 @@ labelled composite option.
       map's fine detail; a non-matching map adds nothing. On Andy's stack with his map (match
       0.63) it gives craters and rays close to his look (`moon_looks2.png`, bottom right).
 - [ ] Check in Siril on the full final image (Andy).
+- 5 Nov: at Andy's request the albedo map (guide and map texture) and the vignette
+  (`limb_darkening`, `vignette_shape`) were removed. The lunar surface is now only his data with
+  the glare taken away, evenly lit; the recipe above without `--limb-darkening 0`.
 
 ### 2b. Deconvolution (tested 3 Nov on the crop, not in the toolkit)
 

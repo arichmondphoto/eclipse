@@ -115,7 +115,7 @@ The window has one tab per step, and each step saves into the project file:
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
 | 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper); **Natural layer and colour:** Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k), Noise gate (off) and the size and strength of each of its six scales (the paper's 1.25, 2.5, 5, 10, 20, 40 px at strength 1); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
-| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, optional albedo map and its guidance, smoothing (overall and by the limb), edge grain, brightness, darkening towards the limb and its shape, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
+| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, edge grain, brightness, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
 Every setting has hover help explaining what it does and when to change it.
@@ -729,25 +729,7 @@ towards white: nothing is filled in or smoothed over. (Until 5 Nov 2026 such
 spots were replaced by a 6 px blur of their surroundings; on the 2024 Moon
 that drew a faceted grey blob with a dark wedge over the prominence's fan.)
 
-**Albedo map (optional).** `--albedo-map lroc_color_2k.jpg` (or **Albedo
-map** on the Earthshine tab) uses a map of the Moon's surface brightness to
-help tell maria near the limb from glare. Any 2:1 equirectangular map with
-0° longitude in the middle works, for example the colour map from NASA's
-[CGI Moon Kit](https://svs.gsfc.nasa.gov/4720) (credit: NASA's Scientific
-Visualization Studio). The map is turned to match your Moon (rotation,
-mirror and libration are searched against the pattern in the middle of your
-disc, so no clock or site is needed); if the match is below 0.6 it is not
-used. It is blurred, scaled to your data and only subtracted while the glare
-is *estimated*; the glare estimate is then subtracted from your data, so
-nothing from the map is added to the picture. Where your data can tell the
-surface from glare, the map is first pulled towards your data, so a feature
-the map has and your Moon does not is mostly rejected (not in the outer 5%
-of the radius, where that correction fed the glare back as a string of beads
-along the limb). On simulations a
-false mare 25 px inside the limb came through at about 15–20% of
-`--albedo-strength` (default 0.5), and not at all 45 px or more inside.
-
-**A dark, clean Moon; map texture (optional, a composite).** On the 2024
+**A dark, clean Moon.** On the 2024
 D850 earthshine stack the lunar surface is mostly noise at every scale up to
 about 35 px (structure/noise 1.0-1.4 from 1 to 35 px): the maria are really
 there, craters and rays are not. `--surface-denoise 4` (**Edge-preserving
@@ -755,14 +737,9 @@ smoothing**) smooths only across similar brightness (a joint bilateral
 filter judged on a lightly smoothed guide), so the noise inside the maria
 goes and their edges stay crisp; plain `--smooth` blurs the edges too, and
 large values of it spread leftover limb glare into beads by the limb. A
-darker, flat, neutral Moon: `--brightness 0.35 --limb-darkening 0
---no-colour --surface-denoise 4`.
-`--albedo-texture 1` (**Map texture (composite)**, with an albedo map)
-adds the map's own fine detail (finer than 4% of the radius: craters, rays)
-to the surface, scaled to your Moon's contrast. That detail comes from the
-map, not your photographs, so it is off by default, only used when the map
-matches your Moon, and the log says "albedo texture ADDED (composite, from
-the map, not your data)".
+darker, flat, neutral Moon: `--brightness 0.35
+--no-colour --surface-denoise 4`. Nothing is added from outside your photographs:
+the lunar surface is your data with the glare taken away.
 
 **How the Moon meets the corona.** A perfectly clean disc cut on a circle
 looks pasted in, so the layer is built like a photograph of the limb:
@@ -806,12 +783,10 @@ itself, ring by ring) is still ~10x that of the middle, and at least over
 the last 2.5% of the radius (~11 px), the edge is filled out to 1.5 px past the limb
 with the brightness just inside, taken round the limb in ~16 px steps
 (a median, so single noisy pixels do not show as teeth) and blended in. That is where the corona layers' black disc ends, so no dark
-ring shows between them. Removing the glare also removes the disc's overall
-shading, so it is put back as a vignette: full brightness in the middle,
-darkening gradually all the way to the limb (`--limb-darkening`, default
-0.6 = the limb at 40% of the middle; 0 = evenly lit; `--vignette-shape`,
-default 1.5: 1 = a straight-line fall from the centre, higher keeps the
-middle bright longer). The stretch is set from the
+ring shows between them. No shading is drawn over the disc: the lunar
+surface is as bright at the limb as the data makes it (until 5 Nov 2026 a
+vignette darkened it towards the limb, by default to 40% of the middle; it
+dimmed the maria by the limb that are really there). The stretch is set from the
 body of the disc. `<name>_earthshine_weight.fit` holds the stack weights
 next to the linear stack.
 
@@ -1199,19 +1174,14 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--no-prominence-glare` | the default since Nov 2026; kept so older command lines still run |
 | `--no-limb-shape` | do not fit the limb glare as light fading inward (that fit keeps maria by the limb) |
 | `--channel` | colour channels to make the earthshine from (default auto: chosen on the stack; the red channel carries most of the chromosphere glare) |
-| `--albedo-map` | lunar albedo map (2:1, 0 deg longitude centred, e.g. lroc_color_2k.jpg from NASA's CGI Moon Kit) to guide the glare removal near the limb |
-| `--albedo-strength` | how much the map guides it, 0-1 (default 0.5); nothing from the map is added to the picture |
 | `--glare-order` | smoothness of the glare removed from the disc: polynomial order (default 2) |
 | `--smooth` | smoothing of the layer in pixels (default 1, 0 = none) |
 | `--brightness` | brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona) |
-| `--limb-darkening` | vignette: how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit) |
 | `--keep-glare` | earthshine layer for pasting: how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1) |
 | `--limb-soften` | earthshine layer for pasting: extra softening of the limb in px, on top of the real one (default 0 = none) |
 | `--no-colour` | make the earthshine layer grey (default: natural colour, so a prominence at the limb stays red on the Moon side too) |
 | `--no-edge-grain` | leave the filled last pixels by the limb smooth (default: grain like the rest) |
-| `--vignette-shape` | how the darkening falls from the centre: 1 = straight line, 1.5 (default) = gentle in the middle, 3 = the middle stays bright longer |
 | `--surface-denoise` | edge-preserving smoothing of the lunar surface, px (0 = off; e.g. 4): maria keep crisp edges |
-| `--albedo-texture` | COMPOSITE: add the albedo map's own craters and rays at this strength (0 = off, your data only; 1 = at your Moon's contrast); needs --albedo-map |
 | `--edge-smooth` | most smoothing of the noisier pixels near the limb, px (default 3) |
 | `--include-rejected` | also use frames marked as rejected |
 | `--output`, `-o` | output folder (default: next to the project) |
@@ -1299,9 +1269,6 @@ added to the tests.
   bright prominence, maria kept by the limb, no arcs or teeth at the edge.
   Other tests use real figures from that stack too (the HDR weights across
   the limb).
-* `tests/test_moonmap.py` checks the albedo map guide on a simulated Moon:
-  orientation found, maria by the limb recovered, a false feature hardly
-  leaking, a wrong map refused.
 * `tests/test_viewzoom.py` checks the zoom and pan of the picture views.
 * `tests/test_region.py` checks that a detail box on the real 2024 stack is
   the full-size result there (through the limb, at a frame corner, in the

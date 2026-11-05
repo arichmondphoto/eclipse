@@ -228,18 +228,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--channel", default="auto", choices=["auto", "all", "green", "green+blue", "blue"],
                    help="colour channels to make the earthshine from (default auto: chosen on the stack; the red "
                         "channel carries most of the chromosphere glare)")
-    p.add_argument("--albedo-map", default="",
-                   help="lunar albedo map (2:1, 0 deg longitude centred, e.g. lroc_color_2k.jpg from NASA's CGI Moon "
-                        "Kit) to guide the glare removal near the limb")
-    p.add_argument("--albedo-strength", type=float, default=0.5,
-                   help="how much the map guides it, 0-1 (default 0.5); nothing from the map is added to the picture")
     p.add_argument("--glare-order", type=int, default=2,
                    help="smoothness of the glare removed from the disc: polynomial order (default 2)")
     p.add_argument("--smooth", type=float, default=1.0, help="smoothing of the layer in pixels (default 1, 0 = none)")
     p.add_argument("--brightness", type=float, default=0.6,
                    help="brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona)")
-    p.add_argument("--limb-darkening", type=float, default=0.6,
-                   help="vignette: how much darker the limb is than the middle, 0-1 (default 0.6; 0 = evenly lit)")
     p.add_argument("--keep-glare", type=float, default=0.1,
                    help="earthshine layer for pasting: how much of the removed glare to keep as a glow inside the "
                         "limb, 0-1 (default 0.1)")
@@ -251,14 +244,8 @@ def main(argv: list[str] | None = None) -> int:
                         "stays red on the Moon side too)")
     p.add_argument("--no-edge-grain", action="store_true",
                    help="leave the filled last pixels by the limb smooth (default: grain like the rest)")
-    p.add_argument("--vignette-shape", type=float, default=1.5,
-                   help="how the darkening falls from the centre: 1 = straight line, 1.5 (default) = gentle in the "
-                        "middle, 3 = the middle stays bright longer")
     p.add_argument("--surface-denoise", type=float, default=0.0,
                    help="edge-preserving smoothing of the lunar surface, px (0 = off; e.g. 4): maria keep crisp edges")
-    p.add_argument("--albedo-texture", type=float, default=0.0,
-                   help="COMPOSITE: add the albedo map's own craters and rays at this strength (0 = off, your data "
-                        "only; 1 = at your Moon's contrast); needs --albedo-map")
     p.add_argument("--edge-smooth", type=float, default=3.0,
                    help="most smoothing of the noisier pixels near the limb, px (default 3)")
     p.add_argument("--include-rejected", action="store_true", help="also use frames marked as rejected")
@@ -809,13 +796,10 @@ def cmd_earthshine(args) -> int:
     params = EarthshineParams(stops=args.stops, glare_order=args.glare_order, smooth=args.smooth,
                               brightness=args.brightness, limb_glare=not args.no_limb_glare,
                               source_glare=args.prominence_glare and not args.no_prominence_glare,
-                              limb_darkening=args.limb_darkening, vignette_shape=args.vignette_shape,
                               keep_glare=args.keep_glare, limb_soften=args.limb_soften,
                               edge_grain=not args.no_edge_grain, colour=not args.no_colour,
                               edge_smooth=args.edge_smooth, surface_denoise=args.surface_denoise,
-                              albedo_texture=args.albedo_texture,
-                              limb_shape=not args.no_limb_shape, channel=args.channel,
-                              albedo_map=args.albedo_map, albedo_strength=args.albedo_strength)
+                              limb_shape=not args.no_limb_shape, channel=args.channel)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,
                         output=args.output, name=args.name, profile_dir=args.profile_dir,
                         lensfun_db=args.lensfun_db, fmt=args.format, quiet=args.quiet)

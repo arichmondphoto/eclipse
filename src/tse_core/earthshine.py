@@ -47,8 +47,6 @@ class EarthshineParams:
     glare_order: int = 2  # polynomial order of the glare (a gentle gradient); higher also eats large maria
     smooth: float = 1.0  # Gaussian smoothing of the shown layer, px (0 = none)
     brightness: float = 0.6  # brightest lunar surface in the layer, 0..1 (the corona stays brighter)
-    limb_darkening: float = 0.6  # how much darker the limb is than the middle (0 = even, 1 = black at the limb)
-    vignette_shape: float = 1.5  # how the darkening falls from the centre (1 = straight line, higher = later)
     edge_smooth: float = 3.0  # most smoothing where the noise is high near the limb, px
     limb_glare: bool = True  # also model the steep glare just inside the limb
     limb_shape: bool = True  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
@@ -57,9 +55,6 @@ class EarthshineParams:
     # Moon a mare: removal left noise there), so the fan is shown as the data has it.
     source_glare: bool = False
     channel: str = "auto"  # colour channels to use: auto, all, green, green+blue, blue
-    albedo_map: str = ""  # lunar albedo map (equirectangular, 0 deg longitude centred) to guide the glare removal
-    albedo_strength: float = 0.5  # how much the map guides it, 0..1 (only used with a map)
-    albedo_min_match: float = 0.6  # the map is not used if it matches the middle of the disc less well than this
     limb_px: float = 1.5  # the corona layers' black disc reaches this far past the limb (enhance's margin)
     feather_px: float = 1.0  # soft edge of the disc in the layer (only without a measured limb)
     keep_glare: float = 0.1  # how much of the removed glare is kept as a glow inside the limb, 0..1
@@ -68,9 +63,6 @@ class EarthshineParams:
     # Edge-preserving smoothing of the lunar surface (px, 0 = off): averages only across similar
     # brightness, so the maria keep crisp edges while the noise inside them goes.
     surface_denoise: float = 0.0
-    # Albedo map texture (0 = off): blends this much of the map's own craters and rays into the
-    # surface, scaled to your Moon's contrast. A COMPOSITE: that detail is the map's, not your data.
-    albedo_texture: float = 0.0
     edge_grain: bool = True  # put grain like the rest of the surface into the filled last pixels
     colour: bool = True  # natural colour: the glow and limb (prominences red) and the earthshine's own tint
     saturation: float = 1.0  # colour saturation, as for the corona layers (0 = grey)
@@ -348,22 +340,6 @@ def source_glare(detail: np.ndarray, good: np.ndarray, cx: float, cy: float, r: 
     return total, found
 
 
-def limb_profile(rho: np.ndarray, darkening: float, shape: float = 1.5) -> np.ndarray:
-    """Brightness across the disc, like a vignette: 1 in the middle, ``1 - darkening`` at the limb.
-
-    It falls gradually all the way from the centre: 1 - darkening x rho^shape (rho = distance
-    from the centre in lunar radii). ``shape`` 1.5 starts gently in the middle and darkens
-    steadily outwards (half way out it is already 21% down at darkening 0.6); higher values
-    keep the middle brighter for longer, values near 1 make a straight-line fall.
-
-    The glare removal takes away the disc's overall brightness along with the glare,
-    leaving it evenly lit; this gives back a brighter middle and keeps the noisier last
-    pixels by the limb dim instead of smoothing them away.
-    """
-    r = np.clip(np.asarray(rho, np.float64), 0.0, 1.0)
-    d = float(np.clip(darkening, 0.0, 1.0))
-    return (1.0 - d * r ** max(float(shape), 0.5)).astype(np.float32)
-
 
 def adaptive_smooth(img: np.ndarray, good: np.ndarray, factor: np.ndarray, base: float, cap: float = 12.0) -> np.ndarray:
     """Gaussian smoothing of ``base`` px, widened to ``base`` x ``factor`` (up to ``cap``) pixel by pixel.
@@ -513,15 +489,9 @@ def limb_falloff(res: np.ndarray, good: np.ndarray, cx: float, cy: float, r: flo
     return out
 
 
-def remove_glare(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams",
-                 prior: Optional[np.ndarray] = None):
-    """The lunar surface left after taking away the glare: returns (detail, glare).
-
-    ``prior``: what the lunar surface is expected to add (from an albedo map). It is taken
-    away only while the glare is *estimated*, so the estimate does not mistake maria for
-    glare; the detail returned is always ``img`` minus the glare, i.e. your data.
-    """
-    est = img if prior is None else np.where(good, img - prior, 0.0).astype(np.float32)
+def remove_glare(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams"):
+    """The lunar surface left after taking away the glare: returns (detail, glare)."""
+    est = img
     glare = glare_surface(est, good, cx, cy, r, p.glare_order, limb=p.limb_glare)
     if p.limb_glare:
         if p.limb_shape:
@@ -531,47 +501,6 @@ def remove_glare(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: flo
     return np.where(good, img - glare, 0.0).astype(np.float32), glare
 
 
-def remove_glare_guided(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams",
-                        prior: np.ndarray, iters: int = 2, sigma: float = 0.02, taper: tuple = (0.05, 0.12)):
-    """:func:`remove_glare` with an albedo-map prior, corrected towards the data first.
-
-    Wherever the data can tell (what is left after the glare estimate is not glare-shaped),
-    the prior is pulled towards the data, a blurred step at a time; so a feature the map has
-    but your Moon does not is mostly rejected, and the map only fills in what the data cannot
-    separate from glare. The correction fades in from ``taper`` (fractions of the radius
-    inside the limb): in the outer few % the residual is mostly glare, and feeding it back
-    made a string of beads along the limb on real data. On simulations a false mare at 17%
-    of the radius inside the limb comes through at about 17% of its strength in the map
-    (times ``albedo_strength``), and not at all at 30% inside.
-    """
-    pr = prior.astype(np.float32).copy()  # correction kept off the outer few % (see the taper below)
-    sig = max(1.0, sigma * r)
-    h, w = img.shape
-    yy, xx = np.mgrid[0:h, 0:w]
-    depth = (r - np.hypot(xx - cx, yy - cy)) / r
-    wt = np.ones((h, w), np.float32) if taper[1] <= taper[0] else \
-        np.clip((depth - taper[0]) / (taper[1] - taper[0]), 0.0, 1.0).astype(np.float32)
-    for _ in range(iters):
-        _, glare = remove_glare(img, good, cx, cy, r, p, pr)
-        resid = np.where(good, img - pr - glare, 0.0).astype(np.float32)
-        num = ndimage.gaussian_filter(resid, sig)
-        den = ndimage.gaussian_filter(good.astype(np.float32), sig)
-        pr = np.where(good, pr + wt * num / np.maximum(den, 1e-6), 0.0).astype(np.float32)
-    return remove_glare(img, good, cx, cy, r, p, pr)
-
-
-def albedo_prior(amap: np.ndarray, detail: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float,
-                 p: "EarthshineParams", orientation=None):
-    """The albedo map turned to the image and scaled to ``detail`` (see moonmap.guide).
-
-    Returns (prior or None, orientation, note): None when the map does not match well enough.
-    """
-    from .moonmap import guide
-
-    tmpl, o, k = guide(amap, detail, good, cx, cy, r, orientation)
-    if o.correlation < p.albedo_min_match or k <= 0:
-        return None, o, (f"{o.describe()}: too poor a match (below {p.albedo_min_match:.2f}), map not used")
-    return (p.albedo_strength * tmpl).astype(np.float32), o, o.describe()
 
 
 CHANNELS = {"all": (1.0, 1.0, 1.0), "green": (0.0, 1.0, 0.0), "green+blue": (0.0, 1.0, 1.0),
@@ -620,29 +549,9 @@ def choose_channel(rgb: np.ndarray, good: np.ndarray, cx: float, cy: float, r: f
     return name, scores
 
 
-def albedo_texture(amap: np.ndarray, detail: np.ndarray, shown: np.ndarray, good: np.ndarray, cx: float,
-                   cy: float, r: float, p: "EarthshineParams", orientation=None):
-    """The albedo map's fine detail (craters, rays; finer than 4% of the radius, where a typical
-    earthshine stack is mostly noise) added to ``shown``, scaled to the Moon's own contrast.
-
-    A composite: the added detail is the map's, not the data's. Only used when the map matches
-    the Moon (``albedo_min_match``). Returns (shown, note)."""
-    from .moonmap import _masked_blur, fit_orientation, guide, render
-
-    o = orientation or fit_orientation(amap, detail, good, cx, cy, r)
-    if o.correlation < p.albedo_min_match:
-        return shown, (f"albedo texture not added: the map matches your Moon only {o.correlation:.2f} "
-                       f"(needs {p.albedo_min_match:.2f})")
-    _, _, k = guide(amap, detail, good, cx, cy, r, o)  # scale of the map's pattern in your data
-    sharp = render(amap, detail.shape, cx, cy, r, o)
-    fine = sharp - _masked_blur(sharp, good, max(2.0, 0.04 * r))
-    add = np.where(good, p.albedo_texture * k * fine, 0.0).astype(np.float32)
-    return (shown + add).astype(np.float32), (f"albedo texture ADDED (composite, from the map, not your data): "
-                                              f"strength {p.albedo_texture:g}")
-
 
 def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: float, cy: float, moon_r: float,
-                 p: EarthshineParams, albedo: Optional[np.ndarray] = None, extras: Optional[dict] = None):
+                 p: EarthshineParams, extras: Optional[dict] = None):
     """From the Moon-aligned stack to the picture: glare removed, smoothed by how certain it is.
 
     Returns (detail, shown, snr, keep_from, notes): ``keep_from`` is the depth inside the
@@ -653,14 +562,6 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
     yy, xx = np.mgrid[0:h, 0:w]
     rr = np.hypot(xx - cx, yy - cy)
     detail, glare = remove_glare(lum, good, cx, cy, moon_r, p)
-    orientation = None
-    if albedo is not None and p.albedo_strength > 0:
-        prior, orientation, note = albedo_prior(albedo, detail, good, cx, cy, moon_r, p)
-        notes.append(note)
-        if prior is not None:
-            detail, glare = remove_glare_guided(lum, good, cx, cy, moon_r, p, prior)
-        else:
-            orientation = None
     if p.limb_glare and p.source_glare:
         extra, angles = source_glare(detail, good, cx, cy, moon_r, p.margin(moon_r))
         if angles:
@@ -692,9 +593,6 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
     # saturated), up to ``edge_smooth`` px; diffraction spikes and other real structure are left alone.
     shown = (adaptive_smooth(detail, good, factor, p.smooth, cap=max(p.edge_smooth, p.smooth))
              if p.smooth > 0 else detail)
-    if albedo is not None and p.albedo_texture > 0:
-        shown, note = albedo_texture(albedo, detail, shown, good, cx, cy, moon_r, p, orientation)
-        notes.append(note)
     # Nearer the limb than where the noise is still ~10x that of the middle, fill the edge from
     # just inside instead: only noise, and glare shaped by the bumpy real limb, is left in those
     # last pixels. At least the last 2.5% of the radius (11 px at 400 mm on a full-frame camera).
@@ -790,14 +688,6 @@ def stack_earthshine(
     if good.sum() < 100:
         raise ValueError("no usable pixels inside the lunar disc")
 
-    albedo = None
-    if p.albedo_map and p.albedo_strength > 0:
-        from .moonmap import load_map
-
-        try:
-            albedo = load_map(p.albedo_map)
-        except (OSError, ValueError) as exc:
-            notes.append(f"albedo map not used: {exc}")
     chan = p.channel
     if chan == "auto":
         chan, scores = choose_channel(rgb, good, cx, cy, moon_r, p)
@@ -808,8 +698,7 @@ def stack_earthshine(
     notes.append(f"made from the {chan} channel{'s' if chan in ('all', 'green+blue') else ''}")
     img = lum if chan == "all" else channel_image(rgb, chan)
     extras: dict = {}
-    detail, shown, snr, keep_from, more = process_disc(img, weight, good, cx, cy, moon_r, p, albedo=albedo,
-                                                       extras=extras)
+    detail, shown, snr, keep_from, more = process_disc(img, weight, good, cx, cy, moon_r, p, extras=extras)
     notes += more
 
     outputs = {}
@@ -903,8 +792,7 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
     """The earthshine layer as a picture (0..1) over the Moon crop.
 
     * The lunar surface (``shown``) is stretched on the body of the disc, filled out over the
-      noisy last pixels from just inside (with grain like the rest, ``edge_grain``), and given
-      the vignette (``limb_darkening``).
+      noisy last pixels from just inside (with grain like the rest, ``edge_grain``).
     * A glow: ``keep_glare`` of the glare that was taken away, fading inward from the limb (what
       the eye sees at totality), compressed so it cannot clip.
     * The real limb: in the last few pixels and ``limb_reach`` px beyond, the stack itself (the
@@ -947,8 +835,7 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
         noise *= grain / (float(np.std(noise)) + 1e-12)
         t = np.clip((rr - (r_in - 3)) / 3, 0, 1)
         surf = np.where(band | (t > 0) & (rr < r_in), np.clip(surf + noise * t, 0, 1), surf)
-    rho = np.minimum(rr / moon_r, 1.0)
-    surf = surf * limb_profile(rho, p.limb_darkening, p.vignette_shape) * p.brightness
+    surf = surf * p.brightness
     if not real_limb:
         fe = max(p.feather_px, 0.5)
         alpha = np.clip((edge + fe / 2 - rr) / fe, 0.0, 1.0)
@@ -1188,7 +1075,7 @@ def moon_surface(shown: np.ndarray, good: np.ndarray, glare: np.ndarray, cx: flo
     """The seas and highlands as a picture to add on top of the stretched Moon, and where to show them.
 
     Returns (surface (h, w, 3) in 0..1, visibility (h, w) in 0..1). The surface is the glare-free
-    detail, stretched on the body of the disc, with the vignette, ``brightness`` and the
+    detail, stretched on the body of the disc, with ``brightness`` and the
     earthshine's ``tint``. The visibility is 1 where the earthshine itself dominates and falls
     smoothly to 0 towards the limb as the glare grows (1 / (1 + (glare / surface)^2)): near the
     limb the stack's own light, stretched with the corona, is all there is, so nothing needs
@@ -1219,8 +1106,7 @@ def moon_surface(shown: np.ndarray, good: np.ndarray, glare: np.ndarray, cx: flo
         noise *= grain / (float(np.std(noise)) + 1e-12)
         t = np.clip((rr - (r_in - 3)) / 3, 0, 1)
         surf = np.where(rr < moon_r + 1.0, np.clip(surf + noise * t, 0, 1), surf)
-    rho = np.minimum(rr / moon_r, 1.0)
-    surf = surf * limb_profile(rho, p.limb_darkening, p.vignette_shape) * p.brightness
+    surf = surf * p.brightness
     # Shown over the whole disc, ending with a 1 px soft edge at the limb; added with screen, so
     # near the limb, where the stretched light of the Moon itself is brighter, that light wins.
     vis = np.clip(moon_r + 0.5 - rr, 0.0, 1.0)

@@ -229,12 +229,6 @@ assert Path(es.final_path).name == "my picture.tif"
 assert Path(es.final_path).exists() and EventProject.load(path).parameters["final"]["strength"] == 1.5
 print("final image:", Path(es.final_path).name)
 es.base.setCurrentIndex(es.base.findData("blend"))
-# Albedo map: Browse fills the path, and the earthshine settings carry it.
-os.environ["STUB_OPEN"] = str(T / "moon_map.jpg")
-es.albedo_path.setText("")
-es._pick_albedo()
-assert es.albedo_path.text() == str(T / "moon_map.jpg")
-es.albedo_path.setText("")
 # From file: a blend saved earlier under another name.
 os.environ["STUB_OPEN"] = et.outputs["blend"]
 es.base.setCurrentIndex(es.base.findData("file"))

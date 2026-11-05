@@ -1852,34 +1852,17 @@ class EarthshineTab(StepTab):
         self.limb_shape = QCheckBox("Keep maria by the limb (glare only fades inward)")
         self.limb_shape.setChecked(True)
         f.addRow(self.limb_shape)
-        arow = QHBoxLayout()
-        self.albedo_path = QLineEdit()
-        self.albedo_path.setPlaceholderText("none (optional)")
-        abrowse = QPushButton("Browse…")
-        abrowse.clicked.connect(self._pick_albedo)
-        _tip(abrowse, "Choose an albedo map of the Moon (optional; see the field beside it).")
-        arow.addWidget(self.albedo_path, 1)
-        arow.addWidget(abrowse)
-        f.addRow("Albedo map:", arow)
-        self.albedo_strength = spin(0.0, 1.0, 0.1, 0.5)
-        f.addRow("Map guidance:", self.albedo_strength)
         self.smooth = spin(0.0, 5.0, 0.5, 1.0, " px")
         f.addRow("Smoothing:", self.smooth)
         self.edge_smooth = spin(0.0, 12.0, 0.5, 3.0, " px")
         f.addRow("Smoothing near the limb:", self.edge_smooth)
         self.surface_denoise = spin(0.0, 10.0, 0.5, 0.0, " px")
         f.addRow("Edge-preserving smoothing:", self.surface_denoise)
-        self.albedo_texture = spin(0.0, 1.5, 0.1, 0.0)
-        f.addRow("Map texture (composite):", self.albedo_texture)
         self.edge_grain = QCheckBox("Grain in the filled edge, like the rest of the surface")
         self.edge_grain.setChecked(True)
         f.addRow(self.edge_grain)
         self.brightness = spin(0.1, 1.0, 0.05, 0.6)
         f.addRow("Brightness:", self.brightness)
-        self.limb_dark = spin(0.0, 1.0, 0.05, 0.6)
-        f.addRow("Darker towards the limb:", self.limb_dark)
-        self.vignette_shape = spin(1.0, 4.0, 0.25, 1.5)
-        f.addRow("Gradient shape:", self.vignette_shape)
         self.colour = QCheckBox("Natural colour (the earthshine's own tint)")
         self.colour.setChecked(True)
         f.addRow(self.colour)
@@ -1996,15 +1979,6 @@ class EarthshineTab(StepTab):
              "distance), which the lunar surface does not follow, and taken away.\n\nOff (default): the fan and its "
              "spikes stay, as the data has them. Removing them cannot bring back what lies under the fan (a mare "
              "there comes out as noise, not as the mare), so off nothing is inferred.")
-        _tip(self.albedo_path, "Optional: a map of the Moon's surface brightness, in the usual 2:1 world-map "
-             "layout with 0 degrees longitude in the middle (for example lroc_color_2k.jpg from NASA's CGI Moon "
-             "Kit, svs.gsfc.nasa.gov/4720). It helps tell maria near the limb from glare. It is turned to match your "
-             "Moon automatically and only guides the glare removal: nothing from the map is added to your picture.",
-             f)
-        _tip(self.albedo_strength, "How much the albedo map guides the glare removal near the limb, from 0 (not at "
-             "all) to 1 (default 0.5). Where your data can tell maria from glare, it overrides the map; the map only decides what "
-             "the data cannot, in the outer ~30 px. On tests a mare the map has but the Moon does not came through "
-             "at about 15-20% of this strength 25 px inside the limb, and not at all further in.", f)
         _tip(self.limb_shape, "Glare from just outside the Moon can only get fainter going inward, while a sea "
              "(mare) near the edge is a dark dip and highlands a bright bump. With this on, only light that "
              "fades inward is taken away around the edge, so seas near the limb such as Crisium survive.")
@@ -2021,10 +1995,6 @@ class EarthshineTab(StepTab):
              "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
              "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
              "smaller pixels, raise them in proportion; with a shorter lens, lower them.", f)
-        _tip(self.limb_dark, "A vignette across the Moon: the middle stays at full brightness and it darkens "
-             "gradually all the way out to the edge. 0 = evenly lit, 0.6 = the edge at 40% of the middle (the "
-             "default), 1 = fading to black at the edge. Removing the glare also removes the Moon's overall "
-             "shading; this gives back a brighter middle and keeps the noisier last pixels by the edge dim.", f)
         _tip(self.keep_glare, "How much of the glare that was taken away is put back as a soft glow just inside "
              "the edge of the Moon, fading inward: the inner corona's light spilling over the dark Moon, as the eye "
              "sees it at totality. 0 = none, 0.1 = a faint glow (default: blends best when pasting), 0.5 = a soft "
@@ -2041,19 +2011,11 @@ class EarthshineTab(StepTab):
              "own measured tint (white balanced like the corona). Off: a grey layer.")
         _tip(self.edge_grain, "The last few pixels by the edge are only noise and are filled from just inside; "
              "this gives them grain like the rest of the surface, so they do not look smoother.")
-        _tip(self.vignette_shape, "How the darkening is spread from the middle to the edge. 1 = a straight-line "
-             "fall from the centre; 1.5 (the default) = gentle in the middle, steady further out; 3 = the middle "
-             "stays bright longer and the darkening gathers towards the edge.", f)
         _tip(self.surface_denoise, "Smooths the lunar surface only across similar brightness, so the noise inside "
              "the maria goes while their edges stay crisp (unlike Smoothing, which blurs edges too). Size in pixels; "
              "0 (default) = off. Start at about 1% of the Sun's radius in pixels: 3-5 px for a 400 mm lens on a "
              "45-megapixel full-frame camera (Sun about 410 px in radius; the Align log's 'Sun centre' line gives "
              "yours). Needs Stack earthshine again.")
-        _tip(self.albedo_texture, "Adds the albedo map's own craters and rays to the lunar surface, scaled to your "
-             "Moon's contrast. This is a COMPOSITE: that fine detail comes from the map (a spacecraft mosaic), not "
-             "from your photographs; a typical earthshine stack is mostly noise at that scale. Needs an albedo map "
-             "above, and is only used if the map matches your Moon; the log says when it is added.\n\n"
-             "0 (default) = off, your data only. 1 = the map's detail at your Moon's own contrast.")
         _tip(self.edge_smooth, "The last pixels by the limb are much noisier (the long exposures are saturated "
              "there), so they get extra smoothing, up to this many pixels where the noise is highest. The rest "
              "of the Moon only gets the Smoothing above. Default 3; lower it to keep more grain at the edge."
@@ -2077,12 +2039,6 @@ class EarthshineTab(StepTab):
         self._show_base()
         self.mode.setEnabled(self.base.currentData() == "file")  # the blend mode only matters when pasting
         self._final_changed()
-
-    def _pick_albedo(self) -> None:
-        start = self.albedo_path.text().strip() or str(self.main.frames_tab.project_dir())
-        fname, _ = QFileDialog.getOpenFileName(self, "Lunar albedo map", start, "Images (*.jpg *.jpeg *.tif *.tiff *.png)")
-        if fname:
-            self.albedo_path.setText(fname)
 
     def _show_base(self) -> None:
         self.base_label.setText(f"File: {Path(self.base_file).name}" if self.base.currentData() == "file"
@@ -2136,11 +2092,6 @@ class EarthshineTab(StepTab):
         QMessageBox.information(self, "Final image", f"Wrote\n{path}")
 
     def load_project(self, project: EventProject, path: Path) -> None:
-        es = project.parameters.get("earthshine", {})
-        if es.get("albedo_map"):
-            self.albedo_path.setText(W.resolve(path, es["albedo_map"]) or es["albedo_map"])
-        if es.get("albedo_strength") is not None:
-            self.albedo_strength.setValue(float(es["albedo_strength"]))
         fin = project.parameters.get("final", {})
         self.final_path = W.resolve(path, fin.get("file"))
         self.open_final_btn.setEnabled(bool(self.final_path))
@@ -2169,16 +2120,12 @@ class EarthshineTab(StepTab):
         params = EarthshineParams(stops=self.stops.value(), glare_order=self.glare.value(),
                                   smooth=self.smooth.value(), brightness=self.brightness.value(),
                                   limb_glare=self.limb_glare.isChecked(),
-                                  source_glare=self.source_glare.isChecked(), limb_darkening=self.limb_dark.value(),
-                                  vignette_shape=self.vignette_shape.value(),
+                                  source_glare=self.source_glare.isChecked(),
                                   keep_glare=self.keep_glare.value(), limb_soften=self.limb_soften.value(),
                                   edge_grain=self.edge_grain.isChecked(), colour=self.colour.isChecked(),
                                   edge_smooth=self.edge_smooth.value(),
                                   surface_denoise=self.surface_denoise.value(),
-                                  albedo_texture=self.albedo_texture.value(), limb_shape=self.limb_shape.isChecked(),
-                                  channel=self.channel.currentData(),
-                                  albedo_map=self.albedo_path.text().strip(),
-                                  albedo_strength=self.albedo_strength.value())
+                                  limb_shape=self.limb_shape.isChecked(), channel=self.channel.currentData())
         inc = self.include_rejected.isChecked()
         proj = self.main.ensure_saved()
         if proj is None:

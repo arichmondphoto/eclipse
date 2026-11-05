@@ -227,7 +227,7 @@ def test_limb_glare_removed_and_layer_meets_the_corona(run, tmp_path):
     mos, infos, tex, matches, ref = run
     # Evenly lit, so a dark ring would stand out. The scene's Moon is tiny (42 px radius) but its
     # limb is blurred like a big one's, so the margin is set as for one (the scaled one is 2 px).
-    p = EarthshineParams(limb_darkening=0.0, margin_px=3.0)
+    p = EarthshineParams(margin_px=3.0)
     res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
                                         (0, 0, SIZE, SIZE), p, out_dir=tmp_path, name="t")
     X0, Y0, w, h = res.crop
@@ -293,20 +293,27 @@ def test_limb_glare_that_changes_quickly_round_the_limb():
     assert _corr_with_truth(detail, res.crop, (ref.moon_x, ref.moon_y), tex) > 0.78
 
 
-def test_limb_darkening_in_the_layer(run, tmp_path):
+def test_the_layer_is_evenly_lit(run, tmp_path):
+    """No vignette is drawn on the Moon: the edge of the lunar surface is as bright as the middle
+    (the old Darker towards the limb setting made it 40% of the middle by default)."""
     import tifffile
 
     mos, infos, tex, matches, ref = run
     res, *_ = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
-                               (0, 0, SIZE, SIZE), EarthshineParams(limb_darkening=0.6, keep_glare=0.0, limb_reach=0.0),
+                               (0, 0, SIZE, SIZE), EarthshineParams(keep_glare=0.0, limb_reach=0.0),
                                out_dir=tmp_path, name="d")
     layer = tifffile.imread(res.outputs["earthshine"]).mean(axis=2)
     yy, xx = np.mgrid[0:SIZE, 0:SIZE]
     rf = np.hypot(xx - ref.moon_x, yy - ref.moon_y) / MOON_R
-    middle = np.median(layer[rf < 0.3])
-    edge = np.median(layer[(rf > 0.95) & (rf < 1.0)])
-    assert 0.3 < edge / middle < 0.6  # about 40-50% of the middle near the limb
-
+    # The maria and highlands differ from place to place, so take them out first: fit the layer as
+    # the true surface plus a term that grows towards the limb, and that term must be about zero.
+    true = ndimage.map_coordinates(tex, [yy - ref.moon_y + 64, xx - ref.moon_x + 64], order=1, mode="nearest")
+    m = rf < 0.9
+    A = np.column_stack([np.ones(m.sum()), true[m], rf[m] ** 2])
+    (a, _b, c), *_ = np.linalg.lstsq(A, layer[m], rcond=None)
+    # With the old default vignette c was -0.75 a. What is left (about -0.2 a) is the glare removal
+    # on this small 42 px test Moon, whose steep limb glare takes some of the surface with it.
+    assert abs(c) < 0.35 * a, (a, c)
 
 def test_channel_choice_avoids_red_glare():
     """Glare that is mostly red (chromosphere) by the limb: the automatic choice leaves red out."""
@@ -373,7 +380,7 @@ def test_layer_follows_the_real_limb_and_glows():
     from tse_core.earthshine import EarthshineParams, compose_layer, remove_glare
 
     lin, cx, cy, r, rr, phi, true_r = _limb_scene()
-    p = EarthshineParams(keep_glare=0.5, limb_soften=0.0, limb_darkening=0.0)
+    p = EarthshineParams(keep_glare=0.5, limb_soften=0.0)
     good = rr < r - p.margin(r) - 2
     weight = (rr < r + p.limb_reach + 2).astype(np.float32)
     detail, glare = remove_glare(lin, good, cx, cy, r, EarthshineParams(limb_shape=False))
@@ -391,8 +398,7 @@ def test_layer_follows_the_real_limb_and_glows():
     mid = np.median(layer[rr < 0.5 * r])
     near = np.median(layer[(rr > r - 10) & (rr < r - 4)])
     assert near > mid * 1.15
-    off = compose_layer(detail, good, weight, cx, cy, r, EarthshineParams(keep_glare=0.0, limb_soften=0.0,
-                        limb_darkening=0.0), keep_from=6.0, linear=lin, glare=glare)
+    off = compose_layer(detail, good, weight, cx, cy, r, EarthshineParams(keep_glare=0.0, limb_soften=0.0), keep_from=6.0, linear=lin, glare=glare)
     assert np.median(off[(rr > r - 40) & (rr < r - 25)]) < np.median(layer[(rr > r - 40) & (rr < r - 25)])
     # Nothing beyond the reach of the stack.
     assert layer[rr > r + p.limb_reach].max() == 0
@@ -409,7 +415,7 @@ def test_filled_edge_gets_grain():
     shown = ndimage.gaussian_filter(shown, 0.8)
     band = (rr > r - 8) & (rr < r - 1)
     for grain, expect in ((True, True), (False, False)):
-        p = EarthshineParams(edge_grain=grain, limb_darkening=0.0, limb_reach=0.0)
+        p = EarthshineParams(edge_grain=grain, limb_reach=0.0)
         out = compose_layer(shown, good, good.astype(np.float32), 100, 100, r, p, keep_from=10.0)
         hp = out - ndimage.gaussian_filter(out, 2)
         inner = good & (rr < r - 15) & (rr > r - 30)
@@ -458,7 +464,7 @@ def test_glare_far_above_the_surface_is_shown_as_recorded():
     stripe = patch & (xx % 2 == 0)
     shown = np.where(stripe, 1.25, np.where(patch, 1.10, shown))
     shown = np.where(good, shown, 0).astype(np.float32)
-    p = EarthshineParams(limb_darkening=0.0, limb_reach=0.0, edge_grain=False, brightness=1.0)
+    p = EarthshineParams(limb_reach=0.0, edge_grain=False, brightness=1.0)
     layer = compose_layer(shown, good, good.astype(np.float32), 100, 100, r, p, keep_from=5.0)
     surf, _ = moon_surface(shown, good, np.zeros_like(shown), 100, 100, r, p, 5.0)
     for name, out in (("layer", layer), ("surface", surf[..., 1])):
@@ -479,7 +485,7 @@ def test_layer_keeps_the_colour_at_the_limb():
     weight = (rr < r + 8).astype(np.float32)
     detail, glare = remove_glare(lum, good, cx, cy, r, EarthshineParams(limb_shape=False))
     # A clear glow (the defaults before Nov 2026), so its colour can be measured.
-    p = EarthshineParams(limb_darkening=0.0, keep_glare=0.5, limb_soften=1.5)
+    p = EarthshineParams(keep_glare=0.5, limb_soften=1.5)
     tint = np.array([0.9, 1.0, 1.1], np.float32)
     layer = compose_layer(detail, good, weight, cx, cy, r, p, keep_from=6.0, linear=lum, glare=glare,
                           rgb=rgb, white=(1.0, 1.0, 1.0), tint=tint)
@@ -820,34 +826,6 @@ def test_edge_preserving_keeps_mare_edges_and_removes_noise():
         return int(((t > 0.1) & (t < 0.9)).sum())
 
     assert edge_width(out) <= 3 < edge_width(gauss)
-
-
-def test_albedo_texture_is_added_only_when_asked_and_matched():
-    """The map's fine detail goes into the surface only with albedo_texture > 0 and a map that
-    matches the Moon; the note says plainly that it is a composite."""
-    from test_moonmap import R as MR, TRUTH, make_map  # noqa: F401
-    from tse_core import moonmap as MM
-
-    amap = make_map()
-    n = 340
-    cx = cy = n / 2 - 0.3
-    surf = 1e-3 * MM.render(amap, (n, n), cx, cy, MR, TRUTH)
-    yy, xx = np.mgrid[0:n, 0:n]
-    rr = np.hypot(xx - cx, yy - cy)
-    good = rr < MR - 3
-    rng = np.random.default_rng(3)
-    detail = np.where(good, ndimage.gaussian_filter(surf, 6) + 2e-4 * rng.normal(0, 1, (n, n)), 0).astype(np.float32)
-    shown = detail.copy()
-    p = ES.EarthshineParams(albedo_texture=1.0)
-    out, note = ES.albedo_texture(amap, detail, shown, good, cx, cy, MR, p, TRUTH)
-    assert "ADDED" in note and "not your data" in note
-    fine_truth = surf - ndimage.gaussian_filter(surf, 6)
-    added = out - shown
-    inner = good & (rr < 0.8 * MR)
-    assert np.corrcoef(added[inner], fine_truth[inner])[0, 1] > 0.5
-    other = make_map(seed=13)
-    out2, note2 = ES.albedo_texture(other, detail, shown, good, cx, cy, MR, p)
-    assert "not added" in note2 and np.array_equal(out2, shown)
 
 
 def test_the_filled_edge_band_is_named_in_the_log(run):
