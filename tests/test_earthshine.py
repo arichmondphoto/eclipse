@@ -440,21 +440,30 @@ def test_composite_matches_the_limb_to_the_corona():
     assert min(prof) > 0.6  # and no dark gap where the layers meet
 
 
-def test_glare_far_above_the_surface_is_not_a_flat_patch():
-    from tse_core.earthshine import EarthshineParams, compose_layer
+def test_glare_far_above_the_surface_is_shown_as_recorded():
+    """Glare far brighter than any lunar surface (by a big prominence, with its diffraction spikes)
+    is shown as the data has it, not replaced by a blur of its surroundings. Andy, Nov 2026, on the
+    2024 Moon: the blur made a faceted grey blob with a dark wedge where the glare and spikes are;
+    he wants "that area represented as close to what the data holds as possible", nothing inferred.
+    Here a patch of stripes 1.10 / 1.25 x the brightest surface (as the fan's spikes): it must stay
+    bright, and the stripes must stay stripes."""
+    from tse_core.earthshine import EarthshineParams, compose_layer, moon_surface
 
     n, r = 200, 80.0
     yy, xx = np.mgrid[0:n, 0:n]
     rr = np.hypot(xx - 100, yy - 100)
     good = rr < r - 3
-    shown = ndimage.gaussian_filter(np.random.default_rng(0).normal(0, 1, (n, n)), 2)
-    blob = 20 * np.exp(-((xx - 100) ** 2 + (yy - 160) ** 2) / (2 * 3.0**2))  # glare by a bright prominence
-    shown = np.where(good, shown + blob, 0).astype(np.float32)
-    p = EarthshineParams(limb_darkening=0.0, limb_reach=0.0, edge_grain=False)
-    out = compose_layer(shown, good, good.astype(np.float32), 100, 100, r, p, keep_from=5.0)
-    core = np.hypot(xx - 100, yy - 160) < 2
-    around = (np.hypot(xx - 100, yy - 160) > 10) & (np.hypot(xx - 100, yy - 160) < 16) & good
-    assert out[core].mean() < out[around].mean() + 0.25 * p.brightness  # not a saturated plateau
+    shown = np.random.default_rng(0).uniform(0, 1, (n, n)).astype(np.float32)  # the lunar surface, 0..1
+    patch = (np.abs(yy - 44) < 4) & (np.abs(xx - 100) < 4)  # 64 px: too few to move the stretch
+    stripe = patch & (xx % 2 == 0)
+    shown = np.where(stripe, 1.25, np.where(patch, 1.10, shown))
+    shown = np.where(good, shown, 0).astype(np.float32)
+    p = EarthshineParams(limb_darkening=0.0, limb_reach=0.0, edge_grain=False, brightness=1.0)
+    layer = compose_layer(shown, good, good.astype(np.float32), 100, 100, r, p, keep_from=5.0)
+    surf, _ = moon_surface(shown, good, np.zeros_like(shown), 100, 100, r, p, 5.0)
+    for name, out in (("layer", layer), ("surface", surf[..., 1])):
+        assert out[patch].mean() > 0.9, (name, out[patch].mean())  # bright, as recorded (a blur gave ~0.5)
+        assert out[stripe].mean() > out[patch & ~stripe].mean() + 0.01, name  # the stripes are still there
 
 
 def test_layer_keeps_the_colour_at_the_limb():

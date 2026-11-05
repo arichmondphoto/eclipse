@@ -921,15 +921,8 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
     # Light far above the brightest surface is glare left over (by a bright prominence): it goes
     # into the glow below, on its gentle logarithmic scale, not into the surface as a flat patch.
     excess = np.where(good, np.clip(xs - 1.0, 0.0, None) * span, 0.0)
-    # Under such glare the surface is not known: fill it smoothly from around (no flat patch).
-    over = ndimage.binary_dilation(good & (xs > 1.15), iterations=2)
-    if over.any():
-        ok = good & ~over
-        sig = 6.0
-        fill = ndimage.gaussian_filter(np.where(ok, surf, 0.0), sig) / np.maximum(
-            ndimage.gaussian_filter(ok.astype(np.float32), sig), 1e-6)
-        wgt = ndimage.gaussian_filter(over.astype(np.float32), 1.5)
-        surf = np.where(good, surf * (1 - wgt) + np.clip(fill, 0, 1) * wgt, surf).astype(np.float32)
+    # Glare far above the surface (a big prominence's fan and diffraction spikes) is shown as the
+    # data has it, rolled off towards white by the shoulder: nothing is filled in or smoothed over.
     keep_from = p.margin(moon_r) if keep_from is None else keep_from
     r_in = moon_r - keep_from
     shown_good = good & (rr < r_in)
@@ -1201,14 +1194,9 @@ def moon_surface(shown: np.ndarray, good: np.ndarray, glare: np.ndarray, cx: flo
     lo, hi = np.percentile(shown[body if body.sum() > 100 else good], [0.5, 99.5])
     span = float(hi - lo) or 1.0
     xs = (shown - lo) / span
+    # Glare far above the surface (by a big prominence) is shown as recorded, rolled off towards
+    # white by the shoulder: nothing is filled in or smoothed over (Andy, Nov 2026).
     surf = soft_shoulder(xs)
-    over = ndimage.binary_dilation(good & (xs > 1.15), iterations=2)  # glare by a bright prominence
-    if over.any():
-        ok = good & ~over
-        fill = ndimage.gaussian_filter(np.where(ok, surf, 0.0), 6.0) / np.maximum(
-            ndimage.gaussian_filter(ok.astype(np.float32), 6.0), 1e-6)
-        wgt = ndimage.gaussian_filter(over.astype(np.float32), 1.5)
-        surf = np.where(good, surf * (1 - wgt) + np.clip(fill, 0, 1) * wgt, surf)
     # Over the noisy last pixels, carry the surface out to the limb (with matching grain).
     if p.surface_denoise > 0:
         surf = edge_preserving(surf, good & (rr < moon_r - keep_from), p.surface_denoise)

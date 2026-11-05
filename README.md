@@ -717,8 +717,16 @@ fall-off only allowed to decrease, so a mare in the fan is not taken for
 glare), which the maria do not follow. The prominence's place on the limb
 (on it or just outside) is searched within 2 degrees for the fit that leaves
 least behind. Up to four such sources are fitted, brightest first. On the 2024 stack this removed the fan
-at 74 degrees; before, it was covered by a smooth lighter patch.
-`--no-prominence-glare` (or the checkbox on the tab) turns it off.
+at 74 degrees. `--no-prominence-glare` (or the checkbox on the tab) turns it
+off: the fan and its spikes then stay in the lunar surface as the data has
+them. Removing them cannot bring back what is under them (on the 2024 Moon a
+mare: removal leaves noise there, not the mare), so with it off nothing is
+inferred.
+
+Glare far brighter than any lunar surface is shown as recorded, rolled off
+towards white: nothing is filled in or smoothed over. (Until 5 Nov 2026 such
+spots were replaced by a 6 px blur of their surroundings; on the 2024 Moon
+that drew a faceted grey blob with a dark wedge over the prominence's fan.)
 
 **Albedo map (optional).** `--albedo-map lroc_color_2k.jpg` (or **Albedo
 map** on the Earthshine tab) uses a map of the Moon's surface brightness to
