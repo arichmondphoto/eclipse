@@ -356,9 +356,11 @@ def parse_blend_modes(text: Optional[str]) -> dict:
     for item in text.split(","):
         if ":" in item and "=" in item:
             k, rest = item.split("=", 1)
-            mode = rest.split(":", 1)[1].strip().lower().replace("softlight", "soft light").replace("_", " ")
-            if mode not in ("soft light", "overlay"):
-                raise WorkflowError(f"unknown blend mode {mode!r}; use soft light or overlay")
+            from .enhance import blend_mode_name
+
+            mode = blend_mode_name(rest.split(":", 1)[1])
+            if mode not in ("soft light", "overlay", "linear"):
+                raise WorkflowError(f"unknown blend mode {mode!r}; use soft light, overlay or linear")
             modes[k.strip()] = mode
     return modes
 

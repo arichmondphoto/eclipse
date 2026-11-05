@@ -295,3 +295,40 @@ def test_gated_adaptive_does_not_make_texture_out_of_noise():
     strands_gated = texture(0.15, True)
     assert noise_gated < 0.4 * noise_plain, (noise_gated, noise_plain)
     assert noise_gated < 0.4 * strands_gated, (noise_gated, strands_gated)
+
+
+def test_linear_blend_is_the_papers_weighted_average():
+    """Linear (paper): the images combined as the papers do, a weighted average on the display range
+    (FNRGF paper: Z = K1 X + K2 Y with K1, K2 non-negative and only their ratio mattering; the
+    thesis's FNRGF software scales both images to 0..1 first; MGN: h C'g + (1 - h) C'; the 2011
+    paper's Fig. 9: 0.4 FNRGF + 0.6 ACHF). The natural layer has weight 1 (K1), each Linear layer
+    its strength (K2), which may exceed 1. Nothing clips, the order does not matter, and the result
+    is not re-stretched, so a detail box still matches the full-size result."""
+    valid = np.ones((3, 4), bool)
+    nat = np.array([[0.0, 0.3, 0.5, 1.0]] * 3, np.float32)
+    a = np.array([[0.2, 0.6, 0.4, 0.95]] * 3, np.float32)
+    f = np.array([[0.7, 0.5, 0.45, 0.5]] * 3, np.float32)
+    layers = {"natural": nat, "adaptive": a, "fnrgf": f}
+    w = {"natural": 1, "adaptive": 0.6, "fnrgf": 2.0}  # K2 above 1 (the thesis: "common values are 10 or lower")
+    out = E.soft_light_blend(layers, w, valid, {"adaptive": "linear", "fnrgf": "linear"})
+    expect = (nat + 0.6 * a + 2.0 * f) / 3.6
+    assert np.allclose(out, expect, atol=1e-6)
+    # The paper's MGN form: h C'g + (1 - h) C' with h = 0.7 is the weight (1 - h) / h against the natural layer.
+    mgn = E.soft_light_blend({"natural": nat, "adaptive": a}, {"natural": 1, "adaptive": 0.3 / 0.7}, valid,
+                             {"adaptive": "linear"})
+    assert np.allclose(mgn, 0.7 * nat + 0.3 * a, atol=1e-6)
+    # Soft Light layers are applied to the base first, then averaged with the Linear ones.
+    mixed = E.soft_light_blend(layers, {"natural": 1, "adaptive": 0.6, "fnrgf": 0.5}, valid, {"fnrgf": "linear"})
+    sl = (1 - 0.6) * nat + 0.6 * E.soft_light(nat, a)
+    assert np.allclose(mixed, (sl + 0.5 * f) / 1.5, atol=1e-6)
+    # Near the Moon the filter layers fade out (their data ends there): each weight times the fade.
+    fade = np.full_like(nat, 0.5)
+    half = E.soft_light_blend(layers, w, valid, {"adaptive": "linear", "fnrgf": "linear"}, fade=fade)
+    assert np.allclose(half, (nat + 0.3 * a + 1.0 * f) / 2.3, atol=1e-6)
+
+
+def test_parse_linear_blend_mode():
+    from tse_core import workflow as W
+
+    assert W.parse_blend_modes("fnrgf_n=0.6:linear,adaptive=0.4:Linear (paper)") == {"fnrgf_n": "linear",
+                                                                                     "adaptive": "linear"}

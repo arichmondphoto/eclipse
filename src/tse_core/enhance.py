@@ -102,7 +102,7 @@ class EnhanceParams:
     neutral_background: bool = True  # model and remove the sky (level, colour and gradient) before filtering
     moon_margin_px: float = 1.5
     blend: dict = field(default_factory=lambda: dict(DEFAULT_BLEND))
-    blend_modes: dict = field(default_factory=dict)  # layer -> "soft light" (default) or "overlay"
+    blend_modes: dict = field(default_factory=dict)  # layer -> "soft light" (default), "overlay" or "linear"
 
 
 @dataclass
@@ -678,6 +678,16 @@ def overlay(base: np.ndarray, top: np.ndarray) -> np.ndarray:
 
 
 BLEND_MODES = {"soft light": soft_light, "overlay": overlay}
+# Linear (paper) is not a layer mode applied in turn: see soft_light_blend.
+MODE_NAMES = ("soft light", "overlay", "linear")
+
+
+def blend_mode_name(text) -> str:
+    """'Soft Light', 'softlight', 'Linear (paper)', ... -> 'soft light', 'overlay' or 'linear'."""
+    m = str(text).strip().lower().replace("_", " ").replace("softlight", "soft light")
+    if m.startswith("linear"):
+        return "linear"
+    return m
 
 
 def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Optional[dict] = None,
@@ -686,23 +696,43 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
     """The natural layer as the base, each filter layer applied at its weight (like layer opacity
     in Photoshop) in its mode, soft light unless ``modes`` says overlay. The filter layers are
     centred on mid-grey, which both modes treat as 'no change', so they add structure without
-    lifting the dark sky. Layers are applied in the order natural, NRGF, FNRGF, FNRGF-N, adaptive."""
+    lifting the dark sky. Layers are applied in the order natural, NRGF, FNRGF, FNRGF-N, adaptive.
+
+    Linear (paper) layers are then combined with that base as the papers combine the original and
+    the filtered image: a weighted average on the display range (FNRGF: Z = K1 X + K2 Y with only
+    the ratio mattering, both images scaled to 0..1 in the thesis's software; MGN: h C'g + (1 - h)
+    C'), the base with the natural layer's weight (1, K1) and each layer with its own (K2, which may
+    exceed 1). Nothing clips and nothing is measured, so a detail box matches the full size."""
     modes = modes or {}
     base = layers["natural"].copy() if "natural" in weights else np.full_like(next(iter(layers.values())), 0.5)
+    lin = []
     for k in LAYERS:
         if k == "natural" or k not in weights:
             continue
+        name = blend_mode_name(modes.get(k, "soft light"))
+        if name not in MODE_NAMES:
+            raise ValueError(f"unknown blend mode {modes[k]!r} for {k}; use soft light, overlay or linear")
+        if name == "linear":
+            lin.append((k, max(float(weights[k]), 0.0)))
+            continue
         w = min(max(weights[k], 0.0), 1.0)
-        fn = BLEND_MODES.get(str(modes.get(k, "soft light")).lower().replace("_", " ").replace("softlight", "soft light"))
-        if fn is None:
-            raise ValueError(f"unknown blend mode {modes[k]!r} for {k}; use soft light or overlay")
+        fn = BLEND_MODES[name]
         if fade is not None:  # filter layers fade out towards the Moon, where they have no data
             wf = w * fade
             base = (1 - wf) * base + wf * fn(base, layers[k])
         else:
             base = (1 - w) * base + w * fn(base, layers[k])
+    if lin:
+        k1 = max(float(weights.get("natural", 1.0)), 0.0) if "natural" in weights else 1.0
+        num = k1 * base
+        den = np.full_like(base, k1)
+        for k, w in lin:
+            wk = w * fade if fade is not None else np.float32(w)
+            num = num + wk * layers[k]
+            den = den + wk
+        base = (num / np.maximum(den, 1e-12)).astype(np.float32)
     # No stretch measured over the whole image (a detail box must give the full-size result): the
-    # natural base already runs from black to white, and both modes keep 0..1. The natural
+    # natural base already runs from black to white, and every mode keeps 0..1. The natural
     # layer's midtone curve is already in the base, so it is not measured again here.
     out = np.clip(roll_off(base, shoulder), 0.0, 1.0).astype(np.float32)
     out[~(valid if show is None else show)] = 0.0

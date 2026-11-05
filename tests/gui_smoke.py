@@ -76,6 +76,12 @@ et.layer_checks["nrgf"].setChecked(False)
 et.blend["adaptive"].setValue(10)
 et.blend_mode["adaptive"].setCurrentIndex(1)  # Overlay
 assert et.params().blend_modes["adaptive"] == "overlay"
+et.blend_mode["adaptive"].setCurrentIndex(2)  # Linear (paper): the papers' weighted sum
+assert et.params().blend_modes["adaptive"] == "linear" and et.blend_mode["adaptive"].currentText() == "Linear (paper)"
+et.blend["adaptive"].setValue(250)  # K2 = 2.5: above 100 % in Linear mode
+assert et.params().blend["adaptive"] == 2.5
+et.blend["adaptive"].setValue(10)
+et.blend_mode["adaptive"].setCurrentIndex(1)
 os.environ["STUB_SAVE"] = str(T / "out" / "custom_blend.tif")  # the name the user types
 et.run()
 assert Path(et.outputs["blend"]).name == "custom_blend.tif" and Path(et.outputs["natural"]).name == "custom_natural.tif"

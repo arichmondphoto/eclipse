@@ -149,7 +149,9 @@ def main(argv: list[str] | None = None) -> int:
                    help=f"comma-separated layers to write, from {', '.join(LAYERS)} (default: all but achf, which "
                         "takes minutes on a full frame)")
     p.add_argument("--blend", default=",".join(f"{k}={v}" for k, v in DEFAULT_BLEND.items()),
-                   help="suggested blend as layer=weight pairs, each optionally ':overlay' (default soft light), "
+                   help="suggested blend as layer=weight pairs, each optionally ':overlay' or ':linear' (the papers' "
+                        "weighted average (K1 X + K2 Y) / (K1 + K2), the natural layer's weight as K1 and the layer's "
+                        "as K2, which may exceed 1; default soft light), "
                         "e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s)")
     p.add_argument("--order", type=int, default=10, help="FNRGF Fourier order (default 10)")
     p.add_argument("--segments", type=int, default=50, help="FNRGF angular segments (default 50)")

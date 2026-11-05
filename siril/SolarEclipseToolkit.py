@@ -1109,7 +1109,12 @@ class EnhanceTab(StepTab):
         for k, default in (("fnrgf_n", 0), ("adaptive", 0), ("achf", 0), ("fnrgf", 0), ("nrgf", 0)):
             sp = self._spin(0, 100, default, " %")
             mode = QComboBox()
-            mode.addItems(["Soft Light", "Overlay"])
+            for text, name in (("Soft Light", "soft light"), ("Overlay", "overlay"), ("Linear (paper)", "linear")):
+                mode.addItem(text, name)
+            # Linear (paper): the strength is K2 against the natural layer's 1, up to 10 (1000 %) as in
+            # Druckmüllerová's FNRGF software; Soft Light and Overlay are opacities, at most 100 %.
+            mode.currentIndexChanged.connect(
+                lambda _i, sp=sp, mode=mode: sp.setMaximum(1000 if mode.currentData() == "linear" else 100))
             mode.currentIndexChanged.connect(self.changed)
             row = QHBoxLayout()
             row.addWidget(sp, 1)
@@ -1272,17 +1277,27 @@ class EnhanceTab(StepTab):
             _tip(c, layer_tips[k] + "\n\nTicked layers are written as 16-bit TIFFs by 'Write full-size layers'. "
                  "The preview always shows every layer.")
         blend_tip = ("How strongly this layer is applied over the natural layer in the blend, like layer "
-                     "opacity in Photoshop. 0 % leaves it out. The mode beside it picks Soft Light or Overlay.\n\n"
-                     "Both modes treat mid-grey as 'no change', so the filter layers add structure without "
-                     "lifting the dark sky. Default 0 % for every layer (the blend is then the natural layer); "
+                     "opacity in Photoshop. 0 % leaves it out. The mode beside it picks Soft Light, Overlay or Linear (paper).\n\n"
+                     "Soft Light and Overlay treat mid-grey as 'no change', so the filter layers add structure without "
+                     "lifting the dark sky (up to 100 %). With Linear (paper) the strength is the layer's weight "
+                     "against the natural layer's 100 % (up to 1000 %). Default 0 % for every layer (the blend is "
+                     "then the natural layer); "
                      "try FNRGF-N 50-70 % and adaptive 50-80 %, Soft Light. Each strength plays the papers' K2 (MGN: 1 - h), "
                      "the weight of the filtered image against the original.")
         for k, sp in self.blend.items():
             _tip(sp, f"{LAYER_NAMES[k]}: " + blend_tip, bf)
-            _tip(self.blend_mode[k], "How this layer is applied, as Photoshop's layer modes. Both treat mid-grey "
-                 "as 'no change', so the sky stays dark.\n\nSoft Light (default): gentle, keeps the natural "
-                 "tones.\n\nOverlay: stronger, adds more contrast, mostly in the mid-tones. Use a lower "
-                 "strength with Overlay (for example 5-20 %).")
+            _tip(self.blend_mode[k], "How this layer is applied.\n\nSoft Light (default): Photoshop's mode; gentle, "
+                 "keeps the natural tones, adds least in the darkest and brightest parts, and treats mid-grey as 'no "
+                 "change', so the sky stays dark.\n\nOverlay: Photoshop's mode; stronger, adds more contrast, mostly "
+                 "in the mid-tones. Use a lower strength (for example 5-20 %).\n\nLinear (paper): the images combined "
+                 "as the papers do, a weighted average Z = (K1 X + K2 Y) / (K1 + K2): the FNRGF paper's Z = K1 X + "
+                 "K2 Y on the display range (Druckmüllerová's software scales both images to 0-1 first), and MGN's "
+                 "h x original + (1 - h) x filtered. The natural layer (after any Soft Light or Overlay layers) has "
+                 "weight 1 (K1); the strength here is K2, up to 1000 %. Nothing clips, but as in the published "
+                 "images the dark sky comes up towards grey and the natural tones flatten by the filtered image's "
+                 "share. Examples: MGN's h = 0.7 is 43 % ((1 - h) / h); the 2011 paper's 0.4 FNRGF + 0.6 ACHF is "
+                 "both layers on Linear at 40 % and 60 % with the natural layer's own share left in. In Photoshop: "
+                 "Normal mode at opacity K2 / (1 + K2) for one layer.")
         for size, sp in zip(self.achf_size, self.achf_w):
             _tip(size, "Adaptive (ACHF) only: the width (sigma) of this scale's kernel in pixels of your full-size "
                  "stack; the structure about this size and finer is brought out. The thesis uses 0.5-64 px. Kept as "
@@ -1436,7 +1451,7 @@ class EnhanceTab(StepTab):
         blend = {"natural": 1.0}
         blend.update({k: sp.value() / 100.0 for k, sp in self.blend.items() if sp.value() > 0})
         layers = tuple(k for k, c in self.layer_checks.items() if c.isChecked())
-        modes = {k: c.currentText().lower() for k, c in self.blend_mode.items() if k in blend}
+        modes = {k: c.currentData() or c.currentText().lower() for k, c in self.blend_mode.items() if k in blend}
         return EnhanceParams(layers=layers, segments=self.segments.value(), order=self.order.value(),
                              noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(), even=self.even.value(), midtone=self.midtone.value(), noise_gate=self.noise_gate.value(), mgn_k=self.mgn_k.value(),
                              achf_scales=tuple(self.achf_frac),
