@@ -18,6 +18,12 @@ SIZE, SUN, RS = 400, (200.0, 200.0), 40.0
 MOON_R = RS * 1.055
 
 
+# The settings these method tests were written for. The test Moon is 42 px in radius, a tenth of a
+# 400 mm Moon, so its maria are large against the disc: the default glare surface (order 6, chosen
+# by eye on the 2024 Moon, R = 436 px) is flexible enough here to take them away with the glare.
+SMALL_MOON = dict(glare_order=2, smooth=1.0, edge_smooth=3.0, brightness=0.6)
+
+
 def _surface(seed=3):
     """Maria and highlands: smooth blobs, fixed to the Moon (coordinates relative to its centre)."""
     rng = np.random.default_rng(seed)
@@ -81,7 +87,7 @@ def test_moon_aligned_stack_recovers_surface(run, tmp_path):
 
     mos, infos, tex, matches, ref = run
     res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
-                                        (0, 0, SIZE, SIZE), EarthshineParams(), out_dir=tmp_path, name="t")
+                                        (0, 0, SIZE, SIZE), EarthshineParams(**SMALL_MOON), out_dir=tmp_path, name="t")
     c = _corr_with_truth(detail, res.crop, (ref.moon_x, ref.moon_y), tex)
     # (The test Moon is small, 42 px: the band by the limb where glare is fitted round the limb
     # is a fifth of it. On a real 400 mm Moon it is a few percent.)
@@ -227,7 +233,7 @@ def test_limb_glare_removed_and_layer_meets_the_corona(run, tmp_path):
     mos, infos, tex, matches, ref = run
     # Evenly lit, so a dark ring would stand out. The scene's Moon is tiny (42 px radius) but its
     # limb is blurred like a big one's, so the margin is set as for one (the scaled one is 2 px).
-    p = EarthshineParams(margin_px=3.0)
+    p = EarthshineParams(margin_px=3.0, **SMALL_MOON)
     res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
                                         (0, 0, SIZE, SIZE), p, out_dir=tmp_path, name="t")
     X0, Y0, w, h = res.crop
@@ -238,7 +244,7 @@ def test_limb_glare_removed_and_layer_meets_the_corona(run, tmp_path):
     middle = rr < MOON_R * 0.6
     assert abs(np.median(sm[edge]) - np.median(sm[middle])) < 3e-5
     _, _, plain = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
-                                   (0, 0, SIZE, SIZE), EarthshineParams(limb_glare=False, margin_px=3.0))
+                                   (0, 0, SIZE, SIZE), EarthshineParams(limb_glare=False, margin_px=3.0, **SMALL_MOON))
     sp = ndimage.gaussian_filter(plain, 2.0)
     assert np.median(sp[edge]) - np.median(sp[middle]) > 6e-5  # the test does contain a rim to remove
     # The layer is filled right out to the corona's edge and soft only beyond it.
@@ -279,7 +285,7 @@ def test_limb_glare_that_changes_quickly_round_the_limb():
     matches = {f.index: Match(f.index, f.nominal_ratio, 0.0, f.nominal_ratio, 0.0, 0) for f in infos}
     ref = infos[1]
     res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
-                                        (0, 0, SIZE, SIZE), EarthshineParams())
+                                        (0, 0, SIZE, SIZE), EarthshineParams(**SMALL_MOON))
     X0, Y0, w, h = res.crop
     yy, xx = np.mgrid[0:h, 0:w]
     cx, cy = ref.moon_x - X0, ref.moon_y - Y0
@@ -380,10 +386,10 @@ def test_layer_follows_the_real_limb_and_glows():
     from tse_core.earthshine import EarthshineParams, compose_layer, remove_glare
 
     lin, cx, cy, r, rr, phi, true_r = _limb_scene()
-    p = EarthshineParams(keep_glare=0.5, limb_soften=0.0)
+    p = EarthshineParams(keep_glare=0.5, limb_soften=0.0, **SMALL_MOON)
     good = rr < r - p.margin(r) - 2
     weight = (rr < r + p.limb_reach + 2).astype(np.float32)
-    detail, glare = remove_glare(lin, good, cx, cy, r, EarthshineParams(limb_shape=False))
+    detail, glare = remove_glare(lin, good, cx, cy, r, EarthshineParams(limb_shape=False, **SMALL_MOON))
     layer = compose_layer(detail, good, weight, cx, cy, r, p, keep_from=6.0, linear=lin, glare=glare)
     # The edge (the steepest rise from the dark Moon to the corona) follows the bumps.
     edges = []
@@ -398,7 +404,7 @@ def test_layer_follows_the_real_limb_and_glows():
     mid = np.median(layer[rr < 0.5 * r])
     near = np.median(layer[(rr > r - 10) & (rr < r - 4)])
     assert near > mid * 1.15
-    off = compose_layer(detail, good, weight, cx, cy, r, EarthshineParams(keep_glare=0.0, limb_soften=0.0), keep_from=6.0, linear=lin, glare=glare)
+    off = compose_layer(detail, good, weight, cx, cy, r, EarthshineParams(keep_glare=0.0, limb_soften=0.0, **SMALL_MOON), keep_from=6.0, linear=lin, glare=glare)
     assert np.median(off[(rr > r - 40) & (rr < r - 25)]) < np.median(layer[(rr > r - 40) & (rr < r - 25)])
     # Nothing beyond the reach of the stack.
     assert layer[rr > r + p.limb_reach].max() == 0
@@ -483,9 +489,9 @@ def test_layer_keeps_the_colour_at_the_limb():
     lum = rgb.mean(axis=0)
     good = rr < r - 5
     weight = (rr < r + 8).astype(np.float32)
-    detail, glare = remove_glare(lum, good, cx, cy, r, EarthshineParams(limb_shape=False))
+    detail, glare = remove_glare(lum, good, cx, cy, r, EarthshineParams(limb_shape=False, **SMALL_MOON))
     # A clear glow (the defaults before Nov 2026), so its colour can be measured.
-    p = EarthshineParams(keep_glare=0.5, limb_soften=1.5)
+    p = EarthshineParams(keep_glare=0.5, limb_soften=1.5, **SMALL_MOON)
     tint = np.array([0.9, 1.0, 1.1], np.float32)
     layer = compose_layer(detail, good, weight, cx, cy, r, p, keep_from=6.0, linear=lum, glare=glare,
                           rgb=rgb, white=(1.0, 1.0, 1.0), tint=tint)
@@ -842,15 +848,19 @@ def test_the_filled_edge_band_is_named_in_the_log(run):
 def test_defaults_as_andy_uses_them():
     """Nov 2026, from Andy's work on the 2024 Moon: a faint glow (0.10) and no extra softening are
     what blend best when pasting, and the prominence glare is left as the data has it (removing it
-    cannot bring back what is under it). The command line has the same defaults."""
+    cannot bring back what is under it). Later in Nov: no smoothing of any kind by default (the
+    surface as the stack has it), full brightness, and the most flexible glare surface (order 6).
+    The command line has the same defaults."""
     import sys
     from pathlib import Path
 
     p = EarthshineParams()
     assert (p.keep_glare, p.limb_soften, p.source_glare) == (0.1, 0.0, False)
+    assert (p.smooth, p.edge_smooth, p.surface_denoise, p.brightness, p.glare_order) == (0.0, 0.0, 0.0, 1.0, 6)
     sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
     from cli_reference import parser
 
     sp = parser()._subparsers._group_actions[0].choices["earthshine"]
     a = sp.parse_args(["proj.json"])
     assert (a.keep_glare, a.limb_soften, a.prominence_glare) == (0.1, 0.0, False)
+    assert (a.smooth, a.edge_smooth, a.surface_denoise, a.brightness, a.glare_order) == (0.0, 0.0, 0.0, 1.0, 6)

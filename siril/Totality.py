@@ -1841,7 +1841,7 @@ class EarthshineTab(StepTab):
         f = QFormLayout(box)
         self.glare = QSpinBox()
         self.glare.setRange(1, 6)
-        self.glare.setValue(2)
+        self.glare.setValue(6)
         f.addRow("Glare smoothness:", self.glare)
         self.limb_glare = QCheckBox("Remove the bright glare along the limb")
         self.limb_glare.setChecked(True)
@@ -1852,16 +1852,16 @@ class EarthshineTab(StepTab):
         self.limb_shape = QCheckBox("Keep maria by the limb (glare only fades inward)")
         self.limb_shape.setChecked(True)
         f.addRow(self.limb_shape)
-        self.smooth = spin(0.0, 5.0, 0.5, 1.0, " px")
+        self.smooth = spin(0.0, 5.0, 0.5, 0.0, " px")
         f.addRow("Smoothing:", self.smooth)
-        self.edge_smooth = spin(0.0, 12.0, 0.5, 3.0, " px")
+        self.edge_smooth = spin(0.0, 12.0, 0.5, 0.0, " px")
         f.addRow("Smoothing near the limb:", self.edge_smooth)
         self.surface_denoise = spin(0.0, 10.0, 0.5, 0.0, " px")
         f.addRow("Edge-preserving smoothing:", self.surface_denoise)
         self.edge_grain = QCheckBox("Grain in the filled edge, like the rest of the surface")
         self.edge_grain.setChecked(True)
         f.addRow(self.edge_grain)
-        self.brightness = spin(0.1, 1.0, 0.05, 0.6)
+        self.brightness = spin(0.1, 1.0, 0.05, 1.0)
         f.addRow("Brightness:", self.brightness)
         self.colour = QCheckBox("Natural colour (the earthshine's own tint)")
         self.colour.setChecked(True)
@@ -1987,11 +1987,12 @@ class EarthshineTab(StepTab):
              "camera has twice as many green pixels, so green usually gives a cleaner Moon than the average of all "
              "three. Automatic tries all, green and green + blue on your stack and picks the cleanest; the log "
              "shows the scores.", fs)
-        _tip(self.glare, "How flexible the glare surface removed from the disc is (polynomial order). Glare from "
-             "the corona is a gentle gradient, so 2 (default) is usually right. Higher removes uneven glare but "
-             "also starts removing large maria; 1 removes a straight gradient only.", f)
-        _tip(self.smooth, "Softens the noise in the layer, in pixels. Earthshine is faint, so a little smoothing "
-             "(default 1) helps; 0 for none, 2-3 for very noisy data."
+        _tip(self.glare, "How flexible the glare surface removed from the disc is (polynomial order). 6 (default) "
+             "is the most flexible and follows uneven glare best. If large maria look washed out, lower it: "
+             "2 removes only a gentle gradient, 1 a straight gradient.", f)
+        _tip(self.smooth, "Softens the noise in the layer, in pixels. 0 (default) = none, the surface as the "
+             "stack has it; 1 for a little, 2-3 for very noisy data (Edge-preserving smoothing keeps the "
+             "maria's edges crisper)."
              "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
              "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
              "smaller pixels, raise them in proportion; with a shorter lens, lower them.", f)
@@ -2018,12 +2019,12 @@ class EarthshineTab(StepTab):
              "yours). Needs Stack earthshine again.")
         _tip(self.edge_smooth, "The last pixels by the limb are much noisier (the long exposures are saturated "
              "there), so they get extra smoothing, up to this many pixels where the noise is highest. The rest "
-             "of the Moon only gets the Smoothing above. Default 3; lower it to keep more grain at the edge."
+             "of the Moon only gets the Smoothing above. 0 (default) = none; about 3 if the edge looks too grainy."
              "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
              "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
              "smaller pixels, raise them in proportion; with a shorter lens, lower them.", f)
-        _tip(self.brightness, "How bright the brightest lunar surface is in the layer, from 0 to 1. Earthshine is "
-             "much fainter than the corona, so the default 0.6 keeps it subdued; adjust to taste in Photoshop.", f)
+        _tip(self.brightness, "How bright the brightest lunar surface is in the layer, from 0 to 1. 1 (default) = "
+             "full brightness; lower it to keep the Moon more subdued against the corona.", f)
         _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken; "
              "they would blur the lunar surface.")
 

@@ -675,7 +675,8 @@ corona alignment and adds a shift that puts its Moon where the Moon is in
 the HDR stack's Moon frame. Only exposures within `--stops` (default 6) of
 the longest are used. The glare from the inner corona inside the disc, a
 gentle gradient, is removed with a smooth surface (`--glare-order`, default
-2; higher orders start removing large maria too). Close to the limb the glare
+6, the most flexible; if large maria look washed out, lower it: 2 removes only
+a gentle gradient). Close to the limb the glare
 climbs steeply (10-20x the earthshine) because the bright inner corona,
 the chromosphere and prominences are only pixels away, and it changes
 within a few degrees round the limb. Terms that fall off with distance
@@ -768,17 +769,17 @@ looks pasted in, so the layer is built like a photograph of the limb:
   filled from just inside, get grain matching the surface next to them
   (`--no-edge-grain` to leave them smooth).
 
-**Pixel settings.** Smoothing (1 px), edge smoothing (3 px), edge softening
-(0 by default) and the suggested edge-preserving smoothing (3-5 px) are in
-pixels, and so are two internal widths (the layer reaches 6 px past the
+**Pixel settings.** Smoothing, edge smoothing and edge softening (all 0, off,
+by default; about 1, 3 and 1-2 px when wanted) and the suggested edge-preserving
+smoothing (3-5 px) are in pixels, and so are two internal widths (the layer reaches 6 px past the
 limb; the corona layers' black disc ends 1.5 px past it). They were chosen
 for a 400 mm lens on a 45-megapixel full-frame camera, where the Sun is
 about 410 px in radius; the Align log's "Sun centre" line gives yours. With
 a longer lens or smaller pixels, raise the settings in proportion; with a
 shorter lens, lower them.
 
-The shown layer gets a little extra smoothing (up to `--edge-smooth`, 3 px)
-only where the noise is high: the last pixels by the limb, where the long
+The shown layer can get extra smoothing (up to `--edge-smooth` px, default 0,
+off; 3 is a good start) only where the noise is high: the last pixels by the limb, where the long
 exposures are saturated. Real structure such as diffraction spikes from a
 bright prominence is left alone. Where the noise (measured on the picture
 itself, ring by ring) is still ~10x that of the middle, and at least over
@@ -1176,15 +1177,15 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--no-prominence-glare` | the default since Nov 2026; kept so older command lines still run |
 | `--no-limb-shape` | do not fit the limb glare as light fading inward (that fit keeps maria by the limb) |
 | `--channel` | colour channels to make the earthshine from (default auto: chosen on the stack; the red channel carries most of the chromosphere glare) |
-| `--glare-order` | smoothness of the glare removed from the disc: polynomial order (default 2) |
-| `--smooth` | smoothing of the layer in pixels (default 1, 0 = none) |
-| `--brightness` | brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona) |
+| `--glare-order` | smoothness of the glare removed from the disc: polynomial order, 1-6 (default 6, the most flexible; 2 = a gentle gradient) |
+| `--smooth` | smoothing of the layer in pixels (default 0 = none) |
+| `--brightness` | brightest lunar surface in the layer, 0-1 (default 1) |
 | `--keep-glare` | earthshine layer for pasting: how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1) |
 | `--limb-soften` | earthshine layer for pasting: extra softening of the limb in px, on top of the real one (default 0 = none) |
 | `--no-colour` | make the earthshine layer grey (default: natural colour, so a prominence at the limb stays red on the Moon side too) |
 | `--no-edge-grain` | leave the filled last pixels by the limb smooth (default: grain like the rest) |
 | `--surface-denoise` | edge-preserving smoothing of the lunar surface, px (0 = off; e.g. 4): maria keep crisp edges |
-| `--edge-smooth` | most smoothing of the noisier pixels near the limb, px (default 3) |
+| `--edge-smooth` | most smoothing of the noisier pixels near the limb, px (default 0 = none; e.g. 3) |
 | `--include-rejected` | also use frames marked as rejected |
 | `--output`, `-o` | output folder (default: next to the project) |
 | `--name` | output file name prefix (default: the project name) |

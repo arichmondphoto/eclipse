@@ -228,11 +228,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--channel", default="auto", choices=["auto", "all", "green", "green+blue", "blue"],
                    help="colour channels to make the earthshine from (default auto: chosen on the stack; the red "
                         "channel carries most of the chromosphere glare)")
-    p.add_argument("--glare-order", type=int, default=2,
-                   help="smoothness of the glare removed from the disc: polynomial order (default 2)")
-    p.add_argument("--smooth", type=float, default=1.0, help="smoothing of the layer in pixels (default 1, 0 = none)")
-    p.add_argument("--brightness", type=float, default=0.6,
-                   help="brightest lunar surface in the layer, 0-1 (default 0.6, dimmer than the corona)")
+    p.add_argument("--glare-order", type=int, default=6,
+                   help="smoothness of the glare removed from the disc: polynomial order, 1-6 (default 6, the most "
+                        "flexible; 2 = a gentle gradient)")
+    p.add_argument("--smooth", type=float, default=0.0, help="smoothing of the layer in pixels (default 0 = none)")
+    p.add_argument("--brightness", type=float, default=1.0,
+                   help="brightest lunar surface in the layer, 0-1 (default 1)")
     p.add_argument("--keep-glare", type=float, default=0.1,
                    help="earthshine layer for pasting: how much of the removed glare to keep as a glow inside the "
                         "limb, 0-1 (default 0.1)")
@@ -246,8 +247,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="leave the filled last pixels by the limb smooth (default: grain like the rest)")
     p.add_argument("--surface-denoise", type=float, default=0.0,
                    help="edge-preserving smoothing of the lunar surface, px (0 = off; e.g. 4): maria keep crisp edges")
-    p.add_argument("--edge-smooth", type=float, default=3.0,
-                   help="most smoothing of the noisier pixels near the limb, px (default 3)")
+    p.add_argument("--edge-smooth", type=float, default=0.0,
+                   help="most smoothing of the noisier pixels near the limb, px (default 0 = none; e.g. 3)")
     p.add_argument("--include-rejected", action="store_true", help="also use frames marked as rejected")
     p.add_argument("--output", "-o", help="output folder (default: next to the project)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")

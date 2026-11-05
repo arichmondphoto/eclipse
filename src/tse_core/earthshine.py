@@ -44,10 +44,10 @@ class EarthshineParams:
     # Stay this far inside the lunar limb (limb glare, chromosphere), full-res px. None: scaled to
     # the Moon's size, 0.7% of its radius, at least 2 px (3 px for the 2024 D850 at 400 mm).
     margin_px: Optional[float] = None
-    glare_order: int = 2  # polynomial order of the glare (a gentle gradient); higher also eats large maria
-    smooth: float = 1.0  # Gaussian smoothing of the shown layer, px (0 = none)
-    brightness: float = 0.6  # brightest lunar surface in the layer, 0..1 (the corona stays brighter)
-    edge_smooth: float = 3.0  # most smoothing where the noise is high near the limb, px
+    glare_order: int = 6  # polynomial order of the glare; lower = gentler (2 is a plain gradient)
+    smooth: float = 0.0  # Gaussian smoothing of the shown layer, px (0 = none)
+    brightness: float = 1.0  # brightest lunar surface in the layer, 0..1
+    edge_smooth: float = 0.0  # most smoothing where the noise is high near the limb, px
     limb_glare: bool = True  # also model the steep glare just inside the limb
     limb_shape: bool = True  # fit the limb glare as light fading inward, round the limb (keeps maria by the limb)
     # Glare round a bright prominence (a fan with diffraction spikes), fitted from the prominence and
