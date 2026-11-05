@@ -83,3 +83,20 @@ def test_without_cache_nothing_is_kept(frame):
     f = frame()
     E.render(f, P, box=(60, 160, 300, 420))
     assert "layers" not in f.cache
+
+
+def test_preview_log_gives_the_mgn_sizes_as_set():
+    """The reduced preview divides the MGN sizes by its reduction; its log line must still give the
+    sizes as set on the tab (full-size px), with the preview's own pixels named as such (it said
+    "Adaptive filter scales (px): 0.2, ..." for 1.25 px, Nov 2026)."""
+    from tse_core import workflow as W
+
+    z = np.load(DATA)
+    hdr = np.ascontiguousarray(np.moveaxis(z["hdr"].astype(np.float32) * float(z["scale"]), 0, -1))
+    geo = {k: float(z[k]) for k in ("SUNX", "SUNY", "SUNR", "MOONX", "MOONY", "MOONR")}
+    data = W.HdrData(hdr, (np.abs(hdr).sum(axis=2) > 0).astype(np.float32), geo, "x", binning=6)
+    p = E.EnhanceParams(layers=("adaptive",), blend={})
+    _, result, _ = W.enhance_whole_preview(data, p)
+    text = result.describe()
+    assert "1.25, 2.5, 5, 10, 20, 40 px of the full-size stack" in text, text
+    assert "in this preview, reduced 6x" in text, text

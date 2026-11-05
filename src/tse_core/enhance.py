@@ -1268,14 +1268,20 @@ class EnhanceResult:
     white: list
     noise_scale: float
     background: list
-    scales: list
+    scales: list  # Adaptive (MGN) kernel widths, px of the image rendered
     notes: list = field(default_factory=list)
+    reduction: int = 1  # the preview's reduction (1 = full size)
 
     def describe(self) -> str:
+        full = ", ".join(f"{s * self.reduction:g}" for s in self.scales)
+        mgn = f"Adaptive (MGN) scales: {full} px of the full-size stack"
+        if self.reduction > 1:
+            mgn += (f" ({', '.join(f'{s:.2g}' for s in self.scales)} px in this preview, reduced "
+                    f"{self.reduction}x)")
         lines = [f"White balance multipliers (R, G, B): {', '.join(f'{v:.3f}' for v in self.white)}",
                  f"Sky removed, typical level after white balance (R, G, B): "
                  f"{', '.join(f'{v:.3g}' for v in self.background)}",
-                 f"Adaptive filter scales (px): {', '.join(f'{s:.1f}' for s in self.scales)}"]
+                 mgn]
         lines += [f"{k}: {v}" for k, v in self.layers.items()]
         lines += [f"Note: {n}" for n in self.notes]
         return "\n".join(lines)

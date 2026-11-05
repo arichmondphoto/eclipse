@@ -468,7 +468,8 @@ def enhance_whole_preview(data: HdrData, params, frame=None, say: Optional[Say] 
     unknown = set(p.blend) - set(LAYERS)
     if unknown:
         notes.append(f"unknown blend layer(s) ignored: {', '.join(sorted(unknown))}")
-    result = EnhanceResult({}, frame.wb.tolist(), frame.nlev, frame.bg.tolist(), _mgn_scales(p, frame.g), notes)
+    result = EnhanceResult({}, frame.wb.tolist(), frame.nlev, frame.bg.tolist(), _mgn_scales(p, frame.g), notes,
+                           reduction=int(data.binning))
     return frame, result, layers
 
 
