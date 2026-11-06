@@ -117,13 +117,17 @@ def test_edge_fill_has_no_teeth(disc):
 
 def test_edge_fill_does_not_depend_on_the_weights(disc):
     """The real stack weights can understate the noise by the limb (this run showed a dashed
-    edge where the preview, with other weights, did not): the fill depth must not rely on them."""
+    edge where the preview, with other weights, did not): the fill depth must not rely on them.
+    With Filled edge at 0 (the default since Nov 2026) the noise alone decides it: 4 px on this
+    binned stack with either weights; with the old 2.5% minimum both were 2.5% of the radius."""
     lum, weight, good, cx, cy, r, rr, phi = disc
     flat = np.where(good, 1.0, 0.0).astype(np.float32)
-    _, _, _, keep_flat, _ = ES.process_disc(lum, flat, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
-    _, _, _, keep, _ = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(smooth=0.5))
-    assert keep_flat >= 0.025 * r
-    assert abs(keep_flat - keep) <= 3
+    for fill in (0.0, 2.5):
+        p = ES.EarthshineParams(smooth=0.5, edge_fill=fill)
+        _, _, _, keep_flat, _ = ES.process_disc(lum, flat, good, cx, cy, r, p)
+        _, _, _, keep, _ = ES.process_disc(lum, weight, good, cx, cy, r, p)
+        assert keep_flat >= max(p.margin(r), fill / 100 * r) - 1e-6
+        assert abs(keep_flat - keep) <= 3
 
 
 def test_detail_is_kept_near_the_limb(disc):
@@ -161,15 +165,15 @@ def test_prominence_fan_is_taken_away(disc):
 
 
 def test_filled_edge_minimum_is_a_setting_in_percent_of_the_radius(disc):
-    """The filled band by the limb is at least ``edge_fill`` % of the Moon's radius (default 2.5%:
-    10.9 px on the full-size 2024 Moon), so it scales with any lens and camera. At 0 the noise rule
-    alone decides: on the full-size 2024 stack that was the last 6 px (1.4%)."""
+    """The filled band by the limb is at least ``edge_fill`` % of the Moon's radius, so it scales with
+    any lens and camera (2.5%: 10.9 px on the full-size 2024 Moon). At 0, the default since Nov 2026
+    (Andy), the noise rule alone decides: on the full-size 2024 stack that was the last 6 px (1.4%)."""
     lum, weight, good, cx, cy, r, rr, phi = disc
     keep = {}
     for pct in (0.0, 2.5, 5.0):
         *_, keep[pct], notes = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(edge_fill=pct))
         assert any(f"{keep[pct]:.1f} px inside the limb" in n for n in notes), notes
-    assert ES.EarthshineParams().edge_fill == 2.5
+    assert ES.EarthshineParams().edge_fill == 0.0
     assert keep[2.5] == pytest.approx(0.025 * r, abs=0.01)
     assert keep[5.0] == pytest.approx(0.05 * r, abs=0.01)
     assert keep[0.0] < 0.025 * r

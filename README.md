@@ -796,10 +796,10 @@ The shown layer can get extra smoothing (up to `--edge-smooth` px, default 0,
 off; 3 is a good start) only where the noise is high: the last pixels by the limb, where the long
 exposures are saturated. Real structure such as diffraction spikes from a
 bright prominence is left alone. Where the noise (measured on the picture
-itself, ring by ring) is still ~10x that of the middle, and at least over
-the last 2.5% of the radius (~11 px at 400 mm; **Filled edge, at least**,
-`--edge-fill`, in % of the radius so it is the same on any lens and camera;
-lower it to see more of your data by the limb, leftover glare included), the edge is filled out to 1.5 px past the limb
+itself, ring by ring) is still ~10x that of the middle (and, if you set
+**Filled edge, at least** / `--edge-fill`, at least over that % of the radius,
+so it is the same on any lens and camera; default 0, the noise alone decides;
+2.5% is ~11 px at 400 mm and hides leftover glare right at the edge), the edge is filled out to 1.5 px past the limb
 with the brightness just inside, taken round the limb in ~16 px steps
 (a median, so single noisy pixels do not show as teeth) and blended in. That is where the corona layers' black disc ends, so no dark
 ring shows between them. No shading is drawn over the disc: the lunar
@@ -1200,7 +1200,7 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--keep-glare` | earthshine layer for pasting: how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1) |
 | `--limb-soften` | earthshine layer for pasting: extra softening of the limb in px, on top of the real one (default 0 = none) |
 | `--no-colour` | make the earthshine layer grey (default: natural colour, so a prominence at the limb stays red on the Moon side too) |
-| `--edge-fill` | fill at least this % of the Moon's radius just inside the limb from further in (default 2.5, 10.9 px on a 400 mm Moon; 0 = only where the noise is over 10x the middle's) |
+| `--edge-fill` | fill at least this % of the Moon's radius just inside the limb from further in (default 0: only where the noise is over 10x the middle's; 2.5 = 10.9 px on a 400 mm Moon) |
 | `--no-edge-grain` | leave the filled last pixels by the limb smooth (default: grain like the rest) |
 | `--surface-denoise` | edge-preserving smoothing of the lunar surface, px (0 = off; e.g. 4): maria keep crisp edges |
 | `--edge-smooth` | most smoothing of the noisier pixels near the limb, px (default 0 = none; e.g. 3) |

@@ -66,7 +66,8 @@ class EarthshineParams:
     edge_grain: bool = True  # put grain like the rest of the surface into the filled last pixels
     # The last pixels inside the limb are filled from just inside: at least this % of the Moon's radius
     # (2.5% = 10.9 px on a 400 mm Moon on a 45 MP full-frame camera), wider where the noise says so.
-    edge_fill: float = 2.5
+    # 0 (default since Nov 2026): only where the noise says so.
+    edge_fill: float = 0.0
     colour: bool = True  # natural colour: the glow and limb (prominences red) and the earthshine's own tint
     saturation: float = 1.0  # colour saturation, as for the corona layers (0 = grey)
     saturation_level: float = 0.95

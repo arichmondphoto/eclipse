@@ -246,9 +246,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-colour", action="store_true",
                    help="make the earthshine layer grey (default: natural colour, so a prominence at the limb "
                         "stays red on the Moon side too)")
-    p.add_argument("--edge-fill", type=float, default=2.5,
+    p.add_argument("--edge-fill", type=float, default=0.0,
                    help="fill at least this %% of the Moon's radius just inside the limb from further in (default "
-                        "2.5, 10.9 px on a 400 mm Moon; 0 = only where the noise is over 10x the middle's)")
+                        "0: only where the noise is over 10x the middle's; 2.5 = 10.9 px on a 400 mm Moon)")
     p.add_argument("--no-edge-grain", action="store_true",
                    help="leave the filled last pixels by the limb smooth (default: grain like the rest)")
     p.add_argument("--surface-denoise", type=float, default=0.0,

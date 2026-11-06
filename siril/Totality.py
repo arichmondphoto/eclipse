@@ -1858,7 +1858,7 @@ class EarthshineTab(StepTab):
         f.addRow("Smoothing near the limb:", self.edge_smooth)
         self.surface_denoise = spin(0.0, 10.0, 0.5, 0.0, " px")
         f.addRow("Edge-preserving smoothing:", self.surface_denoise)
-        self.edge_fill = spin(0.0, 10.0, 0.1, 2.5, " % of radius")
+        self.edge_fill = spin(0.0, 10.0, 0.1, 0.0, " % of radius")
         f.addRow("Filled edge, at least:", self.edge_fill)
         self.edge_grain = QCheckBox("Grain in the filled edge, like the rest of the surface")
         self.edge_grain.setChecked(True)
@@ -2016,11 +2016,11 @@ class EarthshineTab(StepTab):
              "own measured tint (white balanced like the corona). Off: a grey layer.")
         _tip(self.edge_fill, "The last pixels inside the limb are not shown from the stack: they are filled "
              "with the brightness just inside, followed round the limb. This is the least width of that band, as a "
-             "% of the Moon's radius, so it is the same on any lens and camera (2.5%, the default, is about 11 px "
-             "for a 400 mm lens on a 45-megapixel full-frame camera). Where the noise is still over 10x that in "
-             "the middle the band is wider; the log says how wide it was and why.\n\nLower it to see more of your "
-             "data by the limb, including any leftover glare there (a row of small bright and dark beads); 0 "
-             "leaves it to the noise alone. Needs Stack earthshine again.", f)
+             "% of the Moon's radius, so it is the same on any lens and camera (2.5% is about 11 px for a 400 mm "
+             "lens on a 45-megapixel full-frame camera). Where the noise is still over 10x that in the middle "
+             "the band is wider; the log says how wide it was and why.\n\n0 (default): only where the noise says "
+             "so, showing as much of your data by the limb as there is. Raise it to hide leftover glare right at "
+             "the edge (thin bright lines along the limb). Needs Stack earthshine again.", f)
         _tip(self.edge_grain, "The last few pixels by the edge are only noise and are filled from just inside; "
              "this gives them grain like the rest of the surface, so they do not look smoother.")
         _tip(self.surface_denoise, "Smooths the lunar surface only across similar brightness, so the noise inside "
