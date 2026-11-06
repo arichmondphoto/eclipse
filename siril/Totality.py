@@ -1168,6 +1168,12 @@ class EnhanceTab(StepTab):
         tf.addRow("Stretch:", self.natural_stretch)
         self.gamma = self._dspin(1.0, 6.0, 3.2, 0.1, "Gamma of the Gamma stretch (3.2 in the MGN paper)")
         tf.addRow("Gamma:", self.gamma)
+        self.gamma_black = self._dspin(0.0, 50.0, 0.0, 0.1, "Gamma stretch: black point, percentile")
+        self.gamma_black.setSuffix(" %")
+        tf.addRow("Gamma black point:", self.gamma_black)
+        self.gamma_white = self._dspin(50.0, 100.0, 100.0, 0.01, "Gamma stretch: white point, percentile")
+        self.gamma_white.setSuffix(" %")
+        tf.addRow("Gamma white point:", self.gamma_white)
         self.flatten = self._dspin(0.0, 1.0, 0.0, 0.05, "How much of the brightness fall-off from the Sun to remove")
         tf.addRow("Flatten:", self.flatten)
         self.shoulder = self._dspin(0.0, 0.6, 0.0, 0.05, "How softly the brightest parts roll off to white")
@@ -1339,8 +1345,10 @@ class EnhanceTab(StepTab):
         blend_tip = ("How strongly this layer is applied over the natural layer in the blend, like layer "
                      "opacity in Photoshop. 0 % leaves it out. The mode beside it picks Soft Light, Overlay or Linear (paper).\n\n"
                      "Soft Light and Overlay treat mid-grey as 'no change', so the filter layers add structure without "
-                     "lifting the dark sky (up to 100 %). With Linear (paper) the strength is the papers' K2 (MGN: "
-                     "(1 - h) / h), the layer's weight against the natural layer's 100 % (up to 1000 %). Default 0 % "
+                     "lifting the dark sky (up to 100 %). With Linear (paper) the strength is the papers' K2, the "
+                     "layer's weight against the natural layer's 100 % (up to 1000 %).\n\nAdaptive (MGN) on Linear "
+                     "(paper): 43 % is the MGN paper's h = 0.7 (strength = (1 - h) / h; 11 % is its h = 0.9). With "
+                     "Stretch: Gamma (3.2) in 'Natural layer and colour' that is the paper's own image.\n\nDefault 0 % "
                      "for every layer (the blend is then the natural layer); try FNRGF-N 50-70 % and adaptive "
                      "50-80 %, Soft Light.")
         for k, sp in self.blend.items():
@@ -1349,14 +1357,18 @@ class EnhanceTab(StepTab):
                  "keeps the natural tones, adds least in the darkest and brightest parts, and treats mid-grey as 'no "
                  "change', so the sky stays dark.\n\nOverlay: Photoshop's mode; stronger, adds more contrast, mostly "
                  "in the mid-tones. Use a lower strength (for example 5-20 %).\n\nLinear (paper): the images combined "
-                 "as the papers do, a weighted average Z = (K1 X + K2 Y) / (K1 + K2): the FNRGF paper's Z = K1 X + "
-                 "K2 Y on the display range (Druckmüllerová's software scales both images to 0-1 first), and MGN's "
-                 "h x original + (1 - h) x filtered. The natural layer (after any Soft Light or Overlay layers) has "
-                 "weight 1 (K1); the strength here is K2, up to 1000 %. Nothing clips, but as in the published "
-                 "images the dark sky comes up towards grey and the natural tones flatten by the filtered image's "
-                 "share. Examples: MGN's h = 0.7 is 43 % ((1 - h) / h); the 2011 paper's 0.4 FNRGF + 0.6 ACHF is "
-                 "both layers on Linear at 40 % and 60 % with the natural layer's own share left in. In Photoshop: "
-                 "Normal mode at opacity K2 / (1 + K2) for one layer.")
+                 "as the papers do. The natural layer (after any Soft Light or Overlay layers) has weight 1 (K1); the "
+                 "strength here is K2, up to 1000 %; the sum is divided by K1 + K2.\n\n- Adaptive (MGN): the MGN "
+                 "paper's I = h x base + (1 - h) x detail, the detail added as the paper adds it (centred on 0, in "
+                 "radians), so it adds strong structure and keeps the sky dark. 43 % = the paper's h = 0.7. For the "
+                 "paper's own image set Stretch: Gamma, Gamma 3.2 in 'Natural layer and colour'; on an eclipse its "
+                 "base is very dark and much of the corona can clip to black, so lower Gamma white point (about "
+                 "99.9 %) or raise Midtone. With the Log stretch as base, 43 % gives the paper's mix of structure on a "
+                 "brighter base.\n- FNRGF, FNRGF-N, NRGF, Adaptive (ACHF): the FNRGF paper's Z = K1 X + K2 Y on the "
+                 "display range (Druckmüllerová's software scales both images to 0-1 first). As in the published "
+                 "images, the dark sky comes up towards grey and the natural tones flatten by the filtered image's "
+                 "share. The 2011 paper's 0.4 FNRGF + 0.6 ACHF is both layers on Linear at 40 % and 60 %.\n\nIn "
+                 "Photoshop (not MGN): Normal mode at opacity K2 / (1 + K2) for one layer.")
         for size, sp in zip(self.achf_size, self.achf_w):
             _tip(size, "Adaptive (ACHF) only: the width (sigma) of this scale's kernel in pixels of your full-size "
                  "stack; the structure about this size and finer is brought out. The thesis uses 0.5-64 px. Kept as "
@@ -1401,7 +1413,9 @@ class EnhanceTab(StepTab):
         af = self._adaptive_form
         _tip(self.mgn_k, "How strongly the adaptive layer brings out local contrast at each scale: k in the "
              "paper's arctan(k x C) (Morgan & Druckmüller 2014). Default 0.7, the paper's value. Higher gives "
-             "harder, more graphic strands; lower is gentler. Steps of 0.01.", af)
+             "harder, more graphic strands; lower is gentler. Steps of 0.01.\n\nOn Linear (paper) in the Blend box "
+             "the detail is added at the paper's own strength (in radians, about three times what the layer "
+             "shows on its own), so 0.7 there already gives the paper's look.", af)
         for size, sp in zip(self.mgn_size, self.mgn_w):
             _tip(size, "Adaptive (MGN) only: the width (sigma) of this scale's Gaussian kernel in pixels of your "
                  "full-size stack; the contrast is normalized against the surroundings this wide. Defaults: the "
@@ -1429,10 +1443,22 @@ class EnhanceTab(StepTab):
              "log brightness, black at the sky and white at the brightest 0.1%; Flatten, Evenness and Highlight "
              "roll-off shape it.\n\nGamma (MGN paper): the base Morgan & Druckmüller (2014) combine their MGN "
              "detail with: ((B - min) / (max - min))^(1/Gamma) of the linear stack, black at its minimum and white "
-             "at its maximum. Flatten, Evenness and Highlight roll-off do not apply to it; Midtone does. The filter "
-             "layers are not changed by either: they have their own scales.")
+             "at its maximum (Gamma black and white points move these). Flatten, Evenness and Highlight roll-off do "
+             "not apply to it; Midtone does. The filter layers are not changed by either: they have their own "
+             "scales.\n\nFor the MGN paper's image: Gamma, Gamma 3.2, and in the Blend box Adaptive (MGN) at 43 % "
+             "on Linear (paper) (the paper's h = 0.7). Gamma alone is much darker than Log on an eclipse: the "
+             "single brightest pixel sets white. Gamma white point about 99.9 % or Midtone 0.4-0.6 brings the "
+             "corona up.")
+        _tip(self.gamma_black, "Only for Stretch: Gamma. The paper's a0, the input that comes out black, as a "
+             "percentile of the stack: 0 (default) is its minimum, as in the paper. Raise it a little (0.5-2) if the "
+             "sky looks grey. Black stays black: what lies below the point clips to it.")
+        _tip(self.gamma_white, "Only for Stretch: Gamma. The paper's a1, the input that comes out white, as a "
+             "percentile of the stack: 100 (default) is its maximum, as in the paper, so the single brightest "
+             "pixel (the limb, a prominence) sets white and the rest comes out dark. 99.9 lets the brightest 0.1% "
+             "clip to white and lifts everything else; 99-99.5 more.")
         _tip(self.gamma, "Only for Stretch: Gamma. Higher lifts the faint outer corona and compresses the bright "
-             "inner corona. 3.2 is the paper's value; it suggests 2.5-4. 1 = linear.")
+             "inner corona. 3.2 is the paper's value (used with Adaptive (MGN) on Linear (paper) at 43 % in the "
+             "Blend box); it suggests 2.5-4. 1 = linear.")
         _tip(self.midtone, "Lightens or darkens the middle tones (a midtones transfer curve; black and white stay) so that the inner "
              "corona's median brightness (1.05-2.5 solar radii) sits at this level. 0 (default): off. 0.6 gives a "
              "light grey corona; 0.4 a darker one.")
@@ -1556,6 +1582,7 @@ class EnhanceTab(StepTab):
         return EnhanceParams(layers=layers, segments=self.segments.value(), order=self.order.value(),
                              noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(), even=self.even.value(), midtone=self.midtone.value(), noise_gate=self.noise_gate.value(), mgn_k=self.mgn_k.value(),
                              natural_stretch=self.natural_stretch.currentData() or "log", gamma=self.gamma.value(),
+                             gamma_black=self.gamma_black.value(), gamma_white=self.gamma_white.value(),
                              achf_scales=tuple(self.achf_frac),
                              achf_weights=tuple(sp.value() for sp in self.achf_w),
                              achf_part_limit=self.achf_parts.value(),
@@ -1577,7 +1604,8 @@ class EnhanceTab(StepTab):
             mode.setCurrentIndex(max(i, 0))  # first: it sets the strength's range
             sp.setValue(int(round(100 * p.blend.get(k, 0.0))))
         self.natural_stretch.setCurrentIndex(max(self.natural_stretch.findData(p.natural_stretch), 0))
-        for sp, v in ((self.gamma, p.gamma), (self.flatten, p.flatten), (self.shoulder, p.shoulder), (self.even, p.even),
+        for sp, v in ((self.gamma, p.gamma), (self.gamma_black, p.gamma_black), (self.gamma_white, p.gamma_white),
+                      (self.flatten, p.flatten), (self.shoulder, p.shoulder), (self.even, p.even),
                       (self.midtone, p.midtone), (self.saturation, p.saturation), (self.mgn_k, p.mgn_k),
                       (self.noise_gate, p.noise_gate), (self.achf_parts, p.achf_part_limit),
                       (self.achf_contrast, p.achf_contrast), (self.noise_m, p.noise_m),

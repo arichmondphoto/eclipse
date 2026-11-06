@@ -114,7 +114,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper); **Natural layer and colour:** Stretch (Log; or Gamma, the MGN paper's base) and its Gamma (3.2), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k), Noise gate (off) and the size and strength of each of its six scales (the paper's 1.25, 2.5, 5, 10, 20, 40 px at strength 1); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
+| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper); **Natural layer and colour:** Stretch (Log; or Gamma, the MGN paper's base) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k), Noise gate (off) and the size and strength of each of its six scales (the paper's 1.25, 2.5, 5, 10, 20, 40 px at strength 1); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -416,15 +416,26 @@ FNRGF paper's Z = K1 X + K2 Y (Druckmüllerová, Morgan & Habbal 2011, section
 2: "it is their ratio rather than their values that affects the result"),
 with both images on 0..1 as in her FNRGF software (thesis, Appendix:
 "first normalizes both the original and the filtered image into the
-interval <0, 1>"), and MGN's h C'g + (1 - h) C' (Morgan & Druckmüller 2014,
-eq. 5). The natural layer, after any Soft Light or Overlay layers, has
+interval <0, 1>"). Adaptive (MGN) on Linear goes in as its paper adds it:
+I = h C'g + ((1 - h) / n) sum g_i arctan(k C_i) (Morgan & Druckmüller 2014,
+eq. 5), the detail centred on 0 and in radians, (layer - 0.5) pi, since the
+layer itself stores it as 0.5 + mean / pi to be seen on its own (until
+6 Nov 2026 the 0..1 picture went in: a third of the detail, and 0.15 of
+grey added). The natural layer, after any Soft Light or Overlay layers, has
 weight 1 (K1); each Linear layer's strength is its K2 and may go to 1000 %
 (her software's "common values are 10 or lower"). MGN's h = 0.7 is 43 %
-((1 - h) / h); the 2011 paper's Figure 9, 0.4 FNRGF + 0.6 ACHF, is both on
-Linear at 40 % and 60 %, with the natural layer's own share left in. Nothing
-clips and nothing is measured, so a detail box still matches; but, as in
-the published images, the dark sky comes up towards grey and the natural
-tones flatten by the filtered images' share. (A plain sum without the
+((1 - h) / h): with **Stretch: Gamma** (3.2) as the base that is the
+paper's own image. On the binned 2024 stack, Log base with MGN on Linear at
+43 %: fine-detail contrast in the corona 0.064 (0.021 the old way), the sky
+0.08 grey (0.24), the corona's median 0.30 (0.48), nothing clipped. The
+paper's own image (Gamma 3.2 base) is far darker on an eclipse: 32 % of the
+corona at 1.2-3 solar radii clipped to black (7 % with Gamma white point
+99.9 %); the paper says nothing about clipping or display. The 2011 paper's
+Figure 9, 0.4 FNRGF + 0.6 ACHF, is both on Linear at 40 % and 60 %, with the
+natural layer's own share left in. Nothing is measured, so a detail box
+still matches; the result is clipped to 0..1. With FNRGF or ACHF on Linear,
+as in the published images, the dark sky comes up towards grey and the
+natural tones flatten by the filtered images' share. (A plain sum without the
 division, tried first, turned 42% of the 2024 crop flat black: the
 natural layer puts the sky at black and the filter layers carry its noise
 as detail of both signs.) In Photoshop, one layer: Normal mode at opacity
@@ -456,8 +467,12 @@ brightness, black at the sky and white at the brightest 0.1%; Flatten,
 Evenness, Highlight roll-off and Midtone shape it. **Gamma (MGN paper)**
 (`--natural-stretch gamma`): Morgan & Druckmüller's global image,
 C'g = ((B - a0) / (a1 - a0))^(1/γ), with B the linear stack and a0, a1 its
-minimum and maximum; `--gamma` (**Gamma**) 3.2 as in the paper, which
-suggests 2.5-4 (1 = linear). In MGN's final image it is the base the filtered
+minimum and maximum by default; `--gamma` (**Gamma**) 3.2 as in the paper, which
+suggests 2.5-4 (1 = linear). The paper's a0 and a1 "set the minimum and
+maximum input values" and may be chosen: **Gamma black point** /
+`--gamma-black` and **Gamma white point** / `--gamma-white`, as percentiles
+of the stack (0 and 100, the paper's minimum and maximum, by default; a
+white point of 99.9 lets the brightest 0.1 % clip and lifts the rest). In MGN's final image it is the base the filtered
 scales are combined with, h C'g + (1 - h) C', so with Gamma and Adaptive
 (MGN) on Linear at 43 % the blend is the paper's own image. Only Midtone
 applies to it. With black and white at the image's extremes it is far darker
@@ -1199,6 +1214,8 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--shoulder` | highlight roll-off: 0 = hard white point (the brightest 0.1% clip); e.g. 0.3 = the top 30% of the range rolls off smoothly to white, nothing clips and colours keep their hue |
 | `--natural-stretch` | natural layer: log brightness (default) or gamma, the MGN paper's base: ((B - min) / (max - min))^(1/gamma) |
 | `--gamma` | gamma of --natural-stretch gamma (3.2 as in Morgan & Druckmueller 2014; 2.5-4 suggested) (default 3.2) |
+| `--gamma-black` | --natural-stretch gamma: black point (the paper's a0) as a percentile of the stack; 0 = its minimum (default, as in the paper) |
+| `--gamma-white` | --natural-stretch gamma: white point (the paper's a1) as a percentile; 100 = the maximum (default, as in the paper), e.g. 99.9 lets the brightest 0.1% clip |
 | `--flatten` | natural layer: how much of the radial fall-off to remove, 0..1; 0 = off (default), e.g. 0.8 |
 | `--saturation` | colour saturation, 0 = monochrome (default 1) |
 | `--white` | white balance: inner corona neutral (default), the camera's as-shot, or none |

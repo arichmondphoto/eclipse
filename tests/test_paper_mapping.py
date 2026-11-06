@@ -122,3 +122,42 @@ def test_natural_gamma_stretch_is_the_mgn_papers_global_image():
     assert np.abs(E.render(frame, E.EnhanceParams(layers=("natural",), saturation=0.0, blend={},
                                                   natural_stretch="gamma", gamma=2.0))["natural"][..., 0][v]
                   - expect[v]).max() > 0.01
+
+
+def test_gamma_black_and_white_points_are_the_papers_a0_and_a1():
+    """a0 and a1 "set the minimum and maximum input values" (Morgan & Druckmueller 2014): the image's
+    own by default (percentiles 0 and 100), or chosen. Here the white point at the 99.5th percentile."""
+    z = np.load(DATA)
+    hdr = np.ascontiguousarray(np.moveaxis(z["hdr"].astype(np.float32) * float(z["scale"]), 0, -1))
+    geo = {k: float(z[k]) for k in ("SUNX", "SUNY", "SUNR", "MOONX", "MOONY", "MOONR")}
+    weight = (np.abs(hdr).sum(axis=2) > 0).astype(np.float32)
+    assert (E.EnhanceParams().gamma_black, E.EnhanceParams().gamma_white) == (0.0, 100.0)
+    p = E.EnhanceParams(layers=("natural",), saturation=0.0, blend={}, natural_stretch="gamma", gamma=3.2,
+                        gamma_black=1.0, gamma_white=99.5)
+    frame = E.prepare(hdr, weight, geo, p)
+    out = E.render(frame, p)["natural"][..., 0]
+    b = np.maximum(frame.lum, 0)
+    a0, a1 = np.percentile(b[frame.stats_valid], [1.0, 99.5])
+    expect = np.clip((b - a0) / (a1 - a0), 0, 1) ** (1 / 3.2)
+    v = frame.valid
+    assert np.abs(out[v] - expect[v]).max() < 1e-4
+
+
+def test_linear_blend_adds_mgn_detail_as_the_paper_does():
+    """MGN's final image: I = h C'g + (1 - h) / n sum g_i arctan(k C_i) (eq. 5), the detail added as
+    it is, centred on 0 and in radians. The layer stores 0.5 + mean / pi (to be seen on its own), so
+    on Linear it goes in as (layer - 0.5) pi, h = K1 / (K1 + K2): 43 % is the paper's h = 0.7.
+    Until 6 Nov 2026 it went in as the 0..1 picture: 1/pi of the detail and 0.15 of grey added."""
+    rng = np.random.default_rng(2)
+    base = rng.uniform(0, 1, (40, 50)).astype(np.float32)
+    detail = rng.uniform(-0.6, 0.6, (40, 50)).astype(np.float32)        # mean of the arctans, radians
+    layer = (0.5 + detail / np.pi).astype(np.float32)
+    valid = np.ones(base.shape, bool)
+    out = E.soft_light_blend({"natural": base, "adaptive": layer}, {"natural": 1.0, "adaptive": 0.43}, valid,
+                             {"adaptive": "linear"})
+    h = 1 / 1.43
+    assert np.abs(out - np.clip(h * base + (1 - h) * detail, 0, 1)).max() < 1e-5
+    # FNRGF on Linear stays the weighted average of the two 0..1 pictures (her software, thesis appendix).
+    f = rng.uniform(0, 1, base.shape).astype(np.float32)
+    out = E.soft_light_blend({"natural": base, "fnrgf": f}, {"natural": 1.0, "fnrgf": 0.5}, valid, {"fnrgf": "linear"})
+    assert np.abs(out - (base + 0.5 * f) / 1.5).max() < 1e-5

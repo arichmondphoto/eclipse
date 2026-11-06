@@ -88,6 +88,10 @@ class EnhanceParams:
     # a0 and a1 the image's minimum and maximum, gamma 3.2 in the paper (2.5-4 suggested).
     natural_stretch: str = "log"
     gamma: float = 3.2
+    # Gamma's a0 and a1 ("set the minimum and maximum input values"), as percentiles of the stack:
+    # 0 and 100 are its minimum and maximum, as in the paper; e.g. 99.9 lets the brightest 0.1% clip.
+    gamma_black: float = 0.0
+    gamma_white: float = 100.0
     # Adaptive (MGN): the paper's six kernel widths (px of the full-size stack) and their weights g_i
     # (Morgan & Druckmueller 2014: "w = 1.25, 2.5, 5, 10, 20, 40"; g_i "may be adjusted").
     mgn_scales: Optional[Sequence[float]] = MGN_SCALES
@@ -582,7 +586,8 @@ def _ring_at(prof: np.ndarray, r: np.ndarray) -> np.ndarray:
 def natural_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
                   flatten: float, stats_valid: Optional[np.ndarray] = None, shoulder: float = 0.0,
                   even: float = 0.0, sun_r: float = 0.0, midtone: float = 0.0,
-                  base_cache: Optional[dict] = None, stretch: str = "log", gamma: float = 3.2) -> NaturalStats:
+                  base_cache: Optional[dict] = None, stretch: str = "log", gamma: float = 3.2,
+                  gamma_points: tuple = (0.0, 100.0)) -> NaturalStats:
     """The natural layer's whole-image measurements: the circles' mean log brightness, the black
     point (the sky), the white point (99.9th percentile), and for Evenness and Midtone their maps
     and medians. ``base_cache`` keeps what does not depend on the settings between calls."""
@@ -591,8 +596,13 @@ def natural_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarr
     sv = valid if stats_valid is None else stats_valid
     if stretch == "gamma":
         bpos = np.maximum(x, 0)
-        a0 = float(bpos[sv].min()) if sv.any() else 0.0
-        a1 = float(bpos[sv].max()) if sv.any() else 1.0
+        lo_p, hi_p = (min(max(float(v), 0.0), 100.0) for v in gamma_points)
+        if sv.any():
+            vals = bpos[sv]
+            a0 = float(vals.min()) if lo_p <= 0 else float(np.percentile(vals, lo_p))
+            a1 = float(vals.max()) if hi_p >= 100 else float(np.percentile(vals, hi_p))
+        else:
+            a0, a1 = 0.0, 1.0
         st = NaturalStats(floor, np.zeros(1, np.float32), 0.0, 1.0, stretch="gamma", gamma=float(gamma), a0=a0, a1=a1)
         if midtone > 0 and sun_r > 0:
             y = _gamma_curve(bpos, st)
@@ -736,10 +746,11 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
     lifting the dark sky. Layers are applied in the order natural, NRGF, FNRGF, FNRGF-N, adaptive.
 
     Linear (paper) layers are then combined with that base as the papers combine the original and
-    the filtered image: a weighted average on the display range (FNRGF: Z = K1 X + K2 Y with only
-    the ratio mattering, both images scaled to 0..1 in the thesis's software; MGN: h C'g + (1 - h)
-    C'), the base with the natural layer's weight (1, K1) and each layer with its own (K2, which may
-    exceed 1). Nothing clips and nothing is measured, so a detail box matches the full size."""
+    the filtered image, the base with the natural layer's weight (1, K1) and each layer with its own
+    (K2, which may exceed 1), divided by the sum: FNRGF's Z = K1 X + K2 Y, only the ratio mattering,
+    both images on 0..1 as in the thesis's software; MGN's I = h C'g + (1 - h) C', the detail
+    added as the paper does, centred on 0 and in radians, h = K1 / (K1 + K2). Nothing is measured,
+    so a detail box matches the full size; the result is clipped to 0..1."""
     modes = modes or {}
     base = layers["natural"].copy() if "natural" in weights else np.full_like(next(iter(layers.values())), 0.5)
     lin = []
@@ -765,7 +776,10 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
         den = np.full_like(base, k1)
         for k, w in lin:
             wk = w * fade if fade is not None else np.float32(w)
-            num = num + wk * layers[k]
+            # MGN's detail goes in as the paper adds it (eq. 5): the mean of the arctans, centred on
+            # 0 and in radians, which the layer stores as 0.5 + mean / pi.
+            term = (layers[k] - 0.5) * np.float32(math.pi) if k == "adaptive" else layers[k]
+            num = num + wk * term
             den = den + wk
         base = (num / np.maximum(den, 1e-12)).astype(np.float32)
     # No stretch measured over the whole image (a detail box must give the full-size result): the
@@ -1439,13 +1453,14 @@ def _ring_cache(frame: Frame, p: EnhanceParams) -> RingStats:
 
 def _natural_cache(frame: Frame, p: EnhanceParams) -> NaturalStats:
     key = ("nat", float(p.flatten), float(p.even), float(p.shoulder), float(p.midtone), p.natural_stretch,
-           float(p.gamma))
+           float(p.gamma), float(p.gamma_black), float(p.gamma_white))
     if key not in frame.cache:
         r, phi = polar(frame.shape, frame.g)
         frame.cache[key] = natural_stats(frame.lum, r, phi, frame.valid, frame.nlev, p.flatten, frame.stats_valid,
                                          p.shoulder, p.even, frame.g.sun_r, p.midtone,
                                          base_cache=frame.cache.setdefault("nat_base", {}),
-                                         stretch=p.natural_stretch, gamma=p.gamma)
+                                         stretch=p.natural_stretch, gamma=p.gamma,
+                                         gamma_points=(p.gamma_black, p.gamma_white))
     return frame.cache[key]
 
 
@@ -1457,7 +1472,7 @@ def _gated_cache(frame: Frame) -> dict:
 
 # The settings each layer depends on (besides the prepared frame); see render(cache=True).
 LAYER_SETTINGS = {
-    "natural": ("flatten", "even", "shoulder", "midtone", "natural_stretch", "gamma"),
+    "natural": ("flatten", "even", "shoulder", "midtone", "natural_stretch", "gamma", "gamma_black", "gamma_white"),
     "nrgf": ("segments", "order", "ring_smooth"),
     "fnrgf": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation"),
     "fnrgf_n": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation", "noise_m"),
