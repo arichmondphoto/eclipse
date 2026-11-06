@@ -1161,6 +1161,13 @@ class EnhanceTab(StepTab):
 
         tone = QGroupBox("Natural layer and colour")
         tf = QFormLayout(tone)
+        self.natural_stretch = QComboBox()
+        self.natural_stretch.addItem("Log", "log")
+        self.natural_stretch.addItem("Gamma (MGN paper)", "gamma")
+        self.natural_stretch.currentIndexChanged.connect(self.changed)
+        tf.addRow("Stretch:", self.natural_stretch)
+        self.gamma = self._dspin(1.0, 6.0, 3.2, 0.1, "Gamma of the Gamma stretch (3.2 in the MGN paper)")
+        tf.addRow("Gamma:", self.gamma)
         self.flatten = self._dspin(0.0, 1.0, 0.0, 0.05, "How much of the brightness fall-off from the Sun to remove")
         tf.addRow("Flatten:", self.flatten)
         self.shoulder = self._dspin(0.0, 0.6, 0.0, 0.05, "How softly the brightest parts roll off to white")
@@ -1418,6 +1425,14 @@ class EnhanceTab(StepTab):
              "streamers against dark coronal holes, over about a quarter of the Sun's radius), as Flatten does for "
              "the fall-off from the Sun. 0 (default): off. 0.6-0.8 gives the even grey corona of a strongly "
              "processed eclipse picture; the strands themselves stay.")
+        _tip(self.natural_stretch, "How the natural layer turns the linear stack into a picture.\n\nLog (default): "
+             "log brightness, black at the sky and white at the brightest 0.1%; Flatten, Evenness and Highlight "
+             "roll-off shape it.\n\nGamma (MGN paper): the base Morgan & Druckmüller (2014) combine their MGN "
+             "detail with: ((B - min) / (max - min))^(1/Gamma) of the linear stack, black at its minimum and white "
+             "at its maximum. Flatten, Evenness and Highlight roll-off do not apply to it; Midtone does. The filter "
+             "layers are not changed by either: they have their own scales.")
+        _tip(self.gamma, "Only for Stretch: Gamma. Higher lifts the faint outer corona and compresses the bright "
+             "inner corona. 3.2 is the paper's value; it suggests 2.5-4. 1 = linear.")
         _tip(self.midtone, "Lightens or darkens the middle tones (a midtones transfer curve; black and white stay) so that the inner "
              "corona's median brightness (1.05-2.5 solar radii) sits at this level. 0 (default): off. 0.6 gives a "
              "light grey corona; 0.4 a darker one.")
@@ -1540,6 +1555,7 @@ class EnhanceTab(StepTab):
         modes = {k: c.currentData() or c.currentText().lower() for k, c in self.blend_mode.items() if k in blend}
         return EnhanceParams(layers=layers, segments=self.segments.value(), order=self.order.value(),
                              noise_m=self.noise_m.value(), flatten=self.flatten.value(), shoulder=self.shoulder.value(), even=self.even.value(), midtone=self.midtone.value(), noise_gate=self.noise_gate.value(), mgn_k=self.mgn_k.value(),
+                             natural_stretch=self.natural_stretch.currentData() or "log", gamma=self.gamma.value(),
                              achf_scales=tuple(self.achf_frac),
                              achf_weights=tuple(sp.value() for sp in self.achf_w),
                              achf_part_limit=self.achf_parts.value(),
@@ -1560,7 +1576,8 @@ class EnhanceTab(StepTab):
             i = mode.findData(p.blend_modes.get(k, "soft light"))
             mode.setCurrentIndex(max(i, 0))  # first: it sets the strength's range
             sp.setValue(int(round(100 * p.blend.get(k, 0.0))))
-        for sp, v in ((self.flatten, p.flatten), (self.shoulder, p.shoulder), (self.even, p.even),
+        self.natural_stretch.setCurrentIndex(max(self.natural_stretch.findData(p.natural_stretch), 0))
+        for sp, v in ((self.gamma, p.gamma), (self.flatten, p.flatten), (self.shoulder, p.shoulder), (self.even, p.even),
                       (self.midtone, p.midtone), (self.saturation, p.saturation), (self.mgn_k, p.mgn_k),
                       (self.noise_gate, p.noise_gate), (self.achf_parts, p.achf_part_limit),
                       (self.achf_contrast, p.achf_contrast), (self.noise_m, p.noise_m),

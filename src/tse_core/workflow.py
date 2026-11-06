@@ -584,6 +584,10 @@ def load_enhance_settings(path, base=None):
                 v = str(v)
                 if v not in ("corona", "camera", "none"):
                     raise bad(k, v)
+            elif k == "natural_stretch":
+                v = str(v)
+                if v not in ("log", "gamma"):
+                    raise bad(k, v)
             elif k == "neutral_background":
                 v = bool(v)
             elif k in ("segments", "order"):

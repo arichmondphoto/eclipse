@@ -83,6 +83,11 @@ class EnhanceParams:
     # Midtones: above 0, a gamma puts the inner corona's median brightness (1.05-2.5 solar radii)
     # at this level (e.g. 0.6 for a light grey corona). 0 = off.
     midtone: float = 0.0
+    # Natural layer stretch: "log" (log brightness with Flatten, Evenness, Highlight roll-off) or
+    # "gamma", the global image of Morgan & Druckmueller (2014): ((B - a0) / (a1 - a0))^(1/gamma),
+    # a0 and a1 the image's minimum and maximum, gamma 3.2 in the paper (2.5-4 suggested).
+    natural_stretch: str = "log"
+    gamma: float = 3.2
     # Adaptive (MGN): the paper's six kernel widths (px of the full-size stack) and their weights g_i
     # (Morgan & Druckmueller 2014: "w = 1.25, 2.5, 5, 10, 20, 40"; g_i "may be adjusted").
     mgn_scales: Optional[Sequence[float]] = MGN_SCALES
@@ -561,6 +566,10 @@ class NaturalStats:
     ring: Optional[np.ndarray] = None  # Evenness: the circles' mean of the large-scale map
     loc: Optional[tuple] = None  # Evenness: the large-scale map as (blurred lg, blurred base, blurred mask)
     mid: Optional[float] = None  # Midtone: the inner corona's median before the curve
+    stretch: str = "log"  # "log" or "gamma" (the MGN paper's global image)
+    gamma: float = 3.2
+    a0: float = 0.0  # gamma: the image's minimum and maximum
+    a1: float = 1.0
 
 
 def _ring_at(prof: np.ndarray, r: np.ndarray) -> np.ndarray:
@@ -573,14 +582,24 @@ def _ring_at(prof: np.ndarray, r: np.ndarray) -> np.ndarray:
 def natural_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarray, noise_level: float,
                   flatten: float, stats_valid: Optional[np.ndarray] = None, shoulder: float = 0.0,
                   even: float = 0.0, sun_r: float = 0.0, midtone: float = 0.0,
-                  base_cache: Optional[dict] = None) -> NaturalStats:
+                  base_cache: Optional[dict] = None, stretch: str = "log", gamma: float = 3.2) -> NaturalStats:
     """The natural layer's whole-image measurements: the circles' mean log brightness, the black
     point (the sky), the white point (99.9th percentile), and for Evenness and Midtone their maps
     and medians. ``base_cache`` keeps what does not depend on the settings between calls."""
     cache = base_cache if base_cache is not None else {}
     floor = max(noise_level, 1e-9)
-    lg = np.log(np.maximum(x, 0) + floor).astype(np.float32)
     sv = valid if stats_valid is None else stats_valid
+    if stretch == "gamma":
+        bpos = np.maximum(x, 0)
+        a0 = float(bpos[sv].min()) if sv.any() else 0.0
+        a1 = float(bpos[sv].max()) if sv.any() else 1.0
+        st = NaturalStats(floor, np.zeros(1, np.float32), 0.0, 1.0, stretch="gamma", gamma=float(gamma), a0=a0, a1=a1)
+        if midtone > 0 and sun_r > 0:
+            y = _gamma_curve(bpos, st)
+            sel = sv & (r > 1.05 * sun_r) & (r < 2.5 * sun_r)
+            st.mid = float(np.median(y[sel])) if sel.any() else None
+        return st
+    lg = np.log(np.maximum(x, 0) + floor).astype(np.float32)
     if "prof" not in cache:
         # Circle averages from completed circles (see ring_stats), so no arcs at the frame edges.
         lo = float(lg[valid].min()) if valid.any() else 0.0
@@ -614,6 +633,12 @@ def natural_stats(x: np.ndarray, r: np.ndarray, phi: np.ndarray, valid: np.ndarr
     return NaturalStats(floor, prof, black, white, ring, loc, mid)
 
 
+def _gamma_curve(b: np.ndarray, st: NaturalStats) -> np.ndarray:
+    """Morgan & Druckmueller (2014): C'_g = ((B - a0) / (a1 - a0))^(1/gamma)."""
+    y = np.clip((b - np.float32(st.a0)) / np.float32((st.a1 - st.a0) or 1.0), 0.0, 1.0)
+    return np.power(y, np.float32(1.0 / max(st.gamma, 1e-3))).astype(np.float32)
+
+
 def _loc_map(loc: tuple, flatten: float) -> np.ndarray:
     """The large-scale mean of (lg - flatten * base), from its three blurred parts (blurs are
     linear, so this is exactly the blur of the flattened image, for any flatten)."""
@@ -636,6 +661,13 @@ def natural_apply(x: np.ndarray, r: np.ndarray, st: NaturalStats, flatten: float
                   loc: Optional[tuple] = None, show: Optional[np.ndarray] = None) -> np.ndarray:
     """The natural layer at each pixel from the whole image's measurements: a region (``x``, ``r``
     and the ``loc`` maps cut to it) gives exactly the whole image's result there."""
+    if st.stretch == "gamma":
+        out = _gamma_curve(np.maximum(x, 0), st)
+        if midtone > 0 and st.mid is not None:
+            out = _mtf(out, st.mid, midtone)
+        if show is not None:
+            out[~show] = 0.0
+        return out
     lg = np.log(np.maximum(x, 0) + st.floor).astype(np.float32)
     out = lg - np.float32(flatten) * _ring_at(st.prof, r)
     if even > 0 and sun_r > 0 and st.ring is not None:
@@ -849,9 +881,9 @@ def correlated_noise(shape, valid: np.ndarray, sample: np.ndarray, seed: int = 0
 
 
 def gated_prep(x: np.ndarray, valid: np.ndarray, floor: float, sun_r: float, seed: int = 0) -> dict:
-    """What the noise-gated adaptive layer measures over the whole image: the log image with the
-    Moon and frame edges filled (``bf``), and the noise model (kernel and scale)."""
-    b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
+    """What the noise-gated adaptive layer measures over the whole image: the linear image (as the
+    paper's B) with the Moon and frame edges filled (``bf``), and the noise model (kernel and scale)."""
+    b = np.maximum(x, 0).astype(np.float32)
     bf = _masked_fill(b, valid, sun_r)
     smooth_b = blur(bf, max(4.0, 0.05 * sun_r))  # the faint part, as a region (not single pixels)
     faint = valid & (smooth_b < np.percentile(smooth_b[valid], 30))
@@ -870,7 +902,7 @@ def mgn_gated(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: floa
     if prep is None:
         prep = gated_prep(x, valid, floor, sun_r, seed)
     bf = prep["bf"]
-    sig = np.where(valid, noise / np.maximum(np.maximum(x, 0) + max(floor, 1e-9), 1e-12), 0.0)
+    sig = np.where(valid, noise, 0.0)  # the stack's noise, in the same (linear) units as B
     vm = valid.astype(np.float32)
     sig = ndimage.gaussian_filter(sig.astype(np.float32), 4.0) / np.maximum(ndimage.gaussian_filter(vm, 4.0), 1e-3)
     nz = tiled_noise(bf.shape, origin, prep["seed"], prep["kern"]) / prep["norm"] * sig
@@ -1035,8 +1067,8 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
     an amplification rising with spatial frequency; ``weights`` (one per scale, default all 1)
     change each scale's share, like the frequency sliders of Druckmüller's Corona program.
 
-    Not published, so chosen here: it works on log brightness (as Adaptive (MGN) does, so the same
-    contrast counts the same at every height), uses the same scales as Adaptive (MGN), and is
+    Not published, so chosen here: it works on log brightness (so the same contrast counts the same
+    at every height; Adaptive (MGN) works on the linear image, as its paper does), and is
     centred on mid-grey for the blend, whose natural-layer base plays the part of the original
     image's share (K1 in the thesis). Druckmüller's later "nonlinearity in the use of filtered
     images" (Corona 4.1) is not published and not reproduced.
@@ -1094,10 +1126,12 @@ def _achf_reach(scales: Sequence[float], weights: Sequence[float], part_limit: f
 
 def mgn(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], k: float, floor: float,
         origin: tuple[int, int] = (0, 0), weights: Optional[Sequence[float]] = None) -> np.ndarray:
-    """Multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of log(X); local part only,
+    """Multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the linear image; local part only,
     on the paper's own scale: 0.5 + (1/n sum g_i arctan(k C_i)) / pi (see :func:`mgn_unit`), the
     weights g_i (default all 1, the plain mean) as in the paper's eq. 5; a scale at 0 is skipped."""
-    b = np.log(np.maximum(x, 0) + max(floor, 1e-9)).astype(np.float32)
+    # B: the original image, linear, negative pixels replaced (Morgan & Druckmueller 2014; until
+    # 6 Nov 2026 this took the log).
+    b = np.maximum(x, 0).astype(np.float32)
     # Fill invalid pixels with their surroundings so the Moon and frame edges do not ring.
     m = valid.astype(np.float32)
     fill = blur(b * m, 8.0, origin) / np.maximum(blur(m, 8.0, origin), 1e-6)
@@ -1404,12 +1438,14 @@ def _ring_cache(frame: Frame, p: EnhanceParams) -> RingStats:
 
 
 def _natural_cache(frame: Frame, p: EnhanceParams) -> NaturalStats:
-    key = ("nat", float(p.flatten), float(p.even), float(p.shoulder), float(p.midtone))
+    key = ("nat", float(p.flatten), float(p.even), float(p.shoulder), float(p.midtone), p.natural_stretch,
+           float(p.gamma))
     if key not in frame.cache:
         r, phi = polar(frame.shape, frame.g)
         frame.cache[key] = natural_stats(frame.lum, r, phi, frame.valid, frame.nlev, p.flatten, frame.stats_valid,
                                          p.shoulder, p.even, frame.g.sun_r, p.midtone,
-                                         base_cache=frame.cache.setdefault("nat_base", {}))
+                                         base_cache=frame.cache.setdefault("nat_base", {}),
+                                         stretch=p.natural_stretch, gamma=p.gamma)
     return frame.cache[key]
 
 
@@ -1421,7 +1457,7 @@ def _gated_cache(frame: Frame) -> dict:
 
 # The settings each layer depends on (besides the prepared frame); see render(cache=True).
 LAYER_SETTINGS = {
-    "natural": ("flatten", "even", "shoulder", "midtone"),
+    "natural": ("flatten", "even", "shoulder", "midtone", "natural_stretch", "gamma"),
     "nrgf": ("segments", "order", "ring_smooth"),
     "fnrgf": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation"),
     "fnrgf_n": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation", "noise_m"),

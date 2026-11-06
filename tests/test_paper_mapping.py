@@ -24,11 +24,14 @@ DATA = Path(__file__).parent / "data" / "eclipse2024_bin8.npz"
 
 
 def test_mgn_layer_is_the_papers_mean_of_arctan_on_a_straight_line():
+    """B is the original image, linear (Morgan & Druckmueller 2014: "the original image normalised
+    by exposure time", negative pixels replaced first). Until 6 Nov 2026 the layer used log(B)."""
     rng = np.random.default_rng(4)
     x = np.exp(ndimage.gaussian_filter(rng.normal(size=(160, 200)), 2.0)).astype(np.float32)
+    x[5, 5] = -0.3   # a spurious negative pixel: replaced by 0
     valid = np.ones(x.shape, bool)
     scales, k = [1.5, 3.0, 6.0], 0.7
-    b = np.log(x + 1e-6).astype(np.float32)
+    b = np.maximum(x, 0).astype(np.float32)
     acc = np.zeros_like(b)
     for w in scales:  # the paper's C_i: (B - mean) / local deviation, at each scale
         d = b - ndimage.gaussian_filter(b, w, mode="reflect")
@@ -77,7 +80,7 @@ def test_mgn_scale_weights_as_in_the_paper():
     x = np.exp(ndimage.gaussian_filter(rng.normal(size=(120, 150)), 1.5)).astype(np.float32)
     valid = np.ones(x.shape, bool)
     scales, k, g = [1.5, 3.0, 6.0], 0.7, [0.25, 1.0, 0.0]
-    b = np.log(x + 1e-6).astype(np.float32)
+    b = x.astype(np.float32)   # B: the linear image, as in the paper
     acc = np.zeros_like(b)
     for w, gi in zip(scales, g):
         d = b - ndimage.gaussian_filter(b, w, mode="reflect")
@@ -95,3 +98,27 @@ def test_mgn_scales_follow_the_preview_reduction():
 
     p = W._scaled_params(E.EnhanceParams(), 1 / 6)
     assert np.allclose(p.mgn_scales, [v / 6 for v in (1.25, 2.5, 5, 10, 20, 40)])
+
+
+
+def test_natural_gamma_stretch_is_the_mgn_papers_global_image():
+    """Morgan & Druckmueller (2014) combine MGN with C'_g = ((B - a0) / (a1 - a0))^(1/gamma), a0 and
+    a1 the image's minimum and maximum, gamma 3.2 in the paper. Natural layer, Stretch: Gamma."""
+    z = np.load(DATA)
+    hdr = np.ascontiguousarray(np.moveaxis(z["hdr"].astype(np.float32) * float(z["scale"]), 0, -1))
+    geo = {k: float(z[k]) for k in ("SUNX", "SUNY", "SUNR", "MOONX", "MOONY", "MOONR")}
+    weight = (np.abs(hdr).sum(axis=2) > 0).astype(np.float32)
+    p = E.EnhanceParams(layers=("natural",), saturation=0.0, blend={}, natural_stretch="gamma", gamma=3.2)
+    assert E.EnhanceParams().natural_stretch == "log" and E.EnhanceParams().gamma == 3.2
+    frame = E.prepare(hdr, weight, geo, p)
+    out = E.render(frame, p)["natural"][..., 0]
+    b = np.maximum(frame.lum, 0)
+    sv = frame.stats_valid
+    a0, a1 = float(b[sv].min()), float(b[sv].max())
+    expect = np.clip((b - a0) / (a1 - a0), 0, 1) ** (1 / 3.2)
+    v = frame.valid
+    assert np.abs(out[v] - expect[v]).max() < 1e-4
+    # A different gamma gives a different layer, and the log stretch is unchanged by these settings.
+    assert np.abs(E.render(frame, E.EnhanceParams(layers=("natural",), saturation=0.0, blend={},
+                                                  natural_stretch="gamma", gamma=2.0))["natural"][..., 0][v]
+                  - expect[v]).max() > 0.01

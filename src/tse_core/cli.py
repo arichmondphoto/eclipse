@@ -200,6 +200,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--shoulder", type=float, default=0.0,
                    help="highlight roll-off: 0 = hard white point (the brightest 0.1%% clip); e.g. 0.3 = the top 30%% of "
                         "the range rolls off smoothly to white, nothing clips and colours keep their hue")
+    p.add_argument("--natural-stretch", choices=["log", "gamma"], default="log",
+                   help="natural layer: log brightness (default) or gamma, the MGN paper's base: "
+                        "((B - min) / (max - min))^(1/gamma)")
+    p.add_argument("--gamma", type=float, default=3.2,
+                   help="gamma of --natural-stretch gamma (3.2 as in Morgan & Druckmueller 2014; 2.5-4 suggested)")
     p.add_argument("--flatten", type=float, default=0.0,
                    help="natural layer: how much of the radial fall-off to remove, 0..1; 0 = off (default), "
                         "e.g. 0.8")
@@ -712,7 +717,7 @@ def _floats(text):
 ENHANCE_OPTION_SETTINGS = {
     "layers": ("layers",), "segments": ("segments",), "order": ("order",), "mean_att": ("mean_attenuation",),
     "std_att": ("std_attenuation",), "noise_m": ("noise_m",), "flatten": ("flatten",), "shoulder": ("shoulder",),
-    "even": ("even",), "midtone": ("midtone",), "noise_gate": ("noise_gate",), "adaptive_k": ("mgn_k",),
+    "even": ("even",), "midtone": ("midtone",), "natural_stretch": ("natural_stretch",), "gamma": ("gamma",), "noise_gate": ("noise_gate",), "adaptive_k": ("mgn_k",),
     "achf_weights": ("achf_weights",), "achf_scales": ("achf_scales",),
     "mgn_scales": ("mgn_scales",), "mgn_weights": ("mgn_weights",), "achf_part_limit": ("achf_part_limit",),
     "achf_contrast": ("achf_contrast",), "saturation": ("saturation",), "white": ("white",),
@@ -753,6 +758,7 @@ def enhance_params(args, given: set | None = None):
     params = EnhanceParams(layers=layers, segments=args.segments, order=args.order,
                            mean_attenuation=_floats(args.mean_att), std_attenuation=_floats(args.std_att),
                            noise_m=args.noise_m, flatten=args.flatten, shoulder=args.shoulder, even=args.even, midtone=args.midtone, noise_gate=args.noise_gate,
+                           natural_stretch=args.natural_stretch, gamma=args.gamma,
                            mgn_k=args.adaptive_k, achf_weights=_six(args.achf_weights, "--achf-weights"),
                            mgn_scales=_six(args.mgn_scales, "--mgn-scales", positive=True),
                            mgn_weights=_six(args.mgn_weights, "--mgn-weights"),

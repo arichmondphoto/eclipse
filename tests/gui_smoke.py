@@ -75,6 +75,11 @@ assert "strands" not in d.__dataclass_fields__ and "mgn_skip_fine" not in d.__da
 et.blend["fnrgf_n"].setValue(40)
 et.flatten.setValue(0.6)
 assert et.params().blend["fnrgf_n"] == 0.4 and et.params().flatten == 0.6
+assert et.params().natural_stretch == "log" and et.params().gamma == 3.2   # Stretch and Gamma
+et.natural_stretch.setCurrentIndex(1)
+et.gamma.setValue(2.5)
+assert et.params().natural_stretch == "gamma" and et.params().gamma == 2.5
+et.natural_stretch.setCurrentIndex(0)
 et.layer_checks["nrgf"].setChecked(False)
 et.blend["adaptive"].setValue(10)
 et.blend_mode["adaptive"].setCurrentIndex(1)  # Overlay
