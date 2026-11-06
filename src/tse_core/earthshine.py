@@ -79,6 +79,14 @@ class EarthshineParams:
     # Frames whose Moon lies off its track (camera shake) count less: 1 / (1 + (off / s)^2), s twice
     # the frames' typical scatter about the track (from Align).
     track_weight: bool = True
+    # Near the limb a frame's pixel counts less the further it lies from the other frames there, in
+    # units of its own noise: 1 / (1 + (z / robust_k)^2), so at robust_k sigma it counts half and at
+    # twice that a fifth (0 = off). Over the last robust_zone % of the radius and the limb itself,
+    # where glare is steep and a few frames that differ (shake, glare changing towards a contact)
+    # otherwise leave thin lines and ticks.
+    robust_k: float = 3.0
+    robust_zone: float = 5.0
+    robust_smooth: float = 0.5  # % of the radius the differences are judged over (2.2 px at 400 mm)
     noise_floor: float = 0.002
     hot_pixels: bool = True
 
@@ -655,6 +663,49 @@ def track_factors(infos, p: "EarthshineParams", moon_r: float) -> dict:
     return {i: 1.0 / (1.0 + (o / s) ** 2) for i, o in offs.items()}
 
 
+def robust_factors(values: np.ndarray, weights: np.ndarray, depth: np.ndarray, k: float,
+                   where: Optional[tuple] = None, shape: Optional[tuple] = None, smooth: float = 0.0) -> np.ndarray:
+    """How much each frame's pixel counts for agreeing with the other frames: (frames, pixels) -> factor.
+
+    ``values`` are the frames' brightness at each pixel (in the stack's units) and ``weights`` their
+    inverse-variance weights, so a frame's noise there is proportional to 1 / sqrt(weight). Each
+    pixel's centre is the median over the frames that have data there. A frame's distance from it, in its own
+    noise, is smoothed over ``smooth`` px (``where``/``shape`` place the pixels in the image), so that
+    a coherent difference counts and a single noisy pixel does not, then scaled by the typical
+    distance of all frames at that depth from the limb (``depth``, rings of half a pixel). The factor
+    is 1 / (1 + (z / k)^2).
+    """
+    F, N = values.shape
+    # Each pixel's centre: the median of the frames that have data there, one vote each, so that no
+    # single frame (the longest exposure often carries most of the weight) can make itself the reference.
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)   # pixels no frame covers
+        centre = np.nan_to_num(np.nanmedian(np.where(weights > 0, values, np.nan), axis=0))
+    z0 = (values - centre[None, :]) * np.sqrt(np.maximum(weights, 0.0))
+    if smooth > 0 and where is not None and shape is not None:
+        has = np.zeros(shape, np.float32)
+        for f in range(F):
+            img = np.zeros(shape, np.float32)
+            img[where] = z0[f]
+            has[:] = 0.0
+            has[where] = (weights[f] > 0).astype(np.float32)
+            num = ndimage.gaussian_filter(img * has, smooth)
+            den = ndimage.gaussian_filter(has, smooth)
+            z0[f] = np.where(weights[f] > 0, num[where] / np.maximum(den[where], 1e-6), 0.0)
+    ring = np.round(depth * 2.0).astype(int)
+    ring = ring - ring.min()
+    scale = np.zeros(ring.max() + 1)
+    for r_ in np.unique(ring):
+        sel = (ring == r_)[None, :] & (weights > 0)
+        a_ = np.abs(z0[sel])
+        scale[r_] = 1.4826 * float(np.median(a_)) if a_.size else 0.0
+    s_ = scale[ring][None, :]
+    z = np.where(s_ > 0, z0 / np.maximum(s_, 1e-30), 0.0)
+    return (1.0 / (1.0 + (z / k) ** 2)).astype(np.float32)
+
+
 def stack_earthshine(
     infos: Sequence[FrameInfo],
     load: Callable[[FrameInfo], RawMosaic],
@@ -700,6 +751,10 @@ def stack_earthshine(
     total_c = np.zeros((3, 2 * half, 2 * half), np.float64)
     weight = np.zeros_like(total)
     shifts = {}
+    robust = p.robust_k > 0 and p.robust_zone > 0 and len(use) >= 3
+    band = stacked & (rr > moon_r - p.robust_zone / 100.0 * moon_r) if robust else np.zeros_like(stacked)
+    band_idx = np.nonzero(band)
+    band_v, band_c, band_w = [], [], []
     for f in use:
         m = matches[f.index]
         mat = moon_aligned(f.matrix, (f.moon_x, f.moon_y), moon_xy)
@@ -719,11 +774,38 @@ def stack_earthshine(
         for c in range(3):
             total_c[c] += np.nan_to_num((vc[c] - off[c]) / m.gain) * w
         weight += w
+        if robust:
+            band_v.append(np.nan_to_num((v[band_idx] - float(off.mean())) / m.gain).astype(np.float32))
+            band_c.append(np.stack([np.nan_to_num((vc[c][band_idx] - off[c]) / m.gain) for c in range(3)]).astype(np.float32))
+            band_w.append(w[band_idx].astype(np.float32))
         say(f"earthshine: {f.file_name} (gain {m.gain:.3g}, Moon shifted {math.hypot(*shifts[f.index]):.1f} px)")
+    robust_note = None
+    if robust and band_idx[0].size:
+        V, Cc, Wf = np.stack(band_v), np.stack(band_c), np.stack(band_w)
+        factor = robust_factors(V, Wf, (moon_r - rr)[band_idx], p.robust_k, band_idx, rr.shape,
+                                smooth=p.robust_smooth / 100.0 * moon_r)
+        zone_px = p.robust_zone / 100.0 * moon_r   # eased out over the inner third, so no ring at its edge
+        ease = np.clip((zone_px - (moon_r - rr)[band_idx]) / (zone_px / 3.0), 0.0, 1.0)
+        ease = (0.5 - 0.5 * np.cos(math.pi * ease)).astype(np.float32)
+        factor = 1.0 - (1.0 - factor) * ease[None, :]
+        Wr = Wf * factor
+        total[band_idx] = (V * Wr).sum(axis=0)
+        for c in range(3):
+            total_c[c][band_idx] = (Cc[:, c] * Wr).sum(axis=0)
+        weight[band_idx] = Wr.sum(axis=0)
+        lost = 1.0 - Wr.sum() / max(float(Wf.sum()), 1e-30)
+        per = 1.0 - Wr.sum(axis=1) / np.maximum(Wf.sum(axis=1), 1e-30)
+        worst = sorted(zip(per, [f.file_name for f in use]), reverse=True)[:3]
+        robust_note = (f"in the last {p.robust_zone:g}% of the radius by the limb, frame pixels far from the other frames "
+                       f"count less: {100 * lost:.0f}% of the weight there; most from " +
+                       ", ".join(f"{n} ({100 * x:.0f}% of its own)" for x, n in worst))
+        del band_v, band_c, band_w
     lum = np.where(weight > 0, total / np.maximum(weight, 1e-30), 0.0).astype(np.float32)
     rgb = np.where(weight > 0, total_c / np.maximum(weight, 1e-30), 0.0).astype(np.float32)
     good = inside & (weight > 0)
     notes = []
+    if robust_note:
+        notes.append(robust_note)
     if p.mask_fade > 0:
         notes.append(f"each frame fades out over {max(p.mask_fade / 100 * moon_r, 0.5):.1f} px ({p.mask_fade:g}% of the "
                      "radius) before the pixels where it saturates")

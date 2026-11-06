@@ -869,7 +869,8 @@ def test_defaults_as_andy_uses_them():
 
 
 
-def _saturating_limb_scene(n_frames=8, size=700, rs=150.0, seed=3, glare_step=0.3, limb_amp=2.75, noise=True):
+def _saturating_limb_scene(n_frames=8, size=700, rs=150.0, seed=3, glare_step=0.3, limb_amp=2.75, noise=True,
+                           ticks=None):
     """Frames whose long exposures saturate a few px inside the limb (deeper the longer the
     exposure, varying round the limb) and whose limb glare differs a little from frame to frame,
     as on the 2024 frames (10-30% as third contact neared). Moon fixed; returns the stack inputs."""
@@ -892,6 +893,9 @@ def _saturating_limb_scene(n_frames=8, size=700, rs=150.0, seed=3, glare_step=0.
         limb = limb_amp * f * np.exp(-d / 2.5) * (1 + 0.4 * np.cos(3 * phi + i))
         moonlight = 4e-4 * (1 + 0.3 * surf) + 3e-3 + limb
         img = (corona * (1 - disc) + moonlight * disc) * t
+        if ticks is not None and i == ticks[0]:   # this frame alone: a comb of ticks 8-12 px inside the limb
+            band = (d > 8) & (d < 12) & (rr < r_moon)
+            img = img + np.where(band, ticks[1] * t * np.sign(np.sin(phi * r_moon / 1.5)), 0.0)
         if noise:
             img = rng.poisson(np.clip(img, 0, None) * 3e4) / 3e4 + rng.normal(0, 2e-4, img.shape)
         mos[i] = mosaic_from(np.minimum(img, 1.0).astype(np.float32))
@@ -976,3 +980,48 @@ def test_files_keep_their_name_when_shaken_frames_are_named_in_the_log(run, tmp_
                                (0, 0, SIZE, SIZE), EarthshineParams(), out_dir=tmp_path, name="ecl")
     assert any("counted less" in n and "f2" in n for n in res.notes), res.notes
     assert all(Path(v).name.startswith("ecl_") for v in res.outputs.values() if isinstance(v, str)), res.outputs
+
+
+def test_robust_factors_turn_down_a_frame_that_disagrees_only_where_it_does():
+    from tse_core.earthshine import robust_factors
+    rng = np.random.default_rng(0)
+    F, H, Wd = 8, 40, 60
+    yy, xx = np.mgrid[0:H, 0:Wd]
+    where = (yy.ravel(), xx.ravel())
+    w = np.full((F, H * Wd), 4.0, np.float32)               # noise 0.5 in every frame
+    v = (1.0 + rng.normal(0, 0.5, (F, H * Wd))).astype(np.float32)
+    patch = ((yy > 10) & (yy < 20) & (xx > 20) & (xx < 40)).ravel()
+    v[3, patch] += 4.0                                       # one frame off by 8 sigma, over a patch
+    f = robust_factors(v, w, np.full(H * Wd, 5.0), 3.0, where, (H, Wd), smooth=1.0)
+    assert f[3, patch].mean() < 0.15
+    assert f[3, ~patch].mean() > 0.85 and f[[0, 1, 2, 4, 5, 6, 7]].mean() > 0.85
+
+
+def test_a_frame_with_ticks_by_the_limb_counts_less_there():
+    """On Andy's 2024 stack two frames (DSC_9132/9133) left a zipper of ticks 9-11 px inside the limb
+    that no fade or track weighting removed. Near the limb a frame's pixel now counts less the further
+    it lies from the other frames, in its own noise; there the ticks fell from 2.9 to 2.15x the
+    disc's fine structure (1.93 with the two frames left out): what the two frames added beyond the
+    noise fell by 55%. Here one of 8 simulated frames carries ticks, and it is the longest exposure,
+    with over half the weight there: soft weighting (it counts a fifth at 6 sigma, not nothing) takes
+    about 37% of the ticks away. The log names that frame."""
+    out, notes = {}, {}
+    for k in (0.0, 3.0):
+        diff = []
+        for tk in (None, (4, 2e-3)):
+            mos, infos, matches, centre, r, size = _saturating_limb_scene(ticks=tk)
+            res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, centre, r,
+                                                (0, 0, size, size),
+                                                # the test Moon is 158 px: 10% reaches the ticks, as 5% (22 px) does on a 400 mm Moon
+                                                EarthshineParams(robust_k=k, robust_zone=10.0, glare_order=2))
+            diff.append(detail)
+            notes[k] = res.notes
+        X0, Y0, w, h = res.crop
+        yy, xx = np.mgrid[0:h, 0:w]
+        dep = r - np.hypot(xx - (centre[0] - X0), yy - (centre[1] - Y0))
+        band = (dep > 8) & (dep < 12)
+        out[k] = float(np.std((diff[1] - diff[0])[band]))
+    assert EarthshineParams().robust_k == 3.0
+    assert out[3.0] < 0.75 * out[0.0], out
+    assert any("count less" in n and "f4" in n for n in notes[3.0]), notes[3.0]
+    assert not any("frame pixels far from" in n for n in notes[0.0])

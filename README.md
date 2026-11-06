@@ -687,7 +687,16 @@ parallel to the limb. Frames whose Moon lies off its track (camera shake,
 from Align) count less, 1 / (1 + (off / s)^2) with s twice the frames'
 typical scatter about the track; the log names them. On 22 of the 2024
 frames the two together took the row-to-row jumps 6-15 px inside the limb
-from 2.9 to 0.8x the maria, which stayed the same. The glare from the inner corona inside the disc, a
+from 2.9 to 0.8x the maria, which stayed the same. Over the last 5% of the
+radius, and the limb itself, a frame's pixel also counts less the further
+it lies from the other frames there, in its own noise: 1 / (1 + (z / 3)^2),
+half at 3 sigma and a fifth at 6. The reference is the median of the frames
+(one vote each, so the longest exposure cannot make itself the reference),
+and the differences are judged over 0.5% of the radius (2.2 px at 400 mm),
+so a coherent difference counts and a single noisy pixel does not. On the
+2024 stack this took out a zipper of ticks 9-11 px inside the limb that two
+frames near third contact left (the log names the frames that counted
+less). The glare from the inner corona inside the disc, a
 gentle gradient, is removed with a smooth surface (`--glare-order`, default
 6, the most flexible; if large maria look washed out, lower it: 2 removes only
 a gentle gradient). Close to the limb the glare
