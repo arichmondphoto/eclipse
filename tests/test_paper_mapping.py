@@ -161,3 +161,19 @@ def test_linear_blend_adds_mgn_detail_as_the_paper_does():
     f = rng.uniform(0, 1, base.shape).astype(np.float32)
     out = E.soft_light_blend({"natural": base, "fnrgf": f}, {"natural": 1.0, "fnrgf": 0.5}, valid, {"fnrgf": "linear"})
     assert np.abs(out - (base + 0.5 * f) / 1.5).max() < 1e-5
+
+
+def test_weighted_average_keeps_the_previous_linear_look():
+    """Andy, 6 Nov 2026: the paper's form is much stronger; he liked the earlier look too. Weighted
+    average puts the layer in as its 0..1 picture, (K1 B + K2 L) / (K1 + K2), for every layer, MGN
+    included (as Linear did for MGN until 3552a26)."""
+    rng = np.random.default_rng(3)
+    base = rng.uniform(0, 1, (30, 40)).astype(np.float32)
+    layer = rng.uniform(0.2, 0.8, base.shape).astype(np.float32)
+    valid = np.ones(base.shape, bool)
+    for k in ("adaptive", "fnrgf"):
+        out = E.soft_light_blend({"natural": base, k: layer}, {"natural": 1.0, k: 0.43}, valid, {k: "average"})
+        assert np.abs(out - (base + 0.43 * layer) / 1.43).max() < 1e-6
+    assert E.blend_mode_name("Weighted average") == "average"
+    from tse_core.workflow import parse_blend_modes
+    assert parse_blend_modes("natural=1,adaptive=0.43:average") == {"adaptive": "average"}

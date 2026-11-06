@@ -363,8 +363,8 @@ def parse_blend_modes(text: Optional[str]) -> dict:
             from .enhance import blend_mode_name
 
             mode = blend_mode_name(rest.split(":", 1)[1])
-            if mode not in ("soft light", "overlay", "linear"):
-                raise WorkflowError(f"unknown blend mode {mode!r}; use soft light, overlay or linear")
+            if mode not in ("soft light", "overlay", "linear", "average"):
+                raise WorkflowError(f"unknown blend mode {mode!r}; use soft light, overlay, linear or average")
             modes[k.strip()] = mode
     return modes
 
@@ -578,7 +578,7 @@ def load_enhance_settings(path, base=None):
                     raise bad(k, v)
             elif k == "blend_modes":
                 v = {str(a): blend_mode_name(b) for a, b in dict(v).items()}
-                if any(m not in ("soft light", "overlay", "linear") for m in v.values()):
+                if any(m not in ("soft light", "overlay", "linear", "average") for m in v.values()):
                     raise bad(k, v)
             elif k == "white":
                 v = str(v)

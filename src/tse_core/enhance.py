@@ -116,7 +116,7 @@ class EnhanceParams:
     neutral_background: bool = True  # model and remove the sky (level, colour and gradient) before filtering
     moon_margin_px: float = 1.5
     blend: dict = field(default_factory=lambda: dict(DEFAULT_BLEND))
-    blend_modes: dict = field(default_factory=dict)  # layer -> "soft light" (default), "overlay" or "linear"
+    blend_modes: dict = field(default_factory=dict)  # layer -> "soft light" (default), "overlay", "linear" or "average"
 
 
 @dataclass
@@ -726,14 +726,17 @@ def overlay(base: np.ndarray, top: np.ndarray) -> np.ndarray:
 
 BLEND_MODES = {"soft light": soft_light, "overlay": overlay}
 # Linear (paper) is not a layer mode applied in turn: see soft_light_blend.
-MODE_NAMES = ("soft light", "overlay", "linear")
+MODE_NAMES = ("soft light", "overlay", "linear", "average")
 
 
 def blend_mode_name(text) -> str:
-    """'Soft Light', 'softlight', 'Linear (paper)', ... -> 'soft light', 'overlay' or 'linear'."""
+    """'Soft Light', 'softlight', 'Linear (paper)', 'Weighted average', ... -> 'soft light',
+    'overlay', 'linear' or 'average'."""
     m = str(text).strip().lower().replace("_", " ").replace("softlight", "soft light")
     if m.startswith("linear"):
         return "linear"
+    if m in ("average", "weighted average", "weighted"):
+        return "average"
     return m
 
 
@@ -759,9 +762,9 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
             continue
         name = blend_mode_name(modes.get(k, "soft light"))
         if name not in MODE_NAMES:
-            raise ValueError(f"unknown blend mode {modes[k]!r} for {k}; use soft light, overlay or linear")
-        if name == "linear":
-            lin.append((k, max(float(weights[k]), 0.0)))
+            raise ValueError(f"unknown blend mode {modes[k]!r} for {k}; use soft light, overlay, linear or average")
+        if name in ("linear", "average"):
+            lin.append((k, max(float(weights[k]), 0.0), name))
             continue
         w = min(max(weights[k], 0.0), 1.0)
         fn = BLEND_MODES[name]
@@ -774,11 +777,12 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
         k1 = max(float(weights.get("natural", 1.0)), 0.0) if "natural" in weights else 1.0
         num = k1 * base
         den = np.full_like(base, k1)
-        for k, w in lin:
+        for k, w, name in lin:
             wk = w * fade if fade is not None else np.float32(w)
-            # MGN's detail goes in as the paper adds it (eq. 5): the mean of the arctans, centred on
-            # 0 and in radians, which the layer stores as 0.5 + mean / pi.
-            term = (layers[k] - 0.5) * np.float32(math.pi) if k == "adaptive" else layers[k]
+            # Linear: MGN's detail goes in as the paper adds it (eq. 5): the mean of the arctans,
+            # centred on 0 and in radians, which the layer stores as 0.5 + mean / pi. Weighted
+            # average: every layer as its 0..1 picture (Linear for MGN until 6 Nov 2026).
+            term = (layers[k] - 0.5) * np.float32(math.pi) if (k == "adaptive" and name == "linear") else layers[k]
             num = num + wk * term
             den = den + wk
         base = (num / np.maximum(den, 1e-12)).astype(np.float32)

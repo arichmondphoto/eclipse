@@ -1144,12 +1144,15 @@ class EnhanceTab(StepTab):
         for k, default in (("fnrgf_n", 0), ("adaptive", 0), ("achf", 0), ("fnrgf", 0), ("nrgf", 0)):
             sp = self._spin(0, 100, default, " %")
             mode = QComboBox()
-            for text, name in (("Soft Light", "soft light"), ("Overlay", "overlay"), ("Linear (paper)", "linear")):
+            choices = [("Soft Light", "soft light"), ("Overlay", "overlay"), ("Linear (paper)", "linear")]
+            if k == "adaptive":  # only MGN has a second linear form: its paper's, and the 0..1 picture
+                choices.append(("Weighted average", "average"))
+            for text, name in choices:
                 mode.addItem(text, name)
             # Linear (paper): the strength is K2 against the natural layer's 1, up to 10 (1000 %) as in
             # Druckmüllerová's FNRGF software; Soft Light and Overlay are opacities, at most 100 %.
             mode.currentIndexChanged.connect(
-                lambda _i, sp=sp, mode=mode: sp.setMaximum(1000 if mode.currentData() == "linear" else 100))
+                lambda _i, sp=sp, mode=mode: sp.setMaximum(1000 if mode.currentData() in ("linear", "average") else 100))
             mode.currentIndexChanged.connect(self.changed)
             row = QHBoxLayout()
             row.addWidget(sp, 1)
@@ -1367,8 +1370,12 @@ class EnhanceTab(StepTab):
                  "brighter base.\n- FNRGF, FNRGF-N, NRGF, Adaptive (ACHF): the FNRGF paper's Z = K1 X + K2 Y on the "
                  "display range (Druckmüllerová's software scales both images to 0-1 first). As in the published "
                  "images, the dark sky comes up towards grey and the natural tones flatten by the filtered image's "
-                 "share. The 2011 paper's 0.4 FNRGF + 0.6 ACHF is both layers on Linear at 40 % and 60 %.\n\nIn "
-                 "Photoshop (not MGN): Normal mode at opacity K2 / (1 + K2) for one layer.")
+                 "share. The 2011 paper's 0.4 FNRGF + 0.6 ACHF is both layers on Linear at 40 % and 60 %.\n\nWeighted "
+                 "average (Adaptive (MGN) only): the same weighted average with MGN as its own 0-1 picture, as "
+                 "Linear (paper) treated it before 6 Nov 2026. Gentler than Linear (paper), about a third of the "
+                 "detail, and it lifts the sky a little towards grey. Strength up to 1000 %, as K2; 43 % gives the "
+                 "earlier look at the paper's h = 0.7.\n\nIn Photoshop (Weighted average, or Linear for layers "
+                 "other than MGN): Normal mode at opacity K2 / (1 + K2) for one layer.")
         for size, sp in zip(self.achf_size, self.achf_w):
             _tip(size, "Adaptive (ACHF) only: the width (sigma) of this scale's kernel in pixels of your full-size "
                  "stack; the structure about this size and finer is brought out. The thesis uses 0.5-64 px. Kept as "
@@ -1600,7 +1607,10 @@ class EnhanceTab(StepTab):
             c.setChecked(k in p.layers)
         for k, sp in self.blend.items():
             mode = self.blend_mode[k]
-            i = mode.findData(p.blend_modes.get(k, "soft light"))
+            want = p.blend_modes.get(k, "soft light")
+            if want == "average" and k != "adaptive":
+                want = "linear"  # the same thing for every layer but MGN
+            i = mode.findData(want)
             mode.setCurrentIndex(max(i, 0))  # first: it sets the strength's range
             sp.setValue(int(round(100 * p.blend.get(k, 0.0))))
         self.natural_stretch.setCurrentIndex(max(self.natural_stretch.findData(p.natural_stretch), 0))
