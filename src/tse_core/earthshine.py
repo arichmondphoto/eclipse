@@ -728,9 +728,9 @@ def stack_earthshine(
                      "radius) before the pixels where it saturates")
     shaky = sorted((w, i) for i, w in factors.items() if w < 0.8)
     if shaky:
-        name = {f.index: f.file_name for f in use}
+        file_of = {f.index: f.file_name for f in use}
         notes.append("off the Moon's track (camera shake), counted less: " +
-                     ", ".join(f"{name[i]} {100 * w:.0f}%" for w, i in shaky))
+                     ", ".join(f"{file_of[i]} {100 * w:.0f}%" for w, i in shaky))
     if good.sum() < 100:
         raise ValueError("no usable pixels inside the lunar disc")
 

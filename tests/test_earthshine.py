@@ -962,3 +962,17 @@ def test_frames_off_the_moons_track_count_less():
                  "sun": {"rejected": [], "residuals_px": [0.3, 1.4, 0.2]}}
     _, _, got, _ = _frame_infos(project, alignment, include_rejected=False)
     assert [g.track_off for g in got] == [0.3, 1.4, 0.2]
+
+
+def test_files_keep_their_name_when_shaken_frames_are_named_in_the_log(run, tmp_path):
+    """Nov 2026: the log line naming frames off the Moon's track reused the variable holding the
+    output name, so the files were named after a list of frames ('File name too long' in Siril)."""
+    from dataclasses import replace
+
+    mos, infos, tex, matches, ref = run
+    offs = [0.2, 0.3, 2.5, 0.25]
+    shaken = [replace(f, track_off=o) for f, o in zip(infos, offs)]
+    res, *_ = stack_earthshine(shaken, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
+                               (0, 0, SIZE, SIZE), EarthshineParams(), out_dir=tmp_path, name="ecl")
+    assert any("counted less" in n and "f2" in n for n in res.notes), res.notes
+    assert all(Path(v).name.startswith("ecl_") for v in res.outputs.values() if isinstance(v, str)), res.outputs
