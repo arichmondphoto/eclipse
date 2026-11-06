@@ -71,6 +71,7 @@ class FrameInfo:
     moon_x: float  # Moon centre in reference coordinates
     moon_y: float
     moon_r: float
+    track_off: Optional[float] = None  # how far this frame's Moon lies off the fitted track, px (Align)
 
 
 @dataclass

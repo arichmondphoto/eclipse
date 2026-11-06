@@ -70,7 +70,14 @@ class EarthshineParams:
     colour: bool = True  # natural colour: the glow and limb (prominences red) and the earthshine's own tint
     saturation: float = 1.0  # colour saturation, as for the corona layers (0 = grey)
     saturation_level: float = 0.95
-    saturation_taper: float = 0.15
+    saturation_taper: float = 0.15  # only with mask_fade 0: weight falls from 80% to 95% of full scale
+    # Each frame fades out over this % of the Moon's radius before the pixels where it saturates
+    # (0 = cut off at once, as before Nov 2026: frames with slightly different glare then left steps
+    # there, seen as thin lines parallel to the limb).
+    mask_fade: float = 1.0
+    # Frames whose Moon lies off its track (camera shake) count less: 1 / (1 + (off / s)^2), s twice
+    # the frames' typical scatter about the track (from Align).
+    track_weight: bool = True
     noise_floor: float = 0.002
     hot_pixels: bool = True
 
@@ -620,6 +627,33 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
     return detail, shown, snr, keep_from, notes
 
 
+def frame_weight(v: np.ndarray, vmax: np.ndarray, sat: np.ndarray, gain: float, p: "EarthshineParams",
+                 moon_r: float) -> np.ndarray:
+    """How much one frame's pixels count in the Moon-aligned stack.
+
+    Inverse variance (``gain``^2 / value), nothing where the frame is saturated (any colour at
+    ``saturation_level`` or a saturated photosite near), and, with ``mask_fade``, fading in over
+    that % of the Moon's radius from there, so a frame never starts or stops counting all at once.
+    """
+    vmax = np.nan_to_num(vmax, nan=1.0)
+    base = gain**2 / (np.clip(np.nan_to_num(v, nan=0.0), 0, None) + p.noise_floor)
+    cut = (sat >= 0.01) | (vmax >= p.saturation_level)
+    if p.mask_fade > 0:
+        width = max(p.mask_fade / 100.0 * moon_r, 0.5)
+        return base * np.clip(ndimage.distance_transform_edt(~cut) / width, 0.0, 1.0)
+    taper = np.clip((p.saturation_level - vmax) / p.saturation_taper, 0.0, 1.0)
+    return base * taper * ~cut
+
+
+def track_factors(infos, p: "EarthshineParams", moon_r: float) -> dict:
+    """Frame index -> how much it counts for lying off the Moon's track (1 when on it, or unknown)."""
+    offs = {f.index: f.track_off for f in infos if getattr(f, "track_off", None) is not None}
+    if not p.track_weight or len(offs) < 3:
+        return {}
+    s = max(2.0 * 1.4826 * float(np.median(list(offs.values()))), 0.0005 * moon_r)
+    return {i: 1.0 / (1.0 + (o / s) ** 2) for i, o in offs.items()}
+
+
 def stack_earthshine(
     infos: Sequence[FrameInfo],
     load: Callable[[FrameInfo], RawMosaic],
@@ -660,6 +694,7 @@ def stack_earthshine(
     inside = rr < moon_r - p.margin(moon_r)  # used for fitting the glare and the surface
     stacked = rr < moon_r + max(p.limb_reach, 0.0) + 2  # stacked: also the real limb just outside
 
+    factors = track_factors(use, p, moon_r)
     total = np.zeros((2 * half, 2 * half), np.float64)
     total_c = np.zeros((3, 2 * half, 2 * half), np.float64)
     weight = np.zeros_like(total)
@@ -676,8 +711,7 @@ def stack_earthshine(
         v = (vc[0] + vc[1] + vc[2]) / 3.0
         vmax = warp_region(fr.rgb.max(axis=2), mat, crop, (fr.x0, fr.y0), order=1)
         sat = warp_region(fr.saturated.astype(np.float32), mat, crop, (fr.x0, fr.y0), order=1, cval=1.0)
-        taper = np.clip((p.saturation_level - np.nan_to_num(vmax, nan=1.0)) / p.saturation_taper, 0.0, 1.0)
-        w = (m.gain**2) / (np.clip(np.nan_to_num(v, nan=0.0), 0, None) + p.noise_floor) * taper * (sat < 0.01)
+        w = frame_weight(v, vmax, sat, m.gain, p, moon_r) * factors.get(f.index, 1.0)
         w = np.where(np.isfinite(v) & stacked, w, 0.0)
         off = m.colour_offsets()
         total += np.nan_to_num((v - float(off.mean())) / m.gain) * w
@@ -689,6 +723,14 @@ def stack_earthshine(
     rgb = np.where(weight > 0, total_c / np.maximum(weight, 1e-30), 0.0).astype(np.float32)
     good = inside & (weight > 0)
     notes = []
+    if p.mask_fade > 0:
+        notes.append(f"each frame fades out over {max(p.mask_fade / 100 * moon_r, 0.5):.1f} px ({p.mask_fade:g}% of the "
+                     "radius) before the pixels where it saturates")
+    shaky = sorted((w, i) for i, w in factors.items() if w < 0.8)
+    if shaky:
+        name = {f.index: f.file_name for f in use}
+        notes.append("off the Moon's track (camera shake), counted less: " +
+                     ", ".join(f"{name[i]} {100 * w:.0f}%" for w, i in shaky))
     if good.sum() < 100:
         raise ValueError("no usable pixels inside the lunar disc")
 

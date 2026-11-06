@@ -320,11 +320,14 @@ def solve_sun_centre(
         speed = float(np.sum(w * np.sum(dm * rdw, axis=1)) / denom) if denom > 0 else float("nan")
         return Hc, theta, sun_r, rms, speed, states, resid
 
-    # Reject frames whose Moon is far off the track (shake, doubled image, bad limb fit).
+    # Reject frames whose Moon is far off the track (shake, doubled image, bad limb fit): over 3x the
+    # typical scatter, and at least 0.35% of the Moon's radius off (1.5 px with a 400 mm lens on a
+    # 45 MP full-frame camera), so the limit is the same whatever the lens and camera.
+    limit = 0.0035 * float(moon_radius_px)
     for _ in range(5):
         resid = fit(tau)[6]
         scale = 1.4826 * float(np.median(resid[keep])) if keep.any() else 0.0
-        new = resid < max(3.0 * scale, 1.5)
+        new = resid < max(3.0 * scale, limit)
         if new.sum() < 2 or np.array_equal(new, keep):
             break
         keep = new

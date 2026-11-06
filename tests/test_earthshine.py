@@ -866,3 +866,99 @@ def test_defaults_as_andy_uses_them():
     assert (a.keep_glare, a.limb_soften, a.prominence_glare) == (0.1, 0.0, False)
     assert (a.smooth, a.edge_smooth, a.surface_denoise, a.brightness, a.glare_order) == (0.0, 0.0, 0.0, 1.0, 6)
     assert a.limb_shape is False and sp.parse_args(["proj.json", "--limb-shape"]).limb_shape is True
+
+
+
+def _saturating_limb_scene(n_frames=8, size=700, rs=150.0, seed=3, glare_step=0.3, limb_amp=2.75, noise=True):
+    """Frames whose long exposures saturate a few px inside the limb (deeper the longer the
+    exposure, varying round the limb) and whose limb glare differs a little from frame to frame,
+    as on the 2024 frames (10-30% as third contact neared). Moon fixed; returns the stack inputs."""
+    scene = SyntheticScene(size=size, sun_radius=rs, seed=5)
+    tex = _surface()
+    yy, xx = np.mgrid[0:size, 0:size].astype(float)
+    c = size / 2.0
+    r_moon = rs * 1.055
+    rng = np.random.default_rng(seed)
+    corona = scene.corona(c, c) * 1e-3
+    rr = np.hypot(xx - c, yy - c)
+    phi = np.arctan2(yy - c, xx - c)
+    disc = np.clip(r_moon - rr + 0.5, 0, 1)
+    surf = ndimage.map_coordinates(tex, [(yy - c) / 3 + 64, (xx - c) / 3 + 64], order=1, mode="nearest")
+    mos, infos = {}, []
+    exposures = [0.25, 0.5, 1.0, 2.0, 4.0, 3.0, 1.5, 0.75][:n_frames]
+    for i, t in enumerate(exposures):
+        f = 1.0 + glare_step * (i % 2)                # this frame's glare, a little brighter or not
+        d = np.clip(r_moon - rr, 0, None)
+        limb = limb_amp * f * np.exp(-d / 2.5) * (1 + 0.4 * np.cos(3 * phi + i))
+        moonlight = 4e-4 * (1 + 0.3 * surf) + 3e-3 + limb
+        img = (corona * (1 - disc) + moonlight * disc) * t
+        if noise:
+            img = rng.poisson(np.clip(img, 0, None) * 3e4) / 3e4 + rng.normal(0, 2e-4, img.shape)
+        mos[i] = mosaic_from(np.minimum(img, 1.0).astype(np.float32))
+        infos.append(FrameInfo(i, f"f{i}", t, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], c, c, r_moon))
+    matches = {f.index: Match(f.index, f.nominal_ratio, 0.0, f.nominal_ratio, 0.0, 0) for f in infos}
+    return mos, infos, matches, (c, c), r_moon, size
+
+
+def _row_jumps(detail, crop, centre, r, lo=4.0, hi=15.0):
+    """Lines parallel to the limb: in 10-degree sectors, how much each half-pixel ring differs from the next."""
+    X0, Y0, w, h = crop
+    yy, xx = np.mgrid[0:h, 0:w]
+    cx, cy = centre[0] - X0, centre[1] - Y0
+    dep = r - np.hypot(xx - cx, yy - cy)
+    sec = ((np.arctan2(yy - cy, xx - cx) + np.pi) / (2 * np.pi) * 36).astype(int) % 36
+    ds = np.arange(lo, hi, 0.5)
+    prof = np.array([[np.median(detail[(sec == s) & (np.abs(dep - d) < 0.25)]) for d in ds] for s in range(36)])
+    return float(np.median(np.std(np.diff(prof, axis=1), axis=1)))
+
+
+def test_frames_fade_out_near_their_saturation_so_no_lines_follow_the_limb():
+    """Each long exposure stops counting where it saturates, a few px inside the limb, at a depth of
+    its own. Cut off at once, every frame whose glare differs a little from the rest leaves a step
+    there, and the steps show as thin lines parallel to the limb (Andy's 'beads', Nov 2026; on 22
+    of his 2024 frames the row-to-row jumps 6-15 px inside the limb fell from 2.6 to 1.1x the maria).
+    Faded out over 1% of the Moon's radius instead, the steps go.
+
+    Here the drop is smaller (about 0.68x): part of what this measure sees on the simulated limb is
+    glare the removal leaves behind whatever the masks (with every frame's glare the same and no
+    noise it still falls only from 65 to 49 x 1e-4), and fading cannot touch that."""
+    mos, infos, matches, centre, r, size = _saturating_limb_scene()
+    out = {}
+    for fade in (0.0, 1.0):
+        res, lum, detail = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, centre, r,
+                                            (0, 0, size, size), EarthshineParams(mask_fade=fade, glare_order=2))
+        out[fade] = _row_jumps(detail, res.crop, centre, r)
+        assert any("fades out" in n for n in res.notes) == (fade > 0)
+    assert EarthshineParams().mask_fade == 1.0
+    assert out[1.0] < 0.8 * out[0.0], out
+
+
+def test_frames_off_the_moons_track_count_less():
+    """Camera shake puts a frame's Moon off the smooth track Align fits, and its limb is smeared. On
+    22 of Andy's 2024 frames the steadiest 10 alone gave 0.99x the maria in row-to-row jumps by the
+    limb, the other 12 5.6x; weighting by distance from the track (on top of faded masks) took the
+    whole stack from 0.99 to 0.69. A frame counts 1 / (1 + (off / s)^2), s twice the typical scatter."""
+    from tse_core.earthshine import track_factors
+    from tse_core.workflow import _frame_infos
+    from tse_core.inventory import Inventory
+    from tse_core.project import EventProject
+    from conftest import make_frames
+
+    infos = [FrameInfo(i, f"f{i}", 1.0, [[1, 0, 0], [0, 1, 0]], 0, 0, 436.0, off)
+             for i, off in enumerate([0.2, 0.3, 0.4, 0.4, 0.5, 1.3, 2.2])]
+    f = track_factors(infos, EarthshineParams(), 436.0)
+    s = 2 * 1.4826 * 0.4
+    assert f[0] == pytest.approx(1 / (1 + (0.2 / s) ** 2)) and f[0] > 0.9
+    assert f[5] == pytest.approx(1 / (1 + (1.3 / s) ** 2)) and f[5] < 0.5      # like DSC_9126
+    assert track_factors(infos, EarthshineParams(track_weight=False), 436.0) == {}
+    assert track_factors(infos[:2], EarthshineParams(), 436.0) == {}            # too few to say
+    # Align's residuals reach the earthshine stack, frame by frame
+    frames = make_frames(["1/4", "1/2", "1"], aperture=8.0)
+    project = EventProject(name="e")
+    project.set_inventory(Inventory(frames))
+    alignment = {"reference_index": frames[0].index,
+                 "frames": [{"index": fr.index, "file_name": fr.file_name, "matrix": [[1, 0, 0], [0, 1, 0]],
+                             "moon_ref": [10.0, 10.0], "moon_frame": {"radius": 5.0}} for fr in frames],
+                 "sun": {"rejected": [], "residuals_px": [0.3, 1.4, 0.2]}}
+    _, _, got, _ = _frame_infos(project, alignment, include_rejected=False)
+    assert [g.track_off for g in got] == [0.3, 1.4, 0.2]

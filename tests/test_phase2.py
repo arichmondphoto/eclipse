@@ -457,3 +457,23 @@ def test_rotation_note_matches_the_rotation_applied():
         import re
         total = re.search(r"applied \(([-+][0-9.]+) deg over the sequence", text)
         assert total and abs(abs(float(total.group(1))) - 6 * rate) < 0.05, text
+
+
+def test_off_track_limit_scales_with_the_moon():
+    """The off-track limit was a fixed 1.5 px. With a 100 mm lens (Moon ~110 px) a frame 1.2 px off
+    the track is as far off as 5 px at 400 mm, and was kept. The limit is now a share of the Moon's
+    radius (0.35%: 1.5 px on the 2024 400 mm frames), so the same frames go whatever the lens."""
+    ecl = LocalEclipse(elements_for("2024-04-08"), WAPPAPELLO)
+    start = datetime(2024, 4, 8, 18, 55, 5, tzinfo=timezone.utc)
+    times = [start + timedelta(seconds=4 * k) for k in range(37)]
+    rng = np.random.default_rng(1)
+    for scale in (0.25, 1.0, 2.5):   # 100 mm, 400 mm, 1000 mm on the same camera
+        H, sun_r = (3965.0 * scale, 2791.0 * scale), 413.5 * scale
+        moons = [list(p) for p in _track(ecl, times, H, 2.7, sun_r, 117.0)]
+        for p in moons:
+            p[0] += rng.normal(0, 0.03 * scale)
+            p[1] += rng.normal(0, 0.03 * scale)
+        moons[21][1] -= 4.8 * scale   # shaken: 1.2 px off at 100 mm, 4.8 px at 400 mm, 12 px at 1000 mm
+        sc = solve_sun_centre(times, [tuple(p) for p in moons], sun_r * ecl.state_at(times[18]).ratio, ecl,
+                              clock_error_s=117.0)
+        assert sc.rejected == [21], (scale, sc.rejected)

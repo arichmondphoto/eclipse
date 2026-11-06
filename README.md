@@ -239,6 +239,11 @@ applies the calibration plan, and then:
    reported; pass `--clock-error` if you know it. Without it, the clock
    error used is the middle of that allowed range: it comes from the frames'
    times and the eclipse's times at your site, not from the Moon's track.
+   Frames whose Moon lies off the fitted track (camera shake, a doubled
+   image) by more than 3x the typical scatter, and by at least 0.35% of the
+   Moon's radius (1.5 px at 400 mm on a 45 MP full-frame camera, so the same
+   on any lens), are flagged as off the track; each frame's distance from the
+   track is kept for the earthshine stack.
 
 Results go to `<project>_align.json`: a full-resolution 2x3 transform per
 frame, the Moon in each frame, and the Sun's centre and radius.
@@ -673,7 +678,16 @@ moves across the Sun during totality (about 40 px in three minutes at
 400 mm), so a corona-aligned stack blurs it. This step keeps each frame's
 corona alignment and adds a shift that puts its Moon where the Moon is in
 the HDR stack's Moon frame. Only exposures within `--stops` (default 6) of
-the longest are used. The glare from the inner corona inside the disc, a
+the longest are used. Each frame counts by its inverse variance, not at all
+where it is saturated, and fades in over 1% of the Moon's radius from there
+(4.4 px at 400 mm), so no frame starts or stops counting all at once: frames
+differ a little in glare (on the 2024 frames by 10-30% as third contact
+neared), and cut off at once each left a step that showed as thin lines
+parallel to the limb. Frames whose Moon lies off its track (camera shake,
+from Align) count less, 1 / (1 + (off / s)^2) with s twice the frames'
+typical scatter about the track; the log names them. On 22 of the 2024
+frames the two together took the row-to-row jumps 6-15 px inside the limb
+from 2.9 to 0.8x the maria, which stayed the same. The glare from the inner corona inside the disc, a
 gentle gradient, is removed with a smooth surface (`--glare-order`, default
 6, the most flexible; if large maria look washed out, lower it: 2 removes only
 a gentle gradient). Close to the limb the glare

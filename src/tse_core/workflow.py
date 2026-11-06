@@ -250,9 +250,11 @@ def _frame_infos(project: EventProject, alignment: dict, include_rejected: bool)
     frames = {f.index: f for f in project.inventory.lights()}
     ref = alignment["reference_index"]
     rejected = set()
+    order = [fr["index"] for fr in alignment["frames"]]
     if alignment.get("sun") and not include_rejected:
-        order = [fr["index"] for fr in alignment["frames"]]
         rejected = {order[k] for k in alignment["sun"].get("rejected", [])}
+    resid = (alignment.get("sun") or {}).get("residuals_px") or []
+    track_off = {order[k]: float(v) for k, v in enumerate(resid) if k < len(order)}
 
     def _ev(fm):  # light gathered, using the shutter's real time behind its rounded label
         if not (fm.exposure_s and fm.aperture_f and fm.iso):
@@ -273,7 +275,8 @@ def _frame_infos(project: EventProject, alignment: dict, include_rejected: bool)
         ev = _ev(frames[i])
         ratio = 2.0 ** (ev - ev_ref) if ev is not None and ev_ref is not None else 1.0
         mx, my = fr["moon_ref"]
-        infos.append(FrameInfo(i, fr["file_name"], ratio, fr["matrix"], mx, my, fr["moon_frame"]["radius"]))
+        infos.append(FrameInfo(i, fr["file_name"], ratio, fr["matrix"], mx, my, fr["moon_frame"]["radius"],
+                               track_off.get(i)))
     return frames, ref, infos, skipped
 
 
