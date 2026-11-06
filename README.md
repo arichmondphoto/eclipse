@@ -115,7 +115,7 @@ The window has one tab per step, and each step saves into the project file:
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
 | 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper); **Natural layer and colour:** Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k), Noise gate (off) and the size and strength of each of its six scales (the paper's 1.25, 2.5, 5, 10, 20, 40 px at strength 1); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
-| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, edge grain, brightness, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
+| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
 Every setting has hover help explaining what it does and when to change it.
@@ -783,7 +783,9 @@ off; 3 is a good start) only where the noise is high: the last pixels by the lim
 exposures are saturated. Real structure such as diffraction spikes from a
 bright prominence is left alone. Where the noise (measured on the picture
 itself, ring by ring) is still ~10x that of the middle, and at least over
-the last 2.5% of the radius (~11 px), the edge is filled out to 1.5 px past the limb
+the last 2.5% of the radius (~11 px at 400 mm; **Filled edge, at least**,
+`--edge-fill`, in % of the radius so it is the same on any lens and camera;
+lower it to see more of your data by the limb, leftover glare included), the edge is filled out to 1.5 px past the limb
 with the brightness just inside, taken round the limb in ~16 px steps
 (a median, so single noisy pixels do not show as teeth) and blended in. That is where the corona layers' black disc ends, so no dark
 ring shows between them. No shading is drawn over the disc: the lunar
@@ -1184,6 +1186,7 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--keep-glare` | earthshine layer for pasting: how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1) |
 | `--limb-soften` | earthshine layer for pasting: extra softening of the limb in px, on top of the real one (default 0 = none) |
 | `--no-colour` | make the earthshine layer grey (default: natural colour, so a prominence at the limb stays red on the Moon side too) |
+| `--edge-fill` | fill at least this % of the Moon's radius just inside the limb from further in (default 2.5, 10.9 px on a 400 mm Moon; 0 = only where the noise is over 10x the middle's) |
 | `--no-edge-grain` | leave the filled last pixels by the limb smooth (default: grain like the rest) |
 | `--surface-denoise` | edge-preserving smoothing of the lunar surface, px (0 = off; e.g. 4): maria keep crisp edges |
 | `--edge-smooth` | most smoothing of the noisier pixels near the limb, px (default 0 = none; e.g. 3) |

@@ -246,6 +246,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-colour", action="store_true",
                    help="make the earthshine layer grey (default: natural colour, so a prominence at the limb "
                         "stays red on the Moon side too)")
+    p.add_argument("--edge-fill", type=float, default=2.5,
+                   help="fill at least this %% of the Moon's radius just inside the limb from further in (default "
+                        "2.5, 10.9 px on a 400 mm Moon; 0 = only where the noise is over 10x the middle's)")
     p.add_argument("--no-edge-grain", action="store_true",
                    help="leave the filled last pixels by the limb smooth (default: grain like the rest)")
     p.add_argument("--surface-denoise", type=float, default=0.0,
@@ -801,7 +804,8 @@ def cmd_earthshine(args) -> int:
                               brightness=args.brightness, limb_glare=not args.no_limb_glare,
                               source_glare=args.prominence_glare and not args.no_prominence_glare,
                               keep_glare=args.keep_glare, limb_soften=args.limb_soften,
-                              edge_grain=not args.no_edge_grain, colour=not args.no_colour,
+                              edge_grain=not args.no_edge_grain, edge_fill=args.edge_fill,
+                              colour=not args.no_colour,
                               edge_smooth=args.edge_smooth, surface_denoise=args.surface_denoise,
                               limb_shape=args.limb_shape and not args.no_limb_shape, channel=args.channel)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,

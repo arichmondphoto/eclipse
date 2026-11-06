@@ -213,6 +213,7 @@ pp.save(path)
 win.reload_project()
 es = win.earthshine_tab
 es.strength.setValue(1.5)
+assert es.edge_fill.value() == 2.5  # Filled edge, at least: % of the Moon's radius
 # Moon and corona together needs the new earthshine outputs: without them, a clear message.
 n = len(QMessageBox.log)
 es.preview_final()

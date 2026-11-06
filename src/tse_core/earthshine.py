@@ -64,6 +64,9 @@ class EarthshineParams:
     # brightness, so the maria keep crisp edges while the noise inside them goes.
     surface_denoise: float = 0.0
     edge_grain: bool = True  # put grain like the rest of the surface into the filled last pixels
+    # The last pixels inside the limb are filled from just inside: at least this % of the Moon's radius
+    # (2.5% = 10.9 px on a 400 mm Moon on a 45 MP full-frame camera), wider where the noise says so.
+    edge_fill: float = 2.5
     colour: bool = True  # natural colour: the glow and limb (prominences red) and the earthshine's own tint
     saturation: float = 1.0  # colour saturation, as for the corona layers (0 = grey)
     saturation_level: float = 0.95
@@ -595,14 +598,15 @@ def process_disc(lum: np.ndarray, weight: np.ndarray, good: np.ndarray, cx: floa
              if p.smooth > 0 else detail)
     # Nearer the limb than where the noise is still ~10x that of the middle, fill the edge from
     # just inside instead: only noise, and glare shaped by the bumpy real limb, is left in those
-    # last pixels. At least the last 2.5% of the radius (11 px at 400 mm on a full-frame camera).
-    keep_from = max(p.margin(moon_r), 0.025 * moon_r)
+    # last pixels. At least the last ``edge_fill`` % of the radius (2.5%: 11 px at 400 mm on full frame).
+    minimum = max(p.margin(moon_r), max(p.edge_fill, 0.0) / 100.0 * moon_r)
+    keep_from = minimum
     for d in range(int(math.ceil(p.margin(moon_r))), min(nring, int(moon_r * 0.2))):
         if ring_ratio[d] > 0 and ring_ratio[d] < 10.0 and np.median(weight_ratio[good & (ri == d)]) < 10.0:
             keep_from = max(float(d), keep_from)
             break
-    minimum = max(p.margin(moon_r), 0.025 * moon_r)
-    why = ("the minimum, 2.5% of the radius: glare left over by the limb" if keep_from <= minimum + 1e-6
+    why = ((f"the minimum, Filled edge {p.edge_fill:g}% of the radius" if minimum > p.margin(moon_r)
+            else "the margin kept inside the limb") if keep_from <= minimum + 1e-6
            else "nearer the limb the noise is over 10x that in the middle")
     notes.append(f"lunar surface shown to {keep_from:.1f} px inside the limb ({100 * keep_from / moon_r:.1f}% of the "
                  f"radius); the last {keep_from:.1f} px are filled from there ({why})")

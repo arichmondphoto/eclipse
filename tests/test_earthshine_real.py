@@ -158,3 +158,18 @@ def test_prominence_fan_is_taken_away(disc):
         return float(np.percentile(np.abs(sm[near] - np.median(sm[body])), 99) / (p99 - p1))
 
     assert excess(on[0]) < 0.5 * excess(off[0]), (excess(on[0]), excess(off[0]))
+
+
+def test_filled_edge_minimum_is_a_setting_in_percent_of_the_radius(disc):
+    """The filled band by the limb is at least ``edge_fill`` % of the Moon's radius (default 2.5%:
+    10.9 px on the full-size 2024 Moon), so it scales with any lens and camera. At 0 the noise rule
+    alone decides: on the full-size 2024 stack that was the last 6 px (1.4%)."""
+    lum, weight, good, cx, cy, r, rr, phi = disc
+    keep = {}
+    for pct in (0.0, 2.5, 5.0):
+        *_, keep[pct], notes = ES.process_disc(lum, weight, good, cx, cy, r, ES.EarthshineParams(edge_fill=pct))
+        assert any(f"{keep[pct]:.1f} px inside the limb" in n for n in notes), notes
+    assert ES.EarthshineParams().edge_fill == 2.5
+    assert keep[2.5] == pytest.approx(0.025 * r, abs=0.01)
+    assert keep[5.0] == pytest.approx(0.05 * r, abs=0.01)
+    assert keep[0.0] < 0.025 * r
