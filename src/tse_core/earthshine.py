@@ -1328,7 +1328,11 @@ def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: fl
     j_lim = int(np.searchsorted(radii, r - 0.5))  # last sample inside the limb
     if j_out >= len(radii) - 1 or j_lim < 1:
         return None
-    out_val = ndimage.gaussian_filter1d(0.5 * (L[j_out] + L[j_out + 1]), 1.0, axis=0, mode="wrap")
+    # Anchored half a pixel inside the stack's corona, so the two meet without a step (anchored at
+    # 1-1.5 px in and continued inwards with its slope, the corona came out ~2.5 % brighter than the
+    # stack where they met: a 1 px line). Interpolated there, it draws on the stack's pixels.
+    j_a = j_edge + 1
+    out_val = ndimage.gaussian_filter1d(L[j_a], 1.0, axis=0, mode="wrap")
     # The corona keeps brightening towards the limb: continued inwards from ``outer`` px out with
     # its own slope (log brightness per px, at most 0.2): its trend further out where measured (over
     # 2 px per direction, the clip at 0 turned noise into a rise: the continued corona came out a
@@ -1339,11 +1343,11 @@ def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: fl
         slope = np.repeat(np.clip(sl, 0.0, 0.2)[:, None], 3, axis=1)
     else:
         j_o2 = min(int(np.searchsorted(radii, r + outer + 3.0)), len(radii) - 1)
-        slope = (out_val - ndimage.gaussian_filter1d(L[j_o2], 1.0, axis=0, mode="wrap")) / max(radii[j_o2] - radii[j_out], 1.0)
+        slope = (out_val - ndimage.gaussian_filter1d(L[j_o2], 1.0, axis=0, mode="wrap")) / max(radii[j_o2] - radii[j_a], 1.0)
         slope = np.clip(ndimage.gaussian_filter1d(slope, 2.0, axis=0, mode="wrap"), 0.0, 0.2)
     # The drop across the limb, from directions where the earthshine stack is good to the edge.
     good_dir = (T[j_lim - 1: j_lim + 1] >= 0.95).all(axis=0) & inside[j_out]
-    corona_at = out_val + slope * (radii[j_out] - radii[j_edge])  # the corona continued to ``outer`` px
+    corona_at = out_val + slope * (radii[j_a] - radii[j_edge])  # the corona continued to ``outer`` px
     if good_dir.sum() < 10:
         return None
     drop = np.where(good_dir[:, None], 0.5 * (L[j_lim - 1] + L[j_lim]) - corona_at, 0.0)
@@ -1360,7 +1364,7 @@ def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: fl
     in_val = ndimage.gaussian_filter1d(L[j_in, np.arange(na)], 1.0, axis=0, mode="wrap")
     jj = np.arange(len(radii))[:, None]
     u = np.clip((jj - j_in[None]) / np.maximum(j_lim - j_in, 1)[None], 0.0, 1.0)[..., None]
-    corona = out_val[None] + slope[None] * np.clip(radii[j_out] - radii, 0.0, None)[:, None, None]
+    corona = out_val[None] + slope[None] * np.clip(radii[j_a] - radii, 0.0, None)[:, None, None]
     F = np.where((jj <= j_lim)[..., None], in_val[None] * (1 - u) + limb_val[None] * u, corona)
     # Outside the limb (to ``outer`` px) always the continued corona; inside only where needed.
     span = ((has[None] & (jj > j_in[None]) & (jj < j_out)) | ((jj > j_lim) & (jj <= j_out)))[..., None]
@@ -1413,25 +1417,30 @@ def hdr_reliable_from(weight: np.ndarray, rr: np.ndarray, r: float, default: flo
     return float(np.clip(edge, 2.0, 0.03 * r))
 
 
-# Directions taken together (degrees) when measuring the darkening by the Moon's edge.
-DARKENING_SPAN = 18.0
+# Directions taken together (degrees) when measuring the darkening by the Moon's edge: wide enough
+# that a prominence (up to about 14 degrees across) does not count.
+DARKENING_SPAN = 30.0
 
 
 def limb_darkening_gain(lum: np.ndarray, weight: np.ndarray, rr: np.ndarray, phi: np.ndarray, r: float,
-                        start: float = 0.0, nb: int = 180) -> Optional[np.ndarray]:
+                        start: float = 0.0, nb: Optional[int] = None) -> Optional[np.ndarray]:
     """How much the HDR stack's corona just outside the limb is darkened by the Moon's edge.
 
     Frames whose Moon sat just past the stacking margin still darken the corona there with the
     Moon's blurred edge, which the weights do not show; mostly on one side (on the 2024 D850 stack
     at 6-8 o'clock 30 % below the corona's own trend 3 px out, 5 % at 10 px; elsewhere a few %
-    at 3 px, and none from 5 px). Measured per direction: the median of each 1 px ring in ``nb``
-    directions, then the median over the 9 neighbouring directions (18 degrees at 180, so a
-    prominence does not count), fitted in log against the distance from the limb between 4 % and
+    at 3 px, and none from 5 px). Measured per direction: the median of each half-pixel ring in
+    ``nb`` directions (each about 15 px of arc), then the median over 30 degrees of directions (so
+    a prominence does not count), fitted in log against the distance from the limb between 4 % and
     10 % of the radius out. Inwards of that, the shortfall below the line, from ``start`` px out
     (where the stack is used from) to where it first ends (never growing outwards), is the
-    darkening; nearer the limb the same as at ``start``. ``phi``: the angle round the Moon (radians). Returns (gain per pixel, 1 where nothing is darkened; the trend's rise inwards per
+    darkening, each half-pixel ring its own (the first one past the stacking margin is the
+    darkest); nearer the limb the same as at ``start``. ``phi``: the angle round the Moon
+    (radians). Returns (gain per pixel, 1 where nothing is darkened; the trend's rise inwards per
     direction, log brightness per px), or None if it cannot tell.
     """
+    if nb is None:  # each direction about 15 px of arc (180 on a 45-megapixel frame at 400 mm)
+        nb = int(np.clip(round(2 * math.pi * r / 15.0), 36, 180))
     fit0 = int(max(12, round(0.04 * r)))
     fit1 = int(max(30, round(0.10 * r)))
     d = rr - r
@@ -1467,7 +1476,7 @@ def limb_darkening_gain(lum: np.ndarray, weight: np.ndarray, rr: np.ndarray, phi
         # where the darkening ends (from ``start`` out to the first ring not below the line).
         # (Only rings from ``start`` out: the ones inside hold few frames.)
         pad = np.pad(short[j0:], 1, mode="edge")
-        amount = np.convolve(pad, np.array([1.0, 2.0, 1.0]) / 4, mode="valid")
+        amount = short[j0:]
         alive = np.minimum.accumulate(np.convolve(pad, np.ones(3) / 3, mode="valid")) > 0
         D[j0:, b] = np.where(alive, np.maximum(amount, 0.0), 0.0)
         D[:j0, b] = D[j0, b]
@@ -1479,7 +1488,7 @@ def limb_darkening_gain(lum: np.ndarray, weight: np.ndarray, rr: np.ndarray, phi
         return np.ones(lum.shape, np.float32), slopes
     # Per pixel: between ring centres and directions (wrapping round the limb).
     near = (d >= 0) & (d < fit0)
-    jr = np.clip(d[near] / q - 0.5, 0.0, n0 - 1)
+    jr = np.clip(np.floor(d[near] / q), 0.0, n0 - 1)  # each half-pixel ring its own
     ja = np.mod(phi[near], 2 * math.pi) * nb / (2 * math.pi) - 0.5
     Dw = np.concatenate([D[:, -1:], D, D[:, :1]], axis=1)
     g = np.ones(lum.shape, np.float32)
@@ -1630,6 +1639,7 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
     tc = np.where(had, 1.0, trust[sy, sx] * np.where(outside, tout * tout * (3 - 2 * tout), 1.0))
     tc = tc.astype(np.float32)
     target = band & ~had & ((tc < 1.0) | outside)
+    corona_gain = None
     if target.any():
         es_c = np.moveaxis(es_rgb, 0, -1)[sy, sx]
         floor = max(float(np.median(es_c[(rs < 0.8 * mr) & es_ok[sy, sx]])) * 0.05, 1e-12) \
@@ -1638,10 +1648,17 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
                            inner=max(10.0, 0.07 * mr), outer=edge, slopes=slopes)
         if rad is not None:
             k = np.where(target, tc, 1.0)[..., None]
-            sub[:] = np.where(target[..., None], k * es_c + (1 - k) * rad, sub)
+            merged = np.where(target[..., None], k * es_c + (1 - k) * rad, sub)
+            # The filter layers see the corona continued to the limb outside it (see MoonInput).
+            near = target & (rs >= mr)
+            lm, lr = merged.mean(axis=2), rad.mean(axis=2)
+            gain = np.ones((hc, wc), np.float32)
+            gain[sy, sx] = np.where(near & (lm > 0) & (lr > 0), lr / np.maximum(lm, 1e-30), 1.0)
+            corona_gain = gain
+            sub[:] = merged
             wnew = np.where(target, np.maximum(wnew, 0.0), wnew)
     wsub[:] = np.where((a > 0) | hole, np.maximum(wnew, 1e-12), wsub)
     mask = np.zeros((h, w), bool)
     inside = rr < mr + margin_px + 1.0  # overlaps the corona's own region: no gap between them
     mask[ys, xs] = inside[sy, sx]
-    return MoonInput(mask=mask, x0=ox, y0=oy), (dx, dy)
+    return MoonInput(mask=mask, x0=ox, y0=oy, corona_gain=corona_gain), (dx, dy)

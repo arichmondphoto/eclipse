@@ -513,21 +513,24 @@ def test_layer_keeps_the_colour_at_the_limb():
     assert grey.ndim == 2
 
 
-def _moon_project(tmp_path, holes=True):
-    """A small HDR stack and earthshine outputs, as the Stack and Earthshine steps write them."""
+def _moon_project(tmp_path, holes=True, es_blur=0.0, cover=3.0, scale=1):
+    """A small HDR stack and earthshine outputs, as the Stack and Earthshine steps write them.
+    ``es_blur``: the earthshine stack's limb blurred further (Gaussian sigma, px); ``cover``: over
+    how many px outside the limb the stack's weights rise (each frame's Moon covers some);
+    ``scale``: the whole scene that many times larger (the Moon's radius 80 px x ``scale``)."""
     import json
 
     from tse_core.fits import write_fits
     from tse_core.project import EventProject
 
-    n, r, c = 320, 80.0, 160.0
+    n, r, c = 320 * scale, 80.0 * scale, 160.0 * scale
     yy, xx = np.mgrid[0:n, 0:n]
     rr = np.hypot(xx - c, yy - c)
     phi = np.arctan2(yy - c, xx - c)
     d = r - rr
     tex = ndimage.gaussian_filter(np.random.default_rng(3).normal(0, 1, (n, n)), 4)
     light = np.where(d > 0, 1e-3 * (1 + 0.3 * tex / tex.std()) + 4e-3 * np.exp(-d / 4),
-                     0.06 * np.exp(-np.clip(-d, 0, None) / 25) * (1 + 0.3 * np.cos(4 * phi)))
+                     0.06 * np.exp(-np.clip(-d, 0, None) / (25 * scale)) * (1 + 0.3 * np.cos(4 * phi)))
     light = ndimage.gaussian_filter(light, 0.7)
     prom = np.exp(-(phi**2) / (2 * 0.05**2)) * np.exp(-np.abs(d) / 3)  # a red prominence at angle 0
     rgb = np.stack([light * (1 + 3 * prom), light, light * 0.95]).astype(np.float32)
@@ -535,11 +538,13 @@ def _moon_project(tmp_path, holes=True):
     rng = np.random.default_rng(4)
     hdr[:, d > 0] *= 1 + 0.5 * rng.normal(0, 1, (d > 0).sum())  # one noisy frame inside the disc
     hdr[:, d <= 0] += 2e-4 * rng.normal(0, 1, (3, (d <= 0).sum()))  # many frames on the corona
+    if es_blur > 0:  # long Moon-aligned exposures: the limb softer than in the stack
+        rgb = np.stack([ndimage.gaussian_filter(ch, es_blur) for ch in rgb]).astype(np.float32)
     rgb = rgb + 3e-5 * rng.normal(0, 1, rgb.shape).astype(np.float32)  # the earthshine stack's noise
     # Real weights: many frames on the corona, one on the Moon; the earthshine stack's weights
     # are in units of their own.
     # Just outside the limb fewer frames go in (each frame's Moon covers some): over 3 px here.
-    weight = np.where(d > 0, 0.02, np.clip(0.1 + 0.9 * (-d) / 3.0, 0.1, 1.0)).astype(np.float32)
+    weight = np.where(d > 0, 0.02, np.clip(0.1 + 0.9 * (-d) / cover, 0.1, 1.0)).astype(np.float32)
     if holes:
         hole = (np.abs(d - 0.5) < 1) & (np.sin(9 * phi) > 0.6)  # saturated in every frame, by the limb
         hdr[:, hole] = 0
@@ -548,7 +553,7 @@ def _moon_project(tmp_path, holes=True):
     write_fits(tmp_path / "e_hdr.fit", hdr, head)
     write_fits(tmp_path / "e_weight.fit", weight)
     # Earthshine crop at (40, 30): the Moon-aligned stack (clean), its weights and the surface.
-    X0, Y0, m = 40, 30, 240
+    X0, Y0, m = 40 * scale, 30 * scale, 240 * scale
     crop = (slice(Y0, Y0 + m), slice(X0, X0 + m))
     es_w = np.where(rr < r + 8, 5e4, 0.0)[crop].astype(np.float32)
     write_fits(tmp_path / "e_earthshine_rgb.fit", rgb[(slice(None),) + crop],
@@ -1208,6 +1213,46 @@ def test_half_steps_of_glare_smoothness_average_the_two_neighbouring_fits():
     assert np.array_equal(glare_fit(img, inside, c, c, r, 4.0), g4)
     g0 = glare_fit(img, inside, c, c, r, 0)
     assert np.ptp(g0[inside]) < 1e-6 and abs(float(g0[inside].mean()) - float(np.median(img[inside]))) < 0.1
+
+
+def test_filter_layers_do_not_see_the_moons_edge(tmp_path):
+    """Andy, Nov 2026: a dark 1 px line round the limb with MGN at 45 % on Weighted Average. The
+    filter layers have data from the black disc out (1.5 px outside the limb), but the stack there
+    still holds the Moon's blurred edge, where the earthshine stack hands over to the corona: on his
+    2024 stack MGN's input rose from 0.77 at 1.5 px to the corona's 0.88 at 2.75 px, MGN read that
+    as a dark feature (0.35 at 1.5 px, 0.60 at 2 px, 0.75 from 2.5 px) and the final image dipped
+    to 0.730 at 1.5 px between 0.757 and 0.771. The filter layers now see the corona continued to
+    the limb there; the natural layer keeps the limb."""
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams
+
+    # The earthshine stack's limb as on Andy's: 10-90 % of the corona over 4.7 px (sigma 1.8 px).
+    # The stack used from 4 px out, as his (the scene twice the usual size: at most 3 % of the radius).
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False, es_blur=1.8, cover=6.0, scale=2)
+    p = EnhanceParams(layers=(), blend={"natural": 1.0, "adaptive": 0.45}, blend_modes={"adaptive": "average"})
+    img = W.final_with_moon(proj, "blend", 1.0, enhance_params=p, preview_side=10000).mean(axis=2)
+    cap = {}
+    import tse_core.enhance as En
+    orig = En.soft_light_blend
+
+    def keep(layers, *a, **k):
+        cap.update(layers)
+        return orig(layers, *a, **k)
+    En.soft_light_blend = keep
+    try:
+        W.final_with_moon(proj, "blend", 1.0, enhance_params=p, preview_side=10000)
+    finally:
+        En.soft_light_blend = orig
+    got = cap["adaptive"].mean(axis=2) if cap["adaptive"].ndim == 3 else cap["adaptive"]
+    far = (rr >= r + 6) & (rr < r + 12)
+    level = float(np.median(got[far]))
+    for a in (1.5, 2.0, 2.5, 3.0):                # MGN's first rings: no dark edge
+        ring = (rr >= r + a) & (rr < r + a + 0.5)
+        assert float(np.median(got[ring])) > level - 0.05, (a, round(float(np.median(got[ring])), 3), round(level, 3))
+    def at(a):
+        return float(np.median(img[(rr >= r + a) & (rr < r + a + 0.5)]))
+    for a in np.arange(1.0, 4.0, 0.5):            # the final image: no ring darker than both its neighbours
+        assert at(a) > min(at(a - 0.5), at(a + 0.5)) - 0.01, (a, round(at(a - 0.5), 3), round(at(a), 3), round(at(a + 0.5), 3))
 
 
 @pytest.mark.parametrize("layer, weight", [("adaptive", 0.43), ("fnrgf", 0.4)])

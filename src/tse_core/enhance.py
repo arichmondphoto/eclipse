@@ -144,6 +144,10 @@ class MoonInput:
     y0: int = 0
     surface: Optional[np.ndarray] = None  # (hc, wc, 3) display 0..1: the seas and highlands
     visibility: Optional[np.ndarray] = None  # (hc, wc) 0..1: how much of the surface to show
+    # (hc, wc) factor on the brightness for the filter layers (1 elsewhere): just outside the limb
+    # the stack holds the Moon's blurred edge (the natural layer draws it), but the filter layers
+    # see the corona continued to the limb, or read the edge as a dark feature (a 1 px line).
+    corona_gain: Optional[np.ndarray] = None
 
 
 def geometry_from_header(header: dict) -> Geometry:
@@ -1393,6 +1397,11 @@ class Frame:
     moon: Optional[MoonInput] = None
     moon_margin_px: float = 1.5
     cache: dict = field(default_factory=dict)  # whole-image measurements, by what they depend on
+    filter_lum: Optional[np.ndarray] = None  # lum as the filter layers see it (see MoonInput.corona_gain)
+
+    @property
+    def flum(self) -> np.ndarray:
+        return self.lum if self.filter_lum is None else self.filter_lum
 
 
 def prepare(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[EnhanceParams] = None,
@@ -1447,8 +1456,17 @@ def prepare(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
     nlev = float(np.median(noise[valid & (noise > 0)])) if (valid & (noise > 0)).any() else 0.0
     # Per-channel sky offsets are only known to about their own size; where the corona is no
     # brighter than that, its colour cannot be trusted and is shown grey.
+    flum = None
+    if moon is not None and moon.corona_gain is not None:
+        hc, wc = moon.corona_gain.shape
+        ys = slice(max(moon.y0, 0), min(moon.y0 + hc, h))
+        xs = slice(max(moon.x0, 0), min(moon.x0 + wc, w))
+        if ys.stop > ys.start and xs.stop > xs.start:
+            flum = lum.copy()
+            flum[ys, xs] *= moon.corona_gain[ys.start - moon.y0: ys.stop - moon.y0,
+                                             xs.start - moon.x0: xs.stop - moon.x0]
     return Frame(g, (h, w), hdr, lum, weight, valid, show, stats_valid, noise, nlev, wb, bg, sky_kind,
-                 2.0 * float(np.abs(bg).max()), moon, p.moon_margin_px)
+                 2.0 * float(np.abs(bg).max()), moon, p.moon_margin_px, filter_lum=flum)
 
 
 def _mgn_scales(p: EnhanceParams, g: Geometry) -> list:
@@ -1481,7 +1499,7 @@ def _ring_cache(frame: Frame, p: EnhanceParams) -> RingStats:
     key = ("ring", p.segments, p.order, p.ring_smooth)
     if key not in frame.cache:
         r, phi = polar(frame.shape, frame.g)
-        frame.cache[key] = ring_stats(frame.lum, r, phi, frame.stats_valid, p.segments, p.order, p.ring_smooth,
+        frame.cache[key] = ring_stats(frame.flum, r, phi, frame.stats_valid, p.segments, p.order, p.ring_smooth,
                                       frame.noise)
     return frame.cache[key]
 
@@ -1501,7 +1519,7 @@ def _natural_cache(frame: Frame, p: EnhanceParams) -> NaturalStats:
 
 def _gated_cache(frame: Frame) -> dict:
     if "gated" not in frame.cache:
-        frame.cache["gated"] = gated_prep(frame.lum, frame.valid, frame.nlev, frame.g.sun_r)
+        frame.cache["gated"] = gated_prep(frame.flum, frame.valid, frame.nlev, frame.g.sun_r)
     return frame.cache["gated"]
 
 
@@ -1579,7 +1597,7 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
         else:
             m = 0  # natural and the NRGF family are per pixel, from whole-image statistics
         reg, origin, inner, shape = region(0 if whole else m)
-        lum, rvalid = frame.lum[reg], frame.valid[reg]
+        lum, rvalid = (frame.lum if name_l == "natural" else frame.flum)[reg], frame.valid[reg]
         r, phi = polar(shape, g, origin)
         if name_l == "natural":
             st = _natural_cache(frame, p)

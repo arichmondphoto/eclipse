@@ -823,9 +823,12 @@ continued inwards to the limb follows that same trend. By a bright prominence, w
 the light inside the limb is taken from the last well-exposed earthshine
 pixel to the limb. The filter layers have no data on the Moon: they keep full strength wherever
 they have data (out to the corona layers' black disc), and on the Moon count
-as neutral, no detail, at full weight, over a 1 px soft edge. So just outside
-the limb the blend is the blend without the Moon, and on Linear the Moon gets
-the same overall treatment as the corona.
+as neutral, no detail, at full weight, over a 1 px soft edge. Between their
+black disc and where the HDR stack's corona is used, the natural layer draws
+the Moon's own blurred edge, but the filter layers see the corona continued to
+the limb: MGN in particular read the edge as a dark feature, a 1 px dark line
+round the limb. So just outside the limb the blend is the blend without the
+Moon, and on Linear the Moon gets the same overall treatment as the corona.
 
 **Another way: pasting.** **Paste into a file** on the tab (`totality final
 --paste` / `--base-file`) pastes the Moon into a picture you choose, for a
