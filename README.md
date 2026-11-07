@@ -814,8 +814,11 @@ stack is reliable, measured from its weights; the log says where ("the HDR
 stack's corona is used from N px outside the limb"; 3 px on the 2024
 stack). By a bright prominence, where the long earthshine frames saturate,
 the light inside the limb is taken from the last well-exposed earthshine
-pixel to the limb. The filter layers have no data on the Moon, so they fade
-out over the 4 px outside the limb.
+pixel to the limb. The filter layers have no data on the Moon: they keep full strength wherever
+they have data (out to the corona layers' black disc), and on the Moon count
+as neutral, no detail, at full weight, over a 1 px soft edge. So just outside
+the limb the blend is the blend without the Moon, and on Linear the Moon gets
+the same overall treatment as the corona.
 
 **Another way: pasting.** **Paste into a file** on the tab (`totality final
 --paste` / `--base-file`) pastes the Moon into a picture you choose, for a

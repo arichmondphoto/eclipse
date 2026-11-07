@@ -755,6 +755,11 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
     added as the paper does, centred on 0 and in radians, h = K1 / (K1 + K2). Nothing is measured,
     so a detail box matches the full size; the result is clipped to 0..1."""
     modes = modes or {}
+    if fade is not None:
+        # By the Moon (fade given) a filter layer has no data where it is not valid: there it counts
+        # as neutral (mid-grey: no detail, in every mode), not as the black it is stored as.
+        layers = {k: (v if k == "natural" else np.where(valid, v, np.float32(0.5)).astype(np.float32))
+                  for k, v in layers.items()}
     base = layers["natural"].copy() if "natural" in weights else np.full_like(next(iter(layers.values())), 0.5)
     lin = []
     for k in LAYERS:
@@ -778,11 +783,19 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
         num = k1 * base
         den = np.full_like(base, k1)
         for k, w, name in lin:
-            wk = w * fade if fade is not None else np.float32(w)
+            wk = np.float32(w)
             # Linear: MGN's detail goes in as the paper adds it (eq. 5): the mean of the arctans,
             # centred on 0 and in radians, which the layer stores as 0.5 + mean / pi. Weighted
-            # average: every layer as its 0..1 picture (Linear for MGN until 6 Nov 2026).
-            term = (layers[k] - 0.5) * np.float32(math.pi) if (k == "adaptive" and name == "linear") else layers[k]
+            # average: every layer as its 0..1 picture.
+            mgn = k == "adaptive" and name == "linear"
+            term = (layers[k] - 0.5) * np.float32(math.pi) if mgn else layers[k]
+            if fade is not None:
+                # By the Moon the layer has no data: it fades to its neutral value (no detail: 0 for
+                # MGN's detail, mid-grey for a 0..1 picture) at full weight, as Soft Light does. Fading
+                # the weight instead faded the division by K1 + K2, and the corona just outside the
+                # limb lost the Linear form's darkening: a bright ring (Andy, Nov 2026).
+                neutral = np.float32(0.0 if mgn else 0.5)
+                term = fade * term + (1 - fade) * neutral
             num = num + wk * term
             den = den + wk
         base = (num / np.maximum(den, 1e-12)).astype(np.float32)
@@ -1547,7 +1560,11 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
     if frame.moon is not None:
         yy = (np.arange(y0, y1, dtype=np.float64) - g.moon_y).astype(np.float32)[:, None]
         xx = (np.arange(x0, x1, dtype=np.float64) - g.moon_x).astype(np.float32)[None, :]
-        t = np.clip((np.sqrt(xx * xx + yy * yy) - g.moon_r - frame.moon_margin_px) / 4.0, 0.0, 1.0)
+        # The filter layers have data out to the corona layers' black disc (moon_r + margin) and are at
+        # full strength there; inside it, on the Moon, they go to their neutral value (see
+        # soft_light_blend) over a 1 px soft edge. Fading them over 4 px outside left a ring there that
+        # the blend without the Moon does not have (Andy, Nov 2026).
+        t = np.clip((np.sqrt(xx * xx + yy * yy) - g.moon_r - frame.moon_margin_px + 1.0) / 1.0, 0.0, 1.0)
         fade = (t * t * (3 - 2 * t)).astype(np.float32)
         del xx, yy, t
 

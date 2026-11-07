@@ -1158,3 +1158,31 @@ def test_half_steps_of_glare_smoothness_average_the_two_neighbouring_fits():
     assert np.array_equal(glare_fit(img, inside, c, c, r, 4.0), g4)
     g0 = glare_fit(img, inside, c, c, r, 0)
     assert np.ptp(g0[inside]) < 1e-6 and abs(float(g0[inside].mean()) - float(np.median(img[inside]))) < 0.1
+
+
+@pytest.mark.parametrize("layer, weight", [("adaptive", 0.43), ("fnrgf", 0.4)])
+def test_linear_layers_leave_no_bright_ring_round_the_moon(tmp_path, layer, weight):
+    """Andy, Nov 2026: with the Moon put in, a blend on Linear (MGN at 43 % with the Gamma stretch)
+    had a white ring just outside the limb. The filter layers have no data on the Moon, so they fade
+    out over the 4 px outside the limb; on Linear their weight faded, and with it the division by
+    K1 + K2, so the corona there lost the Linear form's darkening (on the 2024 crop 0.876 grey at
+    1.5-3 px against 0.806 at 3-4.5 px). Now the layers keep full strength wherever they have data
+    (out to the black disc), and on the Moon go to their neutral value at full weight, as Soft Light
+    does, over 1 px: just outside the limb the blend is the blend without the Moon (on the 2024
+    crop, MGN 43 % Linear with Gamma: 0.743 / 0.766 / 0.802 at 1.5-3 / 3-4.5 / 4.5-6 px, against
+    0.798 / 0.762 / 0.795 without the Moon)."""
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams
+
+    from tse_core.enhance import enhance
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    p = EnhanceParams(layers=(), blend={"natural": 1.0, layer: weight}, blend_modes={layer: "linear"})
+    img = W.final_with_moon(proj, "blend", 1.0, enhance_params=p, preview_side=10000).mean(axis=2)
+    data = W.load_hdr(proj)                       # the same blend without the Moon (as Enhance writes it)
+    _, col = enhance(data.hdr.copy(), data.weight, data.header, p, out_dir=None, keep={"blend"})
+    plain = col["blend"].mean(axis=2)
+    for a in (1.5, 2.5, 3.5, 4.5):                # the 4 px where the layer has no data beyond
+        ring = (rr >= r + a) & (rr < r + a + 1)
+        got, want = float(np.median(img[ring])), float(np.median(plain[ring]))
+        assert abs(got - want) < 0.03, (a, round(got, 3), round(want, 3))

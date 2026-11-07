@@ -327,10 +327,12 @@ def test_linear_blend_is_the_papers_weighted_average():
     mixed = E.soft_light_blend(layers, {"natural": 1, "adaptive": 0.6, "fnrgf": 0.5}, valid, {"fnrgf": "linear"})
     sl = (1 - 0.6) * nat + 0.6 * E.soft_light(nat, a)
     assert np.allclose(mixed, (sl + 0.5 * f) / 1.5, atol=1e-6)
-    # Near the Moon the filter layers fade out (their data ends there): each weight times the fade.
+    # Near the Moon the filter layers fade out (their data ends there): at full weight, each layer goes
+    # to its neutral value (no detail: 0 for MGN's detail, mid-grey for a 0..1 picture). Fading the
+    # weight instead faded the division by K1 + K2 too and left a bright ring round the Moon (Nov 2026).
     fade = np.full_like(nat, 0.5)
     half = E.soft_light_blend(layers, w, valid, {"adaptive": "linear", "fnrgf": "linear"}, fade=fade)
-    assert np.allclose(half, np.clip((nat + 0.3 * d + 1.0 * f) / 2.3, 0, 1), atol=1e-6)
+    assert np.allclose(half, np.clip((nat + 0.6 * (0.5 * d) + 2.0 * (0.5 * f + 0.25)) / 3.6, 0, 1), atol=1e-6)
 
 
 def test_parse_linear_blend_mode():
