@@ -24,7 +24,7 @@ elements for any eclipse from 1600 to 2400.
 | 1 Frames | RAW inventory, bracket detection, lensfun or own-flats vignetting, calibration planning, project folders | done |
 | 2 Align | Lunar limb, phase correlation alignment, field rotation, the Sun's centre | done |
 | 3 Stack | Moon-aware linear HDR stacking with measured brightness matching | done |
-| 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N, Adaptive (MGN) and Adaptive (ACHF) layers; Soft Light / Overlay / Linear (paper) / Weighted average blend; full-resolution detail box; settings files | done |
+| 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N, Adaptive (MGN) and Adaptive (ACHF) layers; Soft Light / Overlay / Linear (paper) / Weighted average blend (Linear as each method's own publication combines it); full-resolution detail box; settings files | done |
 | 5 Earthshine | Moon-aligned stack of the long exposures; glare removed; the Moon put into the HDR stack and stretched with the corona | done (checked on the 2024 data) |
 | 6 Prominences | Found by colour at the limb; transparent layer put on top | done (checked on a reduced copy of real data) |
 
@@ -114,7 +114,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper), and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the MGN paper's base) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k), Noise gate (off) and the size and strength of each of its six scales (the paper's 1.25, 2.5, 5, 10, 20, 40 px at strength 1); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
+| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper), and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -202,7 +202,7 @@ applies the calibration plan, and then:
 2. **Aligns on the corona** with Druckmüller's modified phase correlation:
    a tangential high-pass filter about the Moon, a soft mask (Moon, edges,
    saturation, stars, hot pixels), damped phase correlation with a Gaussian
-   low-pass, and a sub-pixel peak centroid. Two changes from the paper make
+   low-pass, and a sub-pixel peak centroid. Two changes from that paper (Druckmüller 2009) make
    it work across a 12-stop bracket:
    * the correlation uses *relative* tangential contrast (high-pass divided
      by local brightness), which is the same in any exposure and stops the
@@ -385,13 +385,13 @@ pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 
 | Layer | What it shows |
 | --- | --- |
-| `natural` | log stretch (default); `--flatten` (off by default, e.g. 0.8) removes that much of the radial fall-off. Or `--natural-stretch gamma`: the base Morgan & Druckmüller (2014) combine MGN with, ((B - min) / (max - min))^(1/γ) of the linear stack, `--gamma` 3.2 as in the paper (below) |
+| `natural` | log stretch (default); `--flatten` (off by default, e.g. 0.8) removes that much of the radial fall-off. Or `--natural-stretch gamma`: the base Morgan & Druckmüller (2014) combine MGN with, ((B - min) / (max - min))^(1/γ) of the linear stack, `--gamma` 3.2 as in Morgan & Druckmüller (2014) (below) |
 | `nrgf` | normalizing-radial-graded filter (Morgan et al. 2006): each circle around the Sun normalized to the same mean and spread |
 | `fnrgf` | Fourier NRGF (Druckmüllerová et al. 2011): mean and spread follow position angle too, so faint and bright regions at the same height get similar contrast |
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
-| `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the linear image, as in the paper ("the original image normalised by exposure time"; until 6 Nov 2026 the log image): fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
+| `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the linear image, as in Morgan & Druckmüller 2014 ("the original image normalised by exposure time"; until 6 Nov 2026 the log image): fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
 | `achf` | **Adaptive (ACHF)**: Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; defined in Druckmüllerová 2013): the log image minus its local mean under a kernel that follows the circles round the Sun, at its own six scales (size and strength each), Moon left out. Written only on request (`--layers ...,achf`): a few minutes on a full frame |
-| `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light, Overlay or Linear (paper) at the given strengths; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay`, or `:linear` for the papers' weighted average (below) (`--blend none` to skip); the same thing you would do with layers in Photoshop |
+| `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light, Overlay or Linear (paper) at the given strengths; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay`, or `:linear` for the combination each method's own publication uses (below) (`--blend none` to skip); the same thing you would do with layers in Photoshop |
 
 **Names used:** NRGF = Normalizing-Radial-Graded Filter; FNRGF = Fourier
 Normalizing-Radial-Graded Filter; FNRGF-N = FNRGF with Noise compensation;
@@ -410,13 +410,15 @@ is a stronger alternative at lower opacity. The filter layers are centred on
 mid-grey, which both modes treat as "no change"; desaturate them so the
 colour comes from the natural layer.
 
-**Linear (paper)** combines the images as the papers do, a weighted
-average on the display range: Z = (K1 X + K2 Y) / (K1 + K2). That is the
-FNRGF paper's Z = K1 X + K2 Y (Druckmüllerová, Morgan & Habbal 2011, section
+**Linear (paper)** combines the images as each method's own publication
+does. For NRGF, FNRGF and FNRGF-N it is a weighted average on the display
+range: Z = (K1 X + K2 Y) / (K1 + K2). That is the Z = K1 X + K2 Y of
+Druckmüllerová, Morgan & Habbal (2011, section
 2: "it is their ratio rather than their values that affects the result"),
-with both images on 0..1 as in her FNRGF software (thesis, Appendix:
+with both images on 0..1 as in her FNRGF software (Druckmüllerová 2013,
+thesis, Appendix:
 "first normalizes both the original and the filtered image into the
-interval <0, 1>"). Adaptive (MGN) on Linear goes in as its paper adds it:
+interval <0, 1>"). Adaptive (MGN) on Linear goes in as Morgan & Druckmüller (2014) add it:
 I = h C'g + ((1 - h) / n) sum g_i arctan(k C_i) (Morgan & Druckmüller 2014,
 eq. 5), the detail centred on 0 and in radians, (layer - 0.5) pi, since the
 layer itself stores it as 0.5 + mean / pi to be seen on its own (until
@@ -424,21 +426,22 @@ layer itself stores it as 0.5 + mean / pi to be seen on its own (until
 grey added). The natural layer, after any Soft Light or Overlay layers, has
 weight 1 (K1); each Linear layer's strength is its K2 and may go to 1000 %
 (her software's "common values are 10 or lower"). MGN's h = 0.7 is 43 %
-((1 - h) / h): with **Stretch: Gamma** (3.2) as the base that is the
-paper's own image. On the binned 2024 stack, Log base with MGN on Linear at
+((1 - h) / h): with **Stretch: Gamma** (3.2) as the base that is
+Morgan & Druckmüller's (2014) own image. On the binned 2024 stack, Log base with MGN on Linear at
 43 %: fine-detail contrast in the corona 0.064 (0.021 the old way), the sky
-0.08 grey (0.24), the corona's median 0.30 (0.48), nothing clipped. The
-paper's own image (Gamma 3.2 base) is far darker on an eclipse: 32 % of the
+0.08 grey (0.24), the corona's median 0.30 (0.48), nothing clipped. Their
+own image (Gamma 3.2 base) is far darker on an eclipse: 32 % of the
 corona at 1.2-3 solar radii clipped to black (7 % with Gamma white point
-99.9 %); the paper says nothing about clipping or display. The 2011 paper's
-Figure 9, 0.4 FNRGF + 0.6 ACHF, is FNRGF on Linear at 40 % and ACHF on
+99.9 %); Morgan & Druckmüller (2014) say nothing about clipping or display.
+Druckmüllerová, Morgan & Habbal (2011), Figure 9, 0.4 FNRGF + 0.6 ACHF, is FNRGF on Linear at 40 % and ACHF on
 Weighted average at 60 %, with the natural layer's own share left in.
 Nothing is measured, so a detail box still matches; the result is clipped
 to 0..1. With FNRGF on Linear, as in the published images, the dark sky
 comes up towards grey and the natural tones flatten by the filtered
 image's share.
 
-Adaptive (ACHF) on Linear goes in as the thesis combines it (section 5.2):
+Adaptive (ACHF) on Linear goes in as Druckmüllerová's thesis (2013,
+section 5.2) combines it:
 "the processed image is then a linear combination of the original and the
 filtered image", h = K1 f + K2 g, with f the composed image, "monotone
 (ideally linear)" in the light (section 4.1.4), and g = f minus its local
@@ -448,7 +451,7 @@ K2 the blend strength times **Contrast**), and the natural layer's own
 stretch, measured on f, then draws h (her chapter 7 lists a stretch of f
 before combining as future work). The corona keeps its levels and the sky
 stays dark; only the detail grows. K2 must be far higher than in the other
-modes, as the thesis says the amplification "is limited by the amount of
+modes, as Druckmüllerová (2013) says the amplification "is limited by the amount of
 noise": on Andy's full-size 2024 crop, fine-detail contrast at 1.1-1.5
 solar radii matched the Weighted average form at 60 % with K2 about 40-50
 on the Log stretch and about 100 on Gamma, so the strength runs to
@@ -459,7 +462,8 @@ Log): that is the noise of the data, shown as it is, not clipped away.
 **Weighted average** (`:average`, offered for Adaptive (MGN) and Adaptive
 (ACHF) only) is the same weighted average with the layer as its own 0..1
 picture: how Linear treated these two before 6 Nov 2026, kept because the
-earlier looks can be preferred (for MGN a third of the paper form's
+earlier looks can be preferred (for MGN a third of the detail of the
+form of Morgan & Druckmüller 2014's
 detail; for ACHF its detail on log brightness through its soft curve; the
 sky lifted a little either way). For the other layers Linear already works
 that way, so it is not offered there (a settings file or command line that
@@ -493,16 +497,17 @@ Earthshine step fills it.
 Natural layer stretch. **Log** (default, `--natural-stretch log`): log
 brightness, black at the sky and white at the brightest 0.1%; Flatten,
 Evenness, Highlight roll-off and Midtone shape it. **Gamma (MGN paper)**
-(`--natural-stretch gamma`): Morgan & Druckmüller's global image,
+(`--natural-stretch gamma`): Morgan & Druckmüller's (2014) global image,
 C'g = ((B - a0) / (a1 - a0))^(1/γ), with B the linear stack and a0, a1 its
-minimum and maximum by default; `--gamma` (**Gamma**) 3.2 as in the paper, which
-suggests 2.5-4 (1 = linear). The paper's a0 and a1 "set the minimum and
+minimum and maximum by default; `--gamma` (**Gamma**) 3.2 as in that paper, which
+suggests 2.5-4 (1 = linear). Its a0 and a1 "set the minimum and
 maximum input values" and may be chosen: **Gamma black point** /
 `--gamma-black` and **Gamma white point** / `--gamma-white`, as percentiles
-of the stack (0 and 100, the paper's minimum and maximum, by default; a
+of the stack (0 and 100, the minimum and maximum of Morgan & Druckmüller
+2014, by default; a
 white point of 99.9 lets the brightest 0.1 % clip and lifts the rest). In MGN's final image it is the base the filtered
 scales are combined with, h C'g + (1 - h) C', so with Gamma and Adaptive
-(MGN) on Linear at 43 % the blend is the paper's own image. Only Midtone
+(MGN) on Linear at 43 % the blend is Morgan & Druckmüller's (2014) own image. Only Midtone
 applies to it. With black and white at the image's extremes it is far darker
 than the log stretch: on the 2024 stack the median grey at 1.5 and 4 solar
 radii was 0.28 and 0.07 (log: 0.75 and 0.29); Midtone 0.5 brought it to 0.65
@@ -536,28 +541,29 @@ demosaicing and resampling correlate neighbouring pixels), put through the
 same steps. A test checks that pure noise gives under 0.4x the texture of
 the plain filter and of real strands. Off by default (the filter as
 published); the gated output is on the same fixed scale as the plain
-filter (the paper's, below), so where there is little real structure it
+filter (Morgan & Druckmüller's 2014, below), so where there is little real structure it
 stays flat instead of being stretched back up.
 `--adaptive-k` (**Strength** in the **Adaptive layer (MGN)** box, steps of
-0.01) is k in the paper's arctan(k C): how hard local contrast is brought
-out at each scale. The default, 0.7, is the paper's value.
+0.01) is k in the arctan(k C) of Morgan & Druckmüller (2014): how hard
+local contrast is brought out at each scale. The default, 0.7, is their
+value.
 
 Its six scales each have a size and a strength (**Adaptive layer (MGN)**
 box; `--mgn-scales` in px of the full-size stack and `--mgn-weights`,
-finest first). The defaults are the paper's: kernel widths of 1.25, 2.5, 5,
+finest first). The defaults are Morgan & Druckmüller's (2014): kernel widths of 1.25, 2.5, 5,
 10, 20 and 40 px ("Values used throughout this work are w = 1.25, 2.5, 5,
-10, 20, 40") at weight 1, the plain mean the paper allows ("the g_i can be
-set equal for all scales"). The weights are the paper's g_i: the layer is
+10, 20, 40") at weight 1, the plain mean they allow ("the g_i can be
+set equal for all scales"). The weights are their g_i: the layer is
 (1/6) times the sum of g_i arctan(k C_i), so lowering one weakens the layer
 as well as that scale's share (unlike ACHF, where only the ratios count),
-and 0 leaves the scale out. The paper sets smaller weights for the finest
+and 0 leaves the scale out. Morgan & Druckmüller (2014) set smaller weights for the finest
 scales to keep noise down; the noise gate does that from the data. The
-sizes are pixels, as the paper gives them: a frame of reference is a 400 mm
+sizes are pixels, as Morgan & Druckmüller (2014) give them: a frame of reference is a 400 mm
 lens on a 45-megapixel full-frame camera (Sun about 410 px in radius); raise
 them in proportion with a longer lens or smaller pixels. The reduced
 preview divides them by its reduction. Until 5 Nov 2026 the scales were 0.6%
 to 20% of the Sun's radius (about 2.5 to 83 px on that setup) with equal
-weights; on the 2024 crop the paper's scales give a little more contrast
+weights; on the 2024 crop their (2014) scales give a little more contrast
 overall and a finer grain (the 1.25 px scale is mostly noise there), with
 the noise gate on a little less.
 
@@ -591,18 +597,18 @@ Druckmüller's Corona program did. Defaults: sizes of 0.121%, 0.242%, 0.726%
 and 2.42% of the Sun's radius at strength 1, and 10% and 20% at strength 0
 (for a frame of reference: with a 400 mm lens on a 45-megapixel full-frame
 camera, a Sun about 410 px in radius, the first four are about 0.5, 1, 3 and
-10 px, within the thesis's 0.5-64 px). Sizes are kept as fractions of the
+10 px, within the 0.5-64 px of Druckmüllerová's thesis, 2013). Sizes are kept as fractions of the
 Sun's radius, so they suit any lens; the window shows them in pixels of the
 open stack. 0 leaves a scale out and saves its
-time; only the ratios of the strengths matter. The 2006 paper's one
+time; only the ratios of the strengths matter. Druckmüller, Rušin & Minarovjech's (2006) one
 published setting (its Figure 9, rising to 20x for the finest detail)
 likewise rests on scales of about 0.5-1 px; on a typical stack the finest
-scales are mostly noise, and the thesis says the amplification "is limited
+scales are mostly noise, and Druckmüllerová (2013) says the amplification "is limited
 by the amount of noise", so lower them if the layer is grainy. The preview
 is a reduced copy (about 1/6 for a full frame), so scales under about 6 px
 hardly show there; they show in the full-size layers and in the detail box.
 
-Requirement (d) of the thesis, kernel weight 0 between pixels in
+Requirement (d) of Druckmüllerová's thesis (2013), kernel weight 0 between pixels in
 significantly different parts of the image judged by a maximum acceptable
 difference in value, is applied to the Moon and also to brightness: a pixel
 more than **Separate parts at** times (`--achf-part-limit`, default 2; 0 =
@@ -646,7 +652,7 @@ example `--settings look.json --saturation 0.8`).
 
 The ACHF sizes are kept as fractions of the Sun's radius, so on a stack with
 a bigger or smaller Sun they stay the same size against the Sun; the MGN
-sizes are kept in pixels, as the paper gives them; the other settings are
+sizes are kept in pixels, as Morgan & Druckmüller (2014) give them; the other settings are
 in the methods' own units. Not saved: the detail box (it
 belongs to the project) and three internal widths in pixels. Settings a
 file does not have stay as they were, settings since removed from the
@@ -691,7 +697,9 @@ second one only:
 For this the filter layers have **fixed output scales** instead of being
 stretched to each picture's own spread, set in each method's own units, so
 they mean the same on any camera, lens or eclipse. The NRGF family and
-Adaptive (MGN) are shown as the papers combine them, on a straight line
+Adaptive (MGN) are shown as their publications (Morgan, Habbal & Woo
+2006; Druckmüllerová, Morgan & Habbal 2011; Morgan & Druckmüller 2014)
+combine them, on a straight line
 about mid-grey with nothing added:
 
 | Layer | Output y | Shown as |
@@ -699,12 +707,13 @@ about mid-grey with nothing added:
 | NRGF | (pixel - circle mean) / circle standard deviation | 0.5 + y / 7: white at +3.5 standard deviations, black at -3.5 |
 | FNRGF | the same with the local (Fourier) mean and deviation | 0.5 + y / 13.6: white at +6.8 local deviations |
 | FNRGF-N | the same, the deviation less **Noise compensation** x the noise | 0.5 + y / 40: white at +20 of those |
-| Adaptive (MGN) | mean over the scales of arctan(k C), range -pi/2 to pi/2 | 0.5 + y / pi (the paper's, no constant of ours; also with the noise gate) |
-| Adaptive (ACHF) | **Contrast** x the strength-weighted mean over the scales of ln(pixel / local mean); on Linear (the thesis's form) of (pixel - local mean) / local mean on the linear stack | 0.5 + arctan(1.6 y / 0.0106) / pi: 82% grey at about 1.1% brighter than the local mean, at Contrast 1 (the layer seen on its own; on Linear the blend adds g to the linear stack instead, see above) |
+| Adaptive (MGN) | mean over the scales of arctan(k C), range -pi/2 to pi/2 | 0.5 + y / pi (as Morgan & Druckmüller 2014, no constant of ours; also with the noise gate) |
+| Adaptive (ACHF) | **Contrast** x the strength-weighted mean over the scales of ln(pixel / local mean); on Linear (the form of Druckmüllerová's thesis, 2013) of (pixel - local mean) / local mean on the linear stack | 0.5 + arctan(1.6 y / 0.0106) / pi: 82% grey at about 1.1% brighter than the local mean, at Contrast 1 (the layer seen on its own; on Linear the blend adds g to the linear stack instead, see above) |
 
-The papers combine the filtered image Y with the original X linearly, Z =
-K1 X + K2 Y (FNRGF: "if we want to process two original images X1 and X2
-in the same manner, factors K2 should be the same for both images"; MGN:
+These publications combine the filtered image Y with the original X
+linearly, Z = K1 X + K2 Y (FNRGF, Druckmüllerová, Morgan & Habbal 2011: "if we want to process two original images X1 and X2
+in the same manner, factors K2 should be the same for both images"; MGN,
+Morgan & Druckmüller 2014:
 h times the global image plus 1 - h times the mean of arctan(k C)); here the
 natural layer is X and each layer's blend strength plays K2 (or 1 - h).
 NRGF-family values beyond the ends clip to white or black: on the 2024
@@ -717,8 +726,8 @@ same contrast near mid-grey without it, while Adaptive (MGN) is now 0.63x
 as strong there (0.38x with the noise gate, which had its own scale): raise
 its blend strength or **Strength** (k) for the earlier look. ACHF's layer
 keeps a soft curve for being seen on its own and for Soft Light, Overlay
-and Weighted average; on Linear its g goes into the linear stack as the
-thesis has it, with no curve.
+and Weighted average; on Linear its g goes into the linear stack as
+Druckmüllerová's thesis (2013) has it, with no curve.
 
 These are display units, not fitted to any one eclipse: a corona with
 little structure looks flatter than one with much, as it is, where a
@@ -1226,7 +1235,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--output`, `-o` | output folder (default: next to the project) |
 | `--name` | output file name prefix (default: the project name) |
 | `--layers` | comma-separated layers to write, from natural, nrgf, fnrgf, fnrgf_n, adaptive, achf (default: all but achf, which takes minutes on a full frame) |
-| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay', ':linear' (the papers' weighted average (K1 X + K2 Y) / (K1 + K2), the natural layer's weight as K1 and the layer's as K2, which may exceed 1; MGN's detail added as its paper does; ACHF as its thesis does, h = K1 f + K2 g on the linear stack before the natural stretch, K2 = weight x --achf-contrast, typically 20-100) or, for adaptive and achf only, ':average' (the same average with the layer as its 0..1 picture: the earlier, gentler look); default soft light, e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
+| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' or ':linear' (combined as each method's own publication does: NRGF, FNRGF and FNRGF-N as Druckmuellerova, Morgan & Habbal 2011, typically 0.3-1; adaptive as Morgan & Druckmueller 2014, 0.43 for their mix; achf as Druckmuellerova's thesis 2013, added to the linear stack before the natural stretch, typically 20-50 with the log stretch, about twice that with gamma) or, for adaptive and achf only, ':average' (the earlier, gentler look, typically 0.4-0.6); default soft light, e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
 | `--order` | FNRGF Fourier order (default 10) |
 | `--segments` | FNRGF angular segments (default 50) |
 | `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
@@ -1234,19 +1243,19 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--noise-m` | FNRGF-N noise compensation, 0..0.99 (default 0.7) |
 | `--adaptive-k` | adaptive layer: strength of the local contrast at each scale, k in arctan(k C) (default 0.7, as in Morgan & Druckmueller 2014) |
 | `--achf-scales` | Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in % of the Sun's radius (default 0.121,0.242,0.7259,2.42,10,20; the last two start at strength 0) |
-| `--mgn-scales` | Adaptive (MGN): the width (kernel sigma) of each of its six scales, finest first, in px of the full-size stack (default 1.25,2.5,5,10,20,40, the paper's; a frame of reference: a 400 mm lens on a 45-megapixel full-frame camera; raise them with a longer lens or smaller pixels) |
-| `--mgn-weights` | Adaptive (MGN): the weight g_i of each scale, 0-1, finest first (default 1,1,1,1,1,1: the plain mean); the layer is 1/6 of the weighted sum, as in the paper, so lowering one weakens it; 0 leaves the scale out |
+| `--mgn-scales` | Adaptive (MGN): the width (kernel sigma) of each of its six scales, finest first, in px of the full-size stack (default 1.25,2.5,5,10,20,40, as Morgan & Druckmueller 2014; a frame of reference: a 400 mm lens on a 45-megapixel full-frame camera; raise them with a longer lens or smaller pixels) |
+| `--mgn-weights` | Adaptive (MGN): the weight g_i of each scale, 0-1, finest first (default 1,1,1,1,1,1: the plain mean); the layer is 1/6 of the weighted sum, as in Morgan & Druckmueller 2014, so lowering one weakens it; 0 leaves the scale out |
 | `--achf-weights` | Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out (default 1,1,1,1,0,0) |
 | `--achf-part-limit` | Adaptive (ACHF): a pixel this many times brighter or darker than the corona at its height (a prominence) is a separate part, left out of the corona's kernels and filtered with its own pixels only, so no dark fringe forms round it; 0 = off (default 2) |
-| `--achf-contrast` | Adaptive (ACHF): contrast of the layer (the thesis's K2): at 1, a pixel about 1.1% brighter than its local mean (averaged over the scales by their strengths) shows at 82% grey, 1.1% darker at 18%; at 2, half that difference does; set by eye. With achf on ':linear' it multiplies that blend weight instead (default 1) |
+| `--achf-contrast` | Adaptive (ACHF): how strongly the layer shows its detail with soft light, overlay or average: at 1, a pixel about 1.1% brighter than its surroundings shows at 82% grey; raise it (1.5-3) if the layer looks flat. With achf on ':linear' it multiplies that blend weight instead: leave it at 1 there (default 1) |
 | `--noise-gate` | adaptive layer: each scale's detail counts only as far as it stands above the stack's noise at that scale (e.g. 3); 0 = off |
 | `--even` | take out this fraction of the large brightness differences round the Sun (streamers against coronal holes); 0 = off, e.g. 0.7 |
 | `--midtone` | put the inner corona's median brightness at this level with a midtones transfer curve; 0 = off, e.g. 0.6 |
 | `--shoulder` | highlight roll-off: 0 = hard white point (the brightest 0.1% clip); e.g. 0.3 = the top 30% of the range rolls off smoothly to white, nothing clips and colours keep their hue |
-| `--natural-stretch` | natural layer: log brightness (default) or gamma, the MGN paper's base: ((B - min) / (max - min))^(1/gamma) |
+| `--natural-stretch` | natural layer: log brightness (default) or gamma, the base Morgan & Druckmueller 2014 put under their MGN detail (darker on an eclipse: use --gamma-white 99.9) |
 | `--gamma` | gamma of --natural-stretch gamma (3.2 as in Morgan & Druckmueller 2014; 2.5-4 suggested) (default 3.2) |
-| `--gamma-black` | --natural-stretch gamma: black point (the paper's a0) as a percentile of the stack; 0 = its minimum (default, as in the paper) |
-| `--gamma-white` | --natural-stretch gamma: white point (the paper's a1) as a percentile; 100 = the maximum (default, as in the paper), e.g. 99.9 lets the brightest 0.1% clip |
+| `--gamma-black` | --natural-stretch gamma: black point as a percentile of the stack; 0 = its minimum (default, as in Morgan & Druckmueller 2014); 0.5-2 if the sky looks grey |
+| `--gamma-white` | --natural-stretch gamma: white point as a percentile; 100 = the maximum (default, as in Morgan & Druckmueller 2014), 99.9 recommended for eclipses (the brightest 0.1% goes white and the corona comes up) |
 | `--flatten` | natural layer: how much of the radial fall-off to remove, 0..1; 0 = off (default), e.g. 0.8 |
 | `--saturation` | colour saturation, 0 = monochrome (default 1) |
 | `--white` | white balance: inner corona neutral (default), the camera's as-shot, or none |
@@ -1369,8 +1378,9 @@ added to the tests.
   the full-size result there (through the limb, at a frame corner, in the
   outer corona; every layer and the blend).
 * `tests/test_paper_mapping.py` checks the MGN and NRGF-family layers
-  against the papers' own formulas, and `tests/test_achf.py` the ACHF
-  against the thesis (circular kernel, the Moon left out, scale strengths,
+  against their publications' own formulas (Morgan, Habbal & Woo 2006;
+  Druckmüllerová, Morgan & Habbal 2011; Morgan & Druckmüller 2014), and
+  `tests/test_achf.py` the ACHF against Druckmüllerová's thesis (2013) (circular kernel, the Moon left out, scale strengths,
   the parts rule).
 * `tests/test_calibration_frames.py` and `tests/test_stack_colour_offsets.py`
   run the real Stack step on simulated RAW frames: flats, darks and bias

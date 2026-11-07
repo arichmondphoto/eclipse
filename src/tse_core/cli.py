@@ -153,13 +153,13 @@ def main(argv: list[str] | None = None) -> int:
                    help=f"comma-separated layers to write, from {', '.join(LAYERS)} (default: all but achf, which "
                         "takes minutes on a full frame)")
     p.add_argument("--blend", default=",".join(f"{k}={v}" for k, v in DEFAULT_BLEND.items()),
-                   help="suggested blend as layer=weight pairs, each optionally ':overlay', ':linear' (the papers' "
-                        "weighted average (K1 X + K2 Y) / (K1 + K2), the natural layer's weight as K1 and the layer's "
-                        "as K2, which may exceed 1; MGN's detail added as its paper does; ACHF as its thesis does, "
-                        "h = K1 f + K2 g on the linear stack before the natural stretch, K2 = weight x "
-                        "--achf-contrast, typically 20-100) or, for adaptive and achf only, ':average' (the same "
-                        "average with the layer as its 0..1 picture: the earlier, gentler look); default soft "
-                        "light, "
+                   help="suggested blend as layer=weight pairs, each optionally ':overlay' or ':linear' (combined as "
+                        "each method's own publication does: NRGF, FNRGF and FNRGF-N as Druckmuellerova, Morgan & "
+                        "Habbal 2011, typically 0.3-1; adaptive as Morgan & Druckmueller 2014, 0.43 for their mix; "
+                        "achf as Druckmuellerova's thesis 2013, added to the linear stack before the natural "
+                        "stretch, typically 20-50 with the log stretch, about twice that with gamma) or, for "
+                        "adaptive and achf only, ':average' (the earlier, gentler look, typically 0.4-0.6); "
+                        "default soft light, "
                         "e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s)")
     p.add_argument("--order", type=int, default=10, help="FNRGF Fourier order (default 10)")
     p.add_argument("--segments", type=int, default=50, help="FNRGF angular segments (default 50)")
@@ -175,12 +175,12 @@ def main(argv: list[str] | None = None) -> int:
                         + "; the last two start at strength 0)")
     p.add_argument("--mgn-scales", default=",".join(f"{v:g}" for v in MGN_SCALES),
                    help="Adaptive (MGN): the width (kernel sigma) of each of its six scales, finest first, in px of "
-                        "the full-size stack (default %(default)s, the paper's; a frame of reference: a 400 mm lens "
+                        "the full-size stack (default %(default)s, as Morgan & Druckmueller 2014; a frame of reference: a 400 mm lens "
                         "on a 45-megapixel full-frame camera; raise them with a longer lens or smaller pixels)")
     p.add_argument("--mgn-weights", default=",".join(f"{v:g}" for v in MGN_WEIGHTS),
                    help="Adaptive (MGN): the weight g_i of each scale, 0-1, finest first (default %(default)s: the "
-                        "plain mean); the layer is 1/6 of the weighted sum, as in the paper, so lowering one "
-                        "weakens it; 0 leaves the scale out")
+                        "plain mean); the layer is 1/6 of the weighted sum, as in Morgan & Druckmueller "
+                        "2014, so lowering one weakens it; 0 leaves the scale out")
     p.add_argument("--achf-weights", default=",".join(f"{v:g}" for v in ACHF_WEIGHTS),
                    help="Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out "
                         "(default %(default)s)")
@@ -189,10 +189,10 @@ def main(argv: list[str] | None = None) -> int:
                         "(a prominence) is a separate part, left out of the corona's kernels and filtered with its "
                         "own pixels only, so no dark fringe forms round it; 0 = off (default 2)")
     p.add_argument("--achf-contrast", type=float, default=1.0,
-                   help="Adaptive (ACHF): contrast of the layer (the thesis's K2): at 1, a pixel about 1.1%% brighter "
-                        "than its local mean (averaged over the scales by their strengths) shows at 82%% grey, 1.1%% "
-                        "darker at 18%%; at 2, half that difference does; set by eye. With achf on ':linear' it multiplies "
-                        "that blend weight instead (default 1)")
+                   help="Adaptive (ACHF): how strongly the layer shows its detail with soft light, overlay or "
+                        "average: at 1, a pixel about 1.1%% brighter than its surroundings shows at 82%% grey; raise "
+                        "it (1.5-3) if the layer looks flat. With achf on ':linear' it multiplies that blend weight "
+                        "instead: leave it at 1 there (default 1)")
     p.add_argument("--noise-gate", type=float, default=0.0,
                    help="adaptive layer: each scale's detail counts only as far as it stands above the stack's "
                         "noise at that scale (e.g. 3); 0 = off")
@@ -206,16 +206,17 @@ def main(argv: list[str] | None = None) -> int:
                    help="highlight roll-off: 0 = hard white point (the brightest 0.1%% clip); e.g. 0.3 = the top 30%% of "
                         "the range rolls off smoothly to white, nothing clips and colours keep their hue")
     p.add_argument("--natural-stretch", choices=["log", "gamma"], default="log",
-                   help="natural layer: log brightness (default) or gamma, the MGN paper's base: "
-                        "((B - min) / (max - min))^(1/gamma)")
+                   help="natural layer: log brightness (default) or gamma, the base Morgan & "
+                        "Druckmueller 2014 put under their MGN detail (darker on an eclipse: use --gamma-white 99.9)")
     p.add_argument("--gamma", type=float, default=3.2,
                    help="gamma of --natural-stretch gamma (3.2 as in Morgan & Druckmueller 2014; 2.5-4 suggested)")
     p.add_argument("--gamma-black", type=float, default=0.0,
-                   help="--natural-stretch gamma: black point (the paper's a0) as a percentile of the stack; 0 = its "
-                        "minimum (default, as in the paper)")
+                   help="--natural-stretch gamma: black point as a percentile of the stack; 0 = its "
+                        "minimum (default, as in Morgan & Druckmueller 2014); 0.5-2 if the sky looks grey")
     p.add_argument("--gamma-white", type=float, default=100.0,
-                   help="--natural-stretch gamma: white point (the paper's a1) as a percentile; 100 = the maximum "
-                        "(default, as in the paper), e.g. 99.9 lets the brightest 0.1%% clip")
+                   help="--natural-stretch gamma: white point as a percentile; 100 = the maximum "
+                        "(default, as in Morgan & Druckmueller 2014), 99.9 recommended for eclipses (the brightest "
+                        "0.1%% goes white and the corona comes up)")
     p.add_argument("--flatten", type=float, default=0.0,
                    help="natural layer: how much of the radial fall-off to remove, 0..1; 0 = off (default), "
                         "e.g. 0.8")

@@ -1145,7 +1145,7 @@ class EnhanceTab(StepTab):
             sp = self._spin(0, 100, default, " %")
             mode = QComboBox()
             choices = [("Soft Light", "soft light"), ("Overlay", "overlay"), ("Linear (paper)", "linear")]
-            if k in ("adaptive", "achf"):  # a second linear form: the paper's, and the earlier 0..1 picture
+            if k in ("adaptive", "achf"):  # a second linear form: as published, and the earlier 0..1 picture
                 choices.append(("Weighted average", "average"))
             for text, name in choices:
                 mode.addItem(text, name)
@@ -1173,7 +1173,7 @@ class EnhanceTab(StepTab):
         self.natural_stretch.addItem("Gamma (MGN paper)", "gamma")
         self.natural_stretch.currentIndexChanged.connect(self.changed)
         tf.addRow("Stretch:", self.natural_stretch)
-        self.gamma = self._dspin(1.0, 6.0, 3.2, 0.1, "Gamma of the Gamma stretch (3.2 in the MGN paper)")
+        self.gamma = self._dspin(1.0, 6.0, 3.2, 0.1, "Gamma of the Gamma stretch (3.2 in Morgan & Druckmüller 2014)")
         tf.addRow("Gamma:", self.gamma)
         self.gamma_black = self._dspin(0.0, 50.0, 0.0, 0.1, "Gamma stretch: black point, percentile")
         self.gamma_black.setSuffix(" %")
@@ -1207,7 +1207,7 @@ class EnhanceTab(StepTab):
         af.addRow("Strength:", self.mgn_k)
         self.noise_gate = self._dspin(0.0, 6.0, 0.0, 0.5, "Adaptive layer: keep noise from becoming texture")
         af.addRow("Noise gate:", self.noise_gate)
-        # The paper's six scales: kernel widths in px of the full-size stack, and their weights g_i.
+        # Morgan & Druckmüller's (2014) six scales: kernel widths in px of the full-size stack, and their weights g_i.
         self.mgn_size, self.mgn_w = [], []
         for i, (wpx, gi) in enumerate(zip(MGN_SCALES, MGN_WEIGHTS)):
             size = self._dspin(0.1, 1000.0, wpx, 0.25, "Adaptive (MGN): size of this scale")
@@ -1313,233 +1313,198 @@ class EnhanceTab(StepTab):
         self._box_text()
 
         layer_tips = {
-            "natural": "Natural: a logarithmic (log) stretch, with as much of the brightness fall-off from the Sun "
-                       "removed as Flatten says (0 by default: a plain log stretch). The closest to what the eye "
-                       "saw, and the base layer of the blend. Keeps the colour.",
-            "nrgf": "NRGF = Normalizing-Radial-Graded Filter (Morgan, Habbal & Woo 2006). 'Radial-graded': it "
-                    "works outward from the Sun, circle by circle. 'Normalizing': every circle is brought to "
-                    "the same average brightness and contrast. Simple and honest; bright streamers stay brighter than "
-                    "coronal holes at the same height.",
-            "fnrgf": "FNRGF = Fourier Normalizing-Radial-Graded Filter (Druckmüllerová, Morgan & Habbal 2011). "
-                     "Like NRGF, but the average and contrast are measured in pieces around each circle and "
-                     "smoothed with a Fourier series (a sum of waves around the circle), so contrast is also "
-                     "evened out around each circle, so faint regions get as much contrast as bright streamers at the same height.",
-            "fnrgf_n": "FNRGF-N = FNRGF with Noise compensation (from the same 2011 paper): FNRGF that discounts "
-                       "the noise, so the faint outer corona is enhanced as strongly "
-                       "as the inner corona without turning into grain. Usually the best structure layer.",
-            "achf": "Fine detail with Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & "
-                    "Minarovjech 2006; defined in H. Druckmüllerová's thesis, 2013): at each of its own scales "
-                    "(size and strength set below), each pixel minus its local mean, taken with a kernel that bends along the "
-                    "circle round the Sun and leaves the Moon out. Amplifies detail without normalizing its "
-                    "contrast, so it keeps more of the difference between bright and faint structure than "
-                    "Adaptive (MGN), and more noise in the faint corona. Slow: a few minutes on a full frame, "
-                    "about 10 s on the preview, so it is only computed when ticked, blended or shown.",
-            "adaptive": "Fine detail (loops, plumes, streamer edges) at several scales and every direction. "
-                        "Method: MGN = Multi-scale Gaussian Normalization (Morgan & Druckmüller 2014), the "
-                        "published successor to Druckmüller's ACHF = Adaptive Circular High-pass Filter. "
-                        "It normalizes the local contrast, so in the blend it also flattens the overall brightness.",
+            "natural": "Natural: the stack as the eye saw it, the bright inner corona fading into the faint outer "
+                       "corona, in its own colours. Every other layer is blended onto it, so set it up first "
+                       "('Natural layer and colour').",
+            "nrgf": "NRGF, Normalizing-Radial-Graded Filter (Morgan, Habbal & Woo 2006): makes every height above "
+                    "the Sun equally bright, so the outer corona shows as well as the inner. Streamers stay "
+                    "brighter than the coronal holes beside them. Smooth, with little fine detail; FNRGF-N usually "
+                    "does the same job better.",
+            "fnrgf": "FNRGF, Fourier Normalizing-Radial-Graded Filter (Druckmüllerová, Morgan & Habbal 2011): like "
+                     "NRGF, but it also evens out the brightness round the Sun, so faint regions beside bright "
+                     "streamers get as much contrast as the streamers. Grainy in the faint outer corona; FNRGF-N "
+                     "fixes that.",
+            "fnrgf_n": "FNRGF-N, FNRGF with noise compensation (Druckmüllerová, Morgan & Habbal 2011): FNRGF that "
+                       "allows for the noise, so the faint outer corona comes out without turning into grain. "
+                       "Usually the best layer for the corona's large-scale shape: start here, 50-70 % on Soft "
+                       "Light.",
+            "adaptive": "Adaptive (MGN), Multi-scale Gaussian Normalization (Morgan & Druckmüller 2014): fine detail "
+                        "(loops, plumes, the edges of streamers) at every size and in every direction. It brings "
+                        "structure out evenly everywhere, so it also flattens the overall brightness. The usual "
+                        "partner for FNRGF-N: 50-80 % on Soft Light, or 43 % on Linear (paper) for the published "
+                        "look.",
+            "achf": "Adaptive (ACHF), adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; "
+                    "described in Druckmüllerová 2013): fine detail like Adaptive (MGN), but without evening out "
+                    "contrast, so bright structure stays brighter than faint structure (closer to the natural "
+                    "look) and faint areas show more noise. Use it instead of Adaptive (MGN) rather than with it. "
+                    "Slow (minutes on a full frame), so it is only computed when ticked, blended or shown.",
         }
         for i in range(self.show_layer.count()):
             k = self.show_layer.itemData(i)
             if k in layer_tips:
                 self.show_layer.setItemData(i, layer_tips[k], Qt.ItemDataRole.ToolTipRole)
-        _tip(self.show_layer, "Which layer the preview shows. Blend = the suggested mix of the layers. "
-             "Rest the mouse on a layer name in the list, or on its checkbox, for what it is.")
+        _tip(self.show_layer, "Which layer the preview shows. Blend is the mix set in the Blend box. Rest the mouse "
+             "on a layer name in the list, or on its checkbox, for what it is.")
         for k, c in self.layer_checks.items():
             _tip(c, layer_tips[k] + "\n\nTicked layers are written by 'Write full-size layers'. The preview "
                  "shows every layer whatever is ticked, except Adaptive (ACHF): that one only when it is ticked, "
                  "blended or shown (it is slow).")
-        blend_tip = ("How strongly this layer is applied over the natural layer in the blend, like layer "
-                     "opacity in Photoshop. 0 % leaves it out. The mode beside it picks Soft Light, Overlay or Linear (paper).\n\n"
-                     "Soft Light and Overlay treat mid-grey as 'no change', so the filter layers add structure without "
-                     "lifting the dark sky (up to 100 %). With Linear (paper) the strength is the papers' K2, the "
-                     "layer's weight against the natural layer's 100 % (up to 1000 %).\n\nAdaptive (MGN) on Linear "
-                     "(paper): 43 % is the MGN paper's h = 0.7 (strength = (1 - h) / h; 11 % is its h = 0.9). With "
-                     "Stretch: Gamma (3.2) in 'Natural layer and colour' that is the paper's own image.\n\nDefault 0 % "
-                     "for every layer (the blend is then the natural layer); try FNRGF-N 50-70 % and adaptive "
-                     "50-80 %, Soft Light.")
+        blend_tip = ("How strongly this layer is applied over the natural layer. 0 % leaves it out (the default "
+                     "for every layer, so the blend starts as the natural layer).\n\nThe right amount depends on "
+                     "the mode beside it:\n- Soft Light: 50-80 % is typical (up to 100 %).\n- Overlay: much "
+                     "stronger, 5-20 %.\n- Linear (paper): 30-100 % for NRGF, FNRGF and FNRGF-N; 43 % for "
+                     "Adaptive (MGN); 2000-5000 % for Adaptive (ACHF), about twice that with Stretch: Gamma.\n"
+                     "- Weighted average: 40-60 %.\n\nA good start: FNRGF-N 60 % and Adaptive (MGN) 60 %, both on "
+                     "Soft Light.")
+        mode_common = ("How this layer is mixed with the natural layer.\n\nSoft Light (default): gentle. Adds "
+                       "structure, keeps the natural tones and leaves the dark sky dark. The safe choice for every "
+                       "layer.\n\nOverlay: like Soft Light but much stronger, mostly in the middle tones. Use a "
+                       "low strength (5-20 %).\n\n")
+        fig9 = ("Druckmüllerová, Morgan & Habbal (2011), Figure 9, is FNRGF on Linear (paper) at 40 % with "
+                "Adaptive (ACHF) on Weighted average at 60 %.")
+        mode_tips = {
+            "adaptive": "Linear (paper): mixed as Morgan & Druckmüller (2014) mix it. Much more detail than Soft "
+                        "Light, and the sky stays dark. Use 43 % (their mix). For their exact look also set "
+                        "Stretch: Gamma, Gamma 3.2 and Gamma white point about 99.9 % under 'Natural layer and "
+                        "colour' (at 100 % an eclipse comes out very dark). With Stretch: Log, 43 % gives the same "
+                        "structure on a brighter, more natural base.\n\nWeighted average: a gentler Linear (paper), "
+                        "about a third of the detail, with the sky a little grey. 43 % gives the look Totality had "
+                        "before 6 Nov 2026.",
+            "achf": "Linear (paper): mixed as Druckmüllerová's thesis (2013) mixes it. The detail is added to the "
+                    "stack before it is stretched, so the corona keeps its brightness and the sky stays dark. It "
+                    "needs a far higher strength than the other modes: 2000-5000 % with Stretch: Log, about twice "
+                    "that with Gamma. Leave Contrast at 1. At high strength the darkest fine detail by the Moon's "
+                    "edge shows as black specks (noise in the stack): lower the strength or the finest scale.\n\n"
+                    "Weighted average: the earlier, softer look (before 6 Nov 2026), with the sky a little grey. "
+                    "40-60 %. " + fig9,
+        }
+        nrgf_linear = ("Linear (paper): mixed as Druckmüllerová, Morgan & Habbal (2011) mix it, an average of the "
+                       "natural layer and this layer. As in their published pictures the dark sky comes up towards "
+                       "grey and the natural tones flatten. 30-100 %. " + fig9)
         for k, sp in self.blend.items():
             _tip(sp, f"{LAYER_NAMES[k]}: " + blend_tip, bf)
-            _tip(self.blend_mode[k], "How this layer is applied.\n\nSoft Light (default): Photoshop's mode; gentle, "
-                 "keeps the natural tones, adds least in the darkest and brightest parts, and treats mid-grey as 'no "
-                 "change', so the sky stays dark.\n\nOverlay: Photoshop's mode; stronger, adds more contrast, mostly "
-                 "in the mid-tones. Use a lower strength (for example 5-20 %).\n\nLinear (paper): the images combined "
-                 "as the papers do. The natural layer (after any Soft Light or Overlay layers) has weight 1 (K1); the "
-                 "strength here is K2, up to 1000 %; the sum is divided by K1 + K2.\n\n- Adaptive (MGN): the MGN "
-                 "paper's I = h x base + (1 - h) x detail, the detail added as the paper adds it (centred on 0, in "
-                 "radians), so it adds strong structure and keeps the sky dark. 43 % = the paper's h = 0.7. For the "
-                 "paper's own image set Stretch: Gamma, Gamma 3.2 in 'Natural layer and colour'; on an eclipse its "
-                 "base is very dark and much of the corona can clip to black, so lower Gamma white point (about "
-                 "99.9 %) or raise Midtone. With the Log stretch as base, 43 % gives the paper's mix of structure on a "
-                 "brighter base.\n- Adaptive (ACHF): the thesis's h = K1 f + K2 g, before any stretch: the filtered "
-                 "image g (each pixel minus its local mean, on the linear stack) is added to the linear stack, and "
-                 "the natural layer's own stretch (Log or Gamma) then draws the result. K2 = this strength x "
-                 "Contrast (leave Contrast at 1 and set the strength), up to 10000 %. The corona keeps its levels "
-                 "and the sky stays dark; only the detail grows. It needs a much higher strength than the other "
-                 "modes: start about 2000-5000 % with the Log stretch, about twice that with Gamma. Noise grows with "
-                 "it: where the darkest fine detail goes below zero (by the limb, at high strength) it shows black, "
-                 "as the data says; lower the finest scale's strength or the strength here.\n- FNRGF, FNRGF-N, "
-                 "NRGF: the FNRGF paper's Z = K1 X + K2 Y on the display range (Druckmüllerová's software scales "
-                 "both images to 0-1 first). As in the published images, the dark sky comes up towards grey and "
-                 "the natural tones flatten by the filtered image's share.\n\nWeighted average (Adaptive (MGN) and "
-                 "Adaptive (ACHF) only): the same weighted average with the layer as its own 0-1 picture, as "
-                 "Linear (paper) treated these two before 6 Nov 2026. For MGN gentler than Linear (paper), about a "
-                 "third of the detail; for ACHF the earlier look (its detail on log brightness, through a soft "
-                 "curve). Both lift the sky a little towards grey. Strength up to 1000 %, as K2; MGN at 43 % gives "
-                 "its earlier look at the paper's h = 0.7. The 2011 paper's 0.4 FNRGF + 0.6 ACHF is FNRGF on Linear "
-                 "at 40 % and ACHF on Weighted average at 60 %.\n\nIn Photoshop (Weighted average, or Linear for "
-                 "FNRGF, FNRGF-N and NRGF): Normal mode at opacity K2 / (1 + K2) for one layer.")
+            _tip(self.blend_mode[k], mode_common + mode_tips.get(k, nrgf_linear))
         for size, sp in zip(self.achf_size, self.achf_w):
-            _tip(size, "Adaptive (ACHF) only: the width (sigma) of this scale's kernel in pixels of your full-size "
-                 "stack; the structure about this size and finer is brought out. The thesis uses 0.5-64 px. Kept as "
-                 "a fraction of the Sun's radius, so the same setting suits another lens or camera (the pixels shown "
-                 "follow the open stack). Defaults: 0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius, then 10% "
-                 "and 20% for the last two, which start switched off; the boxes show what that is in pixels of the "
-                 "open stack. For a frame of reference: with a 400 mm lens on a 45-megapixel full-frame camera (Sun "
-                 "about 410 px in radius) the first four are about 0.5, 1, 3 and 10 px.\n\n"
-                 "The preview is a reduced copy (about 1/6 for a full frame): scales under about 6 px are finer than "
-                 "its pixels and hardly show there; they show in 'Write full-size layers'.", self._achf_form)
-            _tip(sp, "Adaptive (ACHF) only: how much this scale counts, like the frequency sliders of Druckmüller's "
-                 "Corona program. 0 leaves the scale out (and saves its time); only the ratios matter (all at 2 is "
-                 "the same as all at 1). Defaults: 1 for the first four scales, 0 for the last two.\n\nThe finest "
-                 "scales are mostly noise in a typical stack: lower them if the layer is grainy (judge it in the "
-                 "detail box, at full resolution). The bright glow by the Moon comes from the large scales.", self._achf_form)
-        _tip(self.achf_parts, "Adaptive (ACHF) only: requirement (d) of the method (Druckmüllerová's thesis, "
-             "section 5.2). A pixel this many times brighter or darker than the corona at its height (a "
-             "prominence, mostly) is treated as a separate part of the picture: its kernels use only its own "
-             "pixels, and the corona's kernels leave it out. Without it a bright prominence darkens the corona "
-             "beside it (a dark fringe round it). Default 2; 0 switches the rule off. Lower picks out fainter "
-             "features as parts; much lower starts to split real coronal structure. At 2, bright prominences "
-             "usually become parts of their own and the corona does not. Costs some time: about 3x the plain "
-             "filter.",
+            _tip(size, "Adaptive (ACHF) only: the size of the structure this scale brings out, in pixels of your "
+                 "full-size stack. Smaller brings out finer detail (and more noise); larger, broader structure "
+                 "(and a glow by the Moon's edge). The boxes show pixels for the open stack but keep their size "
+                 "against the Sun, so saved settings suit any lens or camera. The defaults (about 0.5, 1, 3 and "
+                 "10 px with a 400 mm lens on a 45-megapixel full-frame camera; the last two scales start switched "
+                 "off) suit most stacks.\n\nThe whole-picture preview is reduced about 6x, so scales under about "
+                 "6 px hardly show there: judge them in the detail box.", self._achf_form)
+            _tip(sp, "Adaptive (ACHF) only: how much this scale counts in the mix of sizes. 0 switches it off (and "
+                 "saves time). Only the balance between the scales matters; Contrast or the blend strength sets "
+                 "how strong the layer is. Defaults: 1 for the first four scales, 0 for the last two.\n\nGrainy "
+                 "layer: lower the first (finest) one or two. A bright glow by the Moon: lower the large ones.",
+                 self._achf_form)
+        _tip(self.achf_parts, "Adaptive (ACHF) only: keeps prominences from leaving a dark halo in the corona round "
+             "them. Anything this many times brighter (or darker) than the corona at its height is filtered on "
+             "its own. 2 (default) works for most eclipses. 0 turns it off: about three times faster, but "
+             "prominences get dark fringes. Much lower than 2 starts splitting real coronal structure.",
              self._achf_form)
-        _tip(self.achf_contrast, "Adaptive (ACHF) only: how strongly the layer shows its detail (the thesis's "
-             "K2, the weight of the filtered image), set by eye as in Druckmüller's own software.\n\nAt 1 (default), "
-             "a pixel about 1.1% brighter than its surroundings (averaged over the scales by their strengths) shows "
-             "at 82% grey, and 1.1% darker at 18%; at 2 half that difference does, at 0.5 twice it. The same on "
-             "any camera, lens or eclipse, so a corona with little structure looks flatter, as it is.\n\nThe scale "
-             "strengths only set the mix of sizes; this sets the overall strength. Raise it if the layer looks "
-             "flat (for example after lowering the finest scales against grain); lower it if it looks harsh (for "
-             "example with the large scales on). The contrast is not measured on each picture, so the detail box "
-             "shows exactly what the full-size layer will. Noise is raised as much as detail: judge it in the "
-             "detail box.\n\nWith the blend mode Linear (paper), the thesis's form, Contrast multiplies the "
-             "strength (K2 = strength x Contrast): leave it at 1 and set the strength instead.",
-             self._achf_form)
+        _tip(self.achf_contrast, "Adaptive (ACHF) only: how strongly the layer shows its detail on Soft Light, "
+             "Overlay and Weighted average. 1 (default) suits most stacks. Raise it (1.5-3) if the layer looks "
+             "flat, for example after lowering the finest scales against grain; lower it if it looks harsh. It is "
+             "not adjusted to each picture, so a corona with little structure looks flatter, as it is, and the "
+             "detail box shows exactly what the full-size layer will.\n\nOn Linear (paper) it multiplies the "
+             "blend strength: leave it at 1 there and set the strength instead.", self._achf_form)
         _tip(self.views, "Whole picture: a reduced copy of the stack (about 1400 px wide), quick to update. "
              "Hold Shift and drag on it to choose a detail box.\n\nDetail box: that box at full resolution, "
-             "exactly as 'Write full-size layers' will make it (the same pixels), so fine settings such as the "
-             "ACHF scales, the noise gate and Noise compensation can be judged. The first detail takes a while (the "
-             "full-size stack is read and measured once); after that a setting change redraws only the box. "
-             "At most 2000 px a side.")
+             "exactly as 'Write full-size layers' will make it, so fine settings (the Adaptive scales, the Noise "
+             "gate, Noise compensation) can be judged. The first detail box takes a while (the full-size stack is "
+             "read once); after that a setting change redraws only the box. At most 2000 px a side.")
         af = self._adaptive_form
-        _tip(self.mgn_k, "How strongly the adaptive layer brings out local contrast at each scale: k in the "
-             "paper's arctan(k x C) (Morgan & Druckmüller 2014). Default 0.7, the paper's value. Higher gives "
-             "harder, more graphic strands; lower is gentler. Steps of 0.01.\n\nOn Linear (paper) in the Blend box "
-             "the detail is added at the paper's own strength (in radians, about three times what the layer "
-             "shows on its own), so 0.7 there already gives the paper's look.", af)
+        _tip(self.mgn_k, "Adaptive (MGN) only: how hard the detail is brought out. 0.7 (default, the value of "
+             "Morgan & Druckmüller 2014) suits most stacks. Higher (1-1.5) gives harder, more graphic strands; "
+             "lower (0.3-0.5) a gentler look.\n\nWith Adaptive (MGN) on Linear (paper) in the Blend box, keep "
+             "0.7: that mode already adds the detail at full strength.", af)
         for size, sp in zip(self.mgn_size, self.mgn_w):
-            _tip(size, "Adaptive (MGN) only: the width (sigma) of this scale's Gaussian kernel in pixels of your "
-                 "full-size stack; the contrast is normalized against the surroundings this wide. Defaults: the "
-                 "paper's 1.25, 2.5, 5, 10, 20 and 40 px (Morgan & Druckmüller 2014). Pixel defaults: a frame of "
-                 "reference is a 400 mm lens on a 45-megapixel full-frame camera (Sun about 410 px in radius; the "
-                 "Align log's 'Sun centre' line gives yours): with a longer lens or smaller pixels, raise the sizes "
-                 "in proportion; with a shorter lens, lower them.\n\nThe preview is a reduced copy (about 1/6 for a "
-                 "full frame): it uses the sizes divided by its reduction, so scales under about 6 px show only in "
-                 "the detail box and the full-size layers.", af)
-            _tip(sp, "Adaptive (MGN) only: the paper's weight g_i for this scale, 0 to 1 (default 1 for all: the plain "
-                 "mean). As in the paper, the layer is the weighted sum over all six scales divided by six, so "
-                 "lowering a weight weakens the layer as well as that scale's share; 0 leaves the scale out (and "
-                 "saves its time). The paper sets smaller weights for the finest scales to keep noise down; the "
-                 "Noise gate above does that from your data.", af)
-        _tip(self.noise_gate, "The adaptive filter brings out structure at six scales; at the finest ones a stack is "
-             "mostly noise, which it turns into grain. With the gate, each scale's detail counts only as far as it "
-             "stands above the noise measured in your stack at that scale (the number is how many times the noise "
-             "counts as clearly above it).\n\n0 (default): off, the paper's filter as published. 3 is a good start; "
-             "higher keeps more of the faint corona smooth, lower shows finer detail and more grain.", af)
-        _tip(self.even, "Takes out this fraction of the large brightness differences round the Sun (bright "
-             "streamers against dark coronal holes, over about a quarter of the Sun's radius), as Flatten does for "
-             "the fall-off from the Sun. 0 (default): off. 0.6-0.8 gives the even grey corona of a strongly "
-             "processed eclipse picture; the strands themselves stay.")
-        _tip(self.natural_stretch, "How the natural layer turns the linear stack into a picture.\n\nLog (default): "
-             "log brightness, black at the sky and white at the brightest 0.1%; Flatten, Evenness and Highlight "
-             "roll-off shape it.\n\nGamma (MGN paper): the base Morgan & Druckmüller (2014) combine their MGN "
-             "detail with: ((B - min) / (max - min))^(1/Gamma) of the linear stack, black at its minimum and white "
-             "at its maximum (Gamma black and white points move these). Flatten, Evenness and Highlight roll-off do "
-             "not apply to it; Midtone does. The filter layers are not changed by either: they have their own "
-             "scales.\n\nFor the MGN paper's image: Gamma, Gamma 3.2, and in the Blend box Adaptive (MGN) at 43 % "
-             "on Linear (paper) (the paper's h = 0.7). Gamma alone is much darker than Log on an eclipse: the "
-             "single brightest pixel sets white. Gamma white point about 99.9 % or Midtone 0.4-0.6 brings the "
-             "corona up.")
-        _tip(self.gamma_black, "Only for Stretch: Gamma. The paper's a0, the input that comes out black, as a "
-             "percentile of the stack: 0 (default) is its minimum, as in the paper. Raise it a little (0.5-2) if the "
-             "sky looks grey. Black stays black: what lies below the point clips to it.")
-        _tip(self.gamma_white, "Only for Stretch: Gamma. The paper's a1, the input that comes out white, as a "
-             "percentile of the stack: 100 (default) is its maximum, as in the paper, so the single brightest "
-             "pixel (the limb, a prominence) sets white and the rest comes out dark. 99.9 lets the brightest 0.1% "
-             "clip to white and lifts everything else; 99-99.5 more.")
-        _tip(self.gamma, "Only for Stretch: Gamma. Higher lifts the faint outer corona and compresses the bright "
-             "inner corona. 3.2 is the paper's value (used with Adaptive (MGN) on Linear (paper) at 43 % in the "
-             "Blend box); it suggests 2.5-4. 1 = linear.")
-        _tip(self.midtone, "Lightens or darkens the middle tones (a midtones transfer curve; black and white stay) so that the inner "
-             "corona's median brightness (1.05-2.5 solar radii) sits at this level. 0 (default): off. 0.6 gives a "
-             "light grey corona; 0.4 a darker one.")
-        _tip(self.shoulder, "How the brightest parts of the picture (the inner corona by the limb, bright "
-             "prominences) reach white.\n\n0 (default): a hard white point, so the brightest 0.1% clip to flat "
-             "white. Above 0 that top part of the range rolls off smoothly instead, so it keeps its gradations and "
-             "nothing clips; prominences keep their colour instead of turning flat pink. 0.3 is a good start; "
-             "higher compresses more of the bright range.")
-        _tip(self.flatten, "How much of the corona's brightness fall-off from the Sun the natural layer removes, "
-             "from 0 (none: a plain log stretch, the inner corona dominates) to 1 (all of it: equal brightness at "
-             "every height).\n\n0 (default): off. 0.5-0.7 keeps much of the natural fall-off; 0.8-1 shows more "
-             "of the outer corona. It stops where the corona sinks into the noise, so the sky stays "
-             "dark.", tf)
-        _tip(self.saturation, "Colour strength in every layer: 0 = black and white, 1 = the measured colour, "
-             "above 1 = stronger. Colour fades to grey on its own where the corona is too faint for its colour to "
-             "be trusted.", tf)
-        _tip(self.white, "corona (default): the inner corona, 1.2-2.5 solar radii, is made white. Its light is "
-             "sunlight scattered by electrons, so it really is white, which makes this the most reliable "
-             "choice.\n\ncamera: the camera's as-shot white balance.\n\nnone: raw camera colour (looks green).",
-             tf)
-        _tip(self.keep_sky, "By default the sky (twilight glow, its gradient across the frame and small black-level "
-             "offsets) is modelled for each colour and removed before filtering; otherwise the filters turn it "
-             "into arcs and colour casts. Tick this to keep the sky (for example its blue). The natural layer's "
-             "black point is then the darkest sky, so corners darkened by vignetting or the sky's gradient go "
-             "towards black. Stacks made before Nov 2026 had too little red in the sky (fixed in the Stack "
-             "step): re-stack before judging it.")
-        _tip(self.order, "How closely FNRGF's 'local average' follows brightness changes around each circle.\n\n"
-             "Lower (3-6): bright streamers stay clearly brighter than dark coronal holes; closer to plain NRGF, "
-             "with more of the corona's overall shape.\n\nHigher (14-20): faint regions are boosted to match "
-             "bright ones. Too high and the streamers count as part of the average and get subtracted, so they "
-             "look flat and blotchy.\n\nDefault 10 (the value in the FNRGF paper). Lower it if the result looks "
-             "too uniform; raise it if dim regions beside bright streamers still look empty. If you go above "
-             "about 15, raise Segments too.", ff)
-        _tip(self.segments, "How finely each circle is divided to measure its average and contrast. 50 means "
-             "pieces of 7.2 degrees.\n\nMore segments: finer but noisier measurements. Fewer: smoother.\n\n"
-             "Default 50 (the FNRGF paper). Rarely needs changing, but it must stay well above 2 x Order + 1 "
-             "(21 at order 10): at order 20, use about 80-100.", ff)
-        _tip(self.noise_m, "How much of the noise is discounted when FNRGF-N measures contrast, 0 to 0.99.\n\n"
-             "Far from the Sun much of the measured variation is just noise, so plain FNRGF under-enhances the "
-             "faint outer corona. This subtracts the estimated noise first.\n\n0: plain FNRGF, smooth but weak "
-             "far out. Higher (0.8-0.95): more faint streamers and plumes, and more grain.\n\nDefault 0.7. This "
-             "is the main setting to try: compare 0.5 and 0.9 in the preview. Stacks of many frames can go "
-             "higher; noisier ones may need 0.3-0.5.", ff)
+            _tip(size, "Adaptive (MGN) only: the size of the structure this scale brings out, in pixels of your "
+                 "full-size stack. The defaults, 1.25 to 40 px (Morgan & Druckmüller 2014), suit a 400 mm lens on "
+                 "a 45-megapixel full-frame camera (Sun about 410 px in radius; the Align log's 'Sun centre' line "
+                 "gives yours). With a longer lens or smaller pixels raise all six in proportion; with a shorter "
+                 "lens lower them.\n\nThe whole-picture preview is reduced about 6x, so scales under about 6 px "
+                 "show only in the detail box and the full-size layers.", af)
+            _tip(sp, "Adaptive (MGN) only: how much this scale counts, 0 to 1 (default 1 for all). Lowering one "
+                 "also weakens the whole layer a little; 0 switches the scale off (and saves time). If the layer "
+                 "is grainy, lower the first one or two, or use the Noise gate, which does it for you from the "
+                 "noise in your stack.", af)
+        _tip(self.noise_gate, "Adaptive (MGN) only: stops the finest scales from turning noise into grain. 0 "
+             "(default): off, the filter as Morgan & Druckmüller (2014) published it. 3 is a good start for a "
+             "grainy layer; higher keeps more of the faint corona smooth, lower shows finer detail and more "
+             "grain.", af)
+        _tip(self.even, "Stretch: Log only. Evens out bright streamers against dark coronal holes, as Flatten "
+             "evens out the fading away from the Sun. 0 (default): off. 0.6-0.8 gives the even grey corona of a "
+             "heavily processed eclipse picture; the fine strands stay.")
+        _tip(self.natural_stretch, "How the natural layer turns the stack into a picture.\n\nLog (default): a "
+             "natural look with the faint outer corona visible; Flatten, Evenness and Highlight roll-off shape it. "
+             "The best base for the Soft Light layers and for Adaptive (ACHF) on Linear (paper).\n\nGamma (MGN "
+             "paper): the base Morgan & Druckmüller (2014) put under their MGN detail. For their look use it with "
+             "Gamma 3.2 and Adaptive (MGN) on Linear (paper) at 43 %. On an eclipse it is much darker than Log: "
+             "set Gamma white point to about 99.9 %, or Midtone to 0.4-0.6. Flatten, Evenness and Highlight "
+             "roll-off do not apply to it; Midtone does.\n\nThe filter layers seen on their own do not change; "
+             "the blend does.")
+        _tip(self.gamma_black, "Stretch: Gamma only. How dark the darkest parts go. 0 % (default) is the darkest "
+             "pixel of the stack, as Morgan & Druckmüller (2014) have it. Raise it a little (0.5-2 %) if the sky "
+             "looks grey.")
+        _tip(self.gamma_white, "Stretch: Gamma only. What comes out white. 100 % (default, as Morgan & Druckmüller "
+             "2014 have it) lets the single brightest pixel set white, which leaves an eclipse very dark. 99.9 % is "
+             "better for eclipses: the brightest 0.1 % goes white and the corona comes up. 99-99.5 % is brighter "
+             "still.")
+        _tip(self.gamma, "Stretch: Gamma only. Higher lifts the faint outer corona and holds back the bright "
+             "inner corona. 3.2 (default) is the value of Morgan & Druckmüller (2014); they suggest 2.5-4.")
+        _tip(self.midtone, "Lightens or darkens the middle tones of the natural layer (black and white stay) so "
+             "the inner corona sits at this brightness. 0 (default): off. 0.4-0.6 is typical: 0.6 gives a light "
+             "grey corona, 0.4 a darker one. Most useful with Stretch: Gamma, which is dark on an eclipse.")
+        _tip(self.shoulder, "How the brightest parts (the inner corona by the Moon, bright prominences) reach "
+             "white. 0 (default): the brightest 0.1 % clips to flat white. 0.3 is a good start: they keep their "
+             "gradations, and prominences keep their colour instead of turning flat pink. Higher softens more of "
+             "the bright range.")
+        _tip(self.flatten, "Stretch: Log only. How much of the corona's fading away from the Sun is taken out. 0 "
+             "(default): none, the natural look, with the inner corona dominant. 0.5-0.7 keeps much of the "
+             "natural fading but shows more outer corona; 0.8-1 shows the outer corona as brightly as the inner. "
+             "The sky stays dark either way. NRGF, FNRGF and FNRGF-N do much of this already, so keep it low when "
+             "they are blended.", tf)
+        _tip(self.saturation, "Colour strength in every layer: 0 = black and white, 1 (default) = the measured "
+             "colour, above 1 = stronger. Colour fades to grey on its own where "
+             "the corona is too faint for its colour to be trusted.", tf)
+        _tip(self.white, "corona (default): the inner corona is made white. Its light is sunlight scattered by "
+             "electrons, so it really is white: the most reliable choice.\n\ncamera: the camera's as-shot white "
+             "balance.\n\nnone: raw camera colour (looks green).", tf)
+        _tip(self.keep_sky, "Off (default): the sky (twilight glow, its gradient across the frame) is measured and "
+             "removed before filtering; otherwise the filters turn it into arcs and colour casts. Tick it to keep "
+             "the sky, for example its blue. The darkest sky then sets black, so corners darkened by vignetting "
+             "go towards black. Stacks made before Nov 2026 had too little red in the sky: re-stack before "
+             "judging it.")
+        _tip(self.order, "FNRGF and FNRGF-N: how closely they follow brightness changes round the Sun.\n\nLower "
+             "(3-6): bright streamers stay clearly brighter than dark coronal holes, closer to plain NRGF.\n\n"
+             "Higher (14-20): faint regions are lifted to match bright ones; too high and the streamers look flat "
+             "and blotchy.\n\n10 (default, as Druckmüllerová, Morgan & Habbal 2011) suits most stacks. Lower it if "
+             "the result looks too uniform; raise it if dim regions beside bright streamers still look empty. "
+             "Above about 15, raise Segments to 80-100 too.", ff)
+        _tip(self.segments, "FNRGF and FNRGF-N: how many pieces each circle round the Sun is measured in. 50 "
+             "(default, as Druckmüllerová, Morgan & Habbal 2011) rarely needs changing. More is finer but noisier; "
+             "fewer is smoother. With Order above about 15, use 80-100.", ff)
+        _tip(self.noise_m, "FNRGF-N only: how much of the noise is allowed for, 0 to 0.99. Far from the Sun much of "
+             "what looks like structure is noise, so plain FNRGF holds the faint outer corona back.\n\n0: plain "
+             "FNRGF, smooth but weak far out. 0.7 (default) suits most stacks. 0.8-0.95: more faint streamers and "
+             "plumes, and more grain; stacks of many frames take it best. Noisy stacks: 0.3-0.5.\n\nThe main "
+             "setting to try: compare 0.5 and 0.9 in the detail box.", ff)
         _tip(self.preview_btn, "Draws the picture shown: on the 'Whole picture' tab every layer on a reduced copy of "
              "the stack (about 1400 px wide), in seconds; on the 'Detail box' tab the box at full resolution. "
              "Adaptive (ACHF) is computed only when it is ticked, blended or shown. Nothing is written.")
-        _tip(self.save_settings_btn, "Saves every setting on this tab to a file you name: the layers to write, the "
-             "blend, the natural layer and colour, and the MGN, ACHF and FNRGF settings. Load it again on any "
-             "project, or use it on the command line with 'totality enhance --settings <file>'. The ACHF sizes are "
-             "saved as fractions of the Sun's radius, so on a stack with a bigger or smaller Sun they keep the same "
-             "size against the Sun. The detail box is not saved (it belongs to this stack).")
+        _tip(self.save_settings_btn, "Saves every setting on this tab to a file you name. Load it again on any "
+             "project, or use it on the command line with 'totality enhance --settings <file>'. The Adaptive "
+             "(ACHF) sizes are saved relative to the Sun, so they suit a stack taken with another lens. The detail "
+             "box is not saved.")
         _tip(self.load_settings_btn, "Sets every setting on this tab from a file saved with 'Save settings…', or "
-             "from the <name>_enhance.json written beside full-size layers (the exact settings those layers were "
-             "made with). Settings the file does not have stay as they are, and the log lists them. A file "
-             "from before Nov 2026: the filter layers' display changed then (Adaptive (MGN) shows weaker with "
-             "the same strength), so the picture can differ from the one made with it.")
-        _tip(self.run_btn, "Runs the ticked layers at full resolution and writes them, plus the blend, under a name "
+             "from the <name>_enhance.json written beside full-size layers (the exact settings they were made "
+             "with). Settings the file does not have stay as they are, and the log lists them. Files from before "
+             "Nov 2026 can give a different picture: the filter layers have changed since.")
+        _tip(self.run_btn, "Makes the ticked layers at full resolution and writes them, plus the blend, under a name "
              "and in a folder you choose (each layer as <name>_<layer>), as TIFF (16-bit), PNG (16-bit) or JPG "
              "(8-bit), with <name>_enhance.json holding the settings used (Load settings… reads it; the Earthshine "
-             "tab's final image uses the last run's settings). Takes a few minutes for a full frame, more with "
+             "tab's final image uses the last run's settings). A few minutes for a full frame, more with "
              "Adaptive (ACHF).")
 
     def _spin(self, lo, hi, val, suffix) -> QSpinBox:
