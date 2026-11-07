@@ -48,10 +48,13 @@ def test_finds_prominences_not_corona_not_moon():
     rgb, wt, hdr, r, phi = _hdr()
     region = sun_region(rgb, wt, hdr)
     res, layer, alpha = find_prominences(region, ProminenceParams())
+    # The opacity is the prominence's share of the light (no outline is drawn): here its red and
+    # blue against a corona about as bright, so about 2/3.
     for ang, hgt in ((30, 14), (150, 30)):
         x = SX + (R + hgt / 2) * np.cos(np.radians(ang))
         y = SY + (R + hgt / 2) * np.sin(np.radians(ang))
-        assert _at(alpha, region, x, y) > 0.8, ang
+        assert _at(alpha, region, x, y) > 0.5, ang
+        assert _at(layer[..., 0], region, x, y) > 0.3, ang
     # White corona between prominences: nothing.
     x0, y0 = region.origin
     yy, xx = np.mgrid[0 : alpha.shape[0], 0 : alpha.shape[1]]
@@ -63,7 +66,7 @@ def test_finds_prominences_not_corona_not_moon():
     on_moon = np.hypot(xx + x0 - MX, yy + y0 - MY) < MR
     assert alpha[on_moon].max() == 0
     # Pink: red above blue above green.
-    k = alpha > 0.9
+    k = alpha > 0.5
     m = layer[k].mean(axis=0)
     assert m[0] > m[2] > m[1]
     assert res.count >= 3
@@ -74,10 +77,12 @@ def test_chromosphere_optional():
     region = sun_region(rgb, wt, hdr)
     # The uncovered crescent of the rim, in the west (angle 180), away from any prominence.
     x, y = SX - (R + 1.3), SY
-    _, _, with_c = find_prominences(region, ProminenceParams(chromosphere=True))
-    res, _, without_c = find_prominences(region, ProminenceParams(chromosphere=False))
-    assert _at(with_c, region, x, y) > 0.5
-    assert _at(without_c, region, x, y) < 0.1
+    # (The layer itself: by the limb the corona is brightest, so the rim's share of the light is small.)
+    _, with_c, _ = find_prominences(region, ProminenceParams(chromosphere=True))
+    res, without_c, _ = find_prominences(region, ProminenceParams(chromosphere=False))
+    with_c, without_c = with_c[..., 0], without_c[..., 0]
+    assert _at(with_c, region, x, y) > 0.2
+    assert _at(without_c, region, x, y) < 0.02
     # The tall prominence keeps its base.
     bx = SX + (R + 2) * np.cos(np.radians(150))
     by = SY + (R + 2) * np.sin(np.radians(150))
@@ -160,3 +165,190 @@ def test_cli(tmp_path, capsys):
                      str(tmp_path / "x.png")]) == 0
     assert IO.read_image(tmp_path / "x.png").shape == (H, W, 3)
     assert cli.main(["final-prominences", str(tmp_path / "e.json")]) == 1  # no final image yet: a message
+
+
+def _stacked_project(tmp_path, monkeypatch, exposures=("1/1000", "1/500", "1/250", "1/60", "1/15")):
+    """A project with RAW frames (synthetic mosaics), aligned and stacked as the Stack step does."""
+    import json
+
+    from conftest import make_frames
+    from tse_core import rawio
+    from tse_core import workflow as W
+    from tse_core.inventory import Inventory
+    from tse_core.project import EventProject
+    from tse_core.synthetic import SyntheticScene
+
+    from tse_core.demosaic import channel_masks
+    from tse_core.rawio import RawMosaic
+
+    scene = SyntheticScene(size=400, sun_radius=60.0, seed=2)
+    frames = make_frames(list(exposures), aperture=8.0)
+    yy, xx = np.mgrid[0:400, 0:400]
+
+    def prominence(dx, dy):  # pink (H-alpha and H-beta) at 3 o'clock, 10 px tall, as bright as the limb
+        r = np.hypot(xx - 200 - dx, yy - 200 - dy)
+        ang = np.arctan2(yy - 200 - dy, xx - 200 - dx)
+        blob = ((r > 60) & (r < 73) & (np.abs(ang) < 0.08)).astype(np.float32) * 2400.0
+        return ndimage.gaussian_filter(blob, 0.7)
+
+    def mosaic(grey, red):
+        masks = channel_masks("RGGB", grey.shape)
+        raw = np.empty(grey.shape, np.float32)
+        for c, k in (("R", 1.0), ("G", 0.0), ("B", 0.35)):
+            raw[masks[c]] = (grey + k * red)[masks[c]]
+        black, white = 600.0, 15520.0
+        raw = np.minimum(black + np.minimum(raw, 1.0) * (white - black), white)
+        return RawMosaic(raw.astype(np.float32), "RGGB", {"R": black, "G": black, "B": black}, white, (2.0, 1.0, 1.5))
+    shifts = [(1.0, -0.5), (0.0, 0.0), (-1.2, 0.8), (0.4, 0.3), (0.8, -0.9)]
+    mosaics, align_frames = {}, []
+    for f, (dx, dy) in zip(frames, shifts):
+        f.path = str(tmp_path / f.file_name)
+        (tmp_path / f.file_name).write_bytes(b"")
+        # the corona peaks at 0.5 of full scale in the 1/250 s frame: the longer ones saturate by the limb
+        img, moon = scene.frame(f.exposure_s * 0.05, 200 + dx, 200 + dy, 0, 0, noise=False, full_scale=1.0)
+        disc = np.clip(np.hypot(xx - moon["moon_x"], yy - moon["moon_y"]) - moon["moon_r"] + 0.5, 0, 1)
+        mosaics[f.path] = mosaic(img, prominence(dx, dy) * disc * f.exposure_s * 0.05)
+        align_frames.append({"index": f.index, "file_name": f.file_name, "matrix": [[1, 0, -dx], [0, 1, -dy]],
+                             "moon_ref": [moon["moon_x"] - dx, moon["moon_y"] - dy],
+                             "moon_frame": {"x": moon["moon_x"], "y": moon["moon_y"], "radius": moon["moon_r"]}})
+    monkeypatch.setattr(rawio, "read_mosaic", lambda p: mosaics[p])
+    sun = {"x": 200.0, "y": 200.0, "radius_px": 60.0, "arcsec_per_px": 16.0, "rotation_deg": 0.0}
+    # The reference a middle exposure, not one of the short frames (as on the 2024 set: 1/10 s)
+    (tmp_path / "e_align.json").write_text(json.dumps({"reference_index": frames[3].index, "image_size": [400, 400],
+                                                       "frames": align_frames, "sun": sun}))
+    p = EventProject(name="e")
+    p.set_inventory(Inventory(frames))
+    p.use_lensfun = False
+    path = tmp_path / "e.json"
+    p.save(path)
+    W.stack(path, W.StackOptions(align=str(tmp_path / "e_align.json"), lensfun_db=str(tmp_path / "none")))
+    return path, frames
+
+
+def test_prominence_stack_uses_the_shortest_frames_in_the_stacks_units(tmp_path, monkeypatch):
+    """The prominences are sharpest in the shortest frames (2024: edges 2.2-2.6 px at 1/1600-1/1000 s
+    against 3.25 px in the HDR stack). Stack prominences takes the frames up to 2 stops longer than
+    the shortest, with the HDR stack's own gains, so it is in the same units; and measures the blur
+    on each frame's own Moon edge (the synthetic optics: sigma 0.7 px, and the demosaicing)."""
+    from tse_core import workflow as W
+    from tse_core.fits import read_fits
+    from tse_core.project import EventProject
+
+    path, frames = _stacked_project(tmp_path, monkeypatch)
+    msgs = []
+    entry = W.prominence_stack(path, say=msgs.append)
+    assert entry["frames"] == [frames[0].index, frames[1].index, frames[2].index]
+    assert 0.5 < entry["blur_px"] < 1.4, entry["blur_px"]
+    assert any("blur" in m and "px" in m for m in msgs)
+    st = EventProject.load(path).parameters
+    hdr, hh = read_fits(st["stack"]["hdr"])
+    pr, ph = read_fits(st["prominence_stack"]["hdr"])
+    x0, y0 = int(ph["CROPX0"]), int(ph["CROPY0"])
+    assert pr.shape[1] < hdr.shape[1] and x0 > 0          # only round the Sun
+    yy, xx = np.mgrid[0:pr.shape[1], 0:pr.shape[2]]
+    r = np.hypot(xx + x0 - 200, yy + y0 - 200)
+    ring = (r > 60 * 1.15) & (r < 60 * 1.4)
+    ratio = pr[1][ring] / hdr[1, y0:y0 + pr.shape[1], x0:x0 + pr.shape[2]][ring]
+    assert abs(float(np.median(ratio)) - 1) < 0.02
+
+
+def test_prominence_layer_from_the_prominence_stack(tmp_path, monkeypatch):
+    """Write prominence layer after Stack prominences: the layer comes from the short frames, the
+    size of the HDR stack, with the prominence's own light only (the corona taken off), and
+    nothing on the HDR stack's Moon (the one in the final image)."""
+    from tse_core import imageout as IO
+    from tse_core import workflow as W
+    from tse_core.fits import read_fits_header
+    from tse_core.project import EventProject
+
+    path, frames = _stacked_project(tmp_path, monkeypatch)
+    W.prominence_stack(path)
+    msgs = []
+    res = W.prominence_layer(path, output_file=str(tmp_path / "p.tif"), say=msgs.append)
+    assert any("prominence stack" in m for m in msgs)
+    lay = IO.read_image(res.outputs["prominences"], alpha=True)
+    assert lay.shape == (400, 400, 4)
+    head = read_fits_header(EventProject.load(path).parameters["stack"]["hdr"])
+    yy, xx = np.mgrid[0:400, 0:400]
+    on_moon = np.hypot(xx - head["MOONX"], yy - head["MOONY"]) < head["MOONR"]
+    assert lay[on_moon].max() == 0
+    r = np.hypot(xx - 200, yy - 200)
+    prom = (r > 63.5) & (r < 70) & (np.abs(np.arctan2(yy - 200, xx - 200)) < 0.04)
+    assert np.median(lay[prom][:, 0]) > 0.3                            # pink: red over green
+    assert np.median(lay[prom][:, 0]) > np.median(lay[prom][:, 1]) + 0.2
+    corona = (r > 66) & (r < 80) & (np.abs(np.arctan2(yy - 200, xx - 200)) > 0.5)
+    assert np.percentile(lay[corona][:, :3].max(axis=1), 99) < 0.05   # the white corona taken off
+
+
+def test_swap_puts_the_short_frames_prominences_into_the_hdr_stack():
+    """The HDR stack's prominences are swollen and soft (2024, 5 o'clock: edge 80-20 % over 2.49
+    superpixels against 1.9-2.0 in the short frames, and a red glow 1 % of the peak 3-8 px out);
+    the prominence stack's are sharp but noisier. The swap takes the HDR stack's prominence light
+    out and puts the prominence stack's in, linear: the corona (green, and red and blue in their
+    ratio to it) is left as it was, nothing changes on the Moon, and where the HDR stack had no
+    data the short frames fill it."""
+    from tse_core.prominences import ProminenceParams, swap_prominences
+
+    rng = np.random.default_rng(5)
+    rgb, wt, head, r, phi = _hdr()
+    corona = rgb[..., 1].copy()
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    # 15 px tall: within the default search height (0.3 solar radii; 2024: prominences 30-35 px of 413)
+    shape = ((r > R) & (r < R + 15) & (np.abs(((phi - 90 + 180) % 360) - 180) < 5)).astype(np.float32) * 0.6
+    sharp = ndimage.gaussian_filter(shape, 0.8)
+    # The HDR stack's: wider, with a 1 % glow; scaled from the 2024 stack to this Sun (60 px against
+    # 413): blur 1.6 px and glow 3 px here are 11 and 21 px there (measured glow: 6-16 px).
+    soft = ndimage.gaussian_filter(shape, 1.6) + 0.01 * ndimage.gaussian_filter(shape, 3.0)
+    base = np.stack([corona, corona, corona], axis=-1)
+    on_moon = np.hypot(xx - MX, yy - MY) < MR
+    hdr = base.copy()
+    hdr[..., 0] += soft
+    hdr[..., 2] += 0.35 * soft
+    prom = base.copy()
+    prom[..., 0] += sharp
+    prom[..., 2] += 0.35 * sharp
+    prom += rng.normal(0, 4e-4, prom.shape).astype(np.float32)
+    hdr[on_moon] = 0.0
+    prom[on_moon] = 0.0
+    weight = np.ones((H, W), np.float32)
+    hole = (np.abs(yy - (SY + R + 6)) < 1) & (np.abs(xx - SX) < 1)   # saturated in every long frame
+    hdr[hole] = 0.0
+    weight[hole] = 0.0
+    before = hdr.copy()
+    g = __import__("tse_core.enhance", fromlist=["Geometry"]).Geometry(SX, SY, R, MX, MY, MR)
+    info = swap_prominences(hdr, weight, prom, np.ones((H, W), np.float32), g,
+                            ProminenceParams(sharpen=0.0, structure=0.0))
+    assert info["count"] >= 1
+    # The prominence now has the short frames' shape (red over the corona).
+    red = hdr[..., 0] - hdr[..., 1]
+    # (Not the pixel touching the Moon: the corona behind it is carried in from beside it at the same
+    # distance, partly over the Moon; the final image replaces it anyway, see merge_moon's handover.)
+    by_moon = np.hypot(xx - MX, yy - MY) < MR + 1
+    ray = (np.abs(xx - SX) < 0.5) & (yy > SY + R) & (yy < SY + R + 30) & ~by_moon
+    got, want = red[ray], sharp[ray]
+    assert np.max(np.abs(got - want)) < 0.06
+    halo = (r > R + 16) & (r < R + 24) & (np.abs(((phi - 90 + 180) % 360) - 180) < 5)
+    # The HDR stack's glow gone: left only what carrying the corona across the prominence (10 deg)
+    # misses of its fine structure, which varies by a few % over that angle (here 0.03 per mode).
+    assert (np.abs(red - sharp)[halo] < 0.05 * corona[halo]).all()
+    # The corona untouched away from the prominence, in every colour (by it, the green changes too:
+    # prominences have some green light of their own, helium's yellow line).
+    away = (np.abs(((phi - 90 + 180) % 360) - 180) > 30) & (r > R + 3)
+    assert np.abs(hdr[away] - before[away]).max() < 1e-6
+    assert np.array_equal(hdr[on_moon], before[on_moon])          # nothing on the Moon
+    assert weight[hole].min() > 0 and hdr[hole][:, 0].min() > 0  # filled from the short frames
+
+
+def test_cli_prominence_stack_and_final_settings(tmp_path, monkeypatch, capsys):
+    """totality prominence-stack: stacks the short frames and saves the settings 'totality final' uses."""
+    from tse_core import cli
+    from tse_core.project import EventProject
+
+    path, frames = _stacked_project(tmp_path, monkeypatch)
+    assert cli.main(["prominence-stack", str(path), "--brightness", "0.3", "--quiet"]) == 0
+    out = capsys.readouterr().out
+    assert "Prominence stack: 3 frame(s)" in out
+    pr = EventProject.load(path).parameters
+    assert pr["prominences"]["params"]["brightness"] == 0.3 and pr["prominence_stack"]["use"] is True
+    assert cli.main(["prominence-stack", str(path), "--settings-only", "--off"]) == 0
+    assert EventProject.load(path).parameters["prominence_stack"]["use"] is False

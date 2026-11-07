@@ -309,14 +309,38 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <name>_final.tif")
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
+    p = sub.add_parser("prominence-stack",
+                       help="stack the shortest exposures round the Sun; 'totality final' then swaps in their sharper "
+                            "prominences")
+    p.add_argument("project", help="project file (run 'totality stack' on it first)")
+    p.add_argument("--longest-stops", type=float, default=2.0,
+                   help="frames from the shortest aligned exposure up to this many stops longer (default 2)")
+    p.add_argument("--radii", type=float, default=1.6,
+                   help="the square stacked, in solar radii from the Sun's centre (default 1.6)")
+    p.add_argument("--settings-only", action="store_true",
+                   help="only save the settings below for 'totality final' (no stacking)")
+    p.add_argument("--off", action="store_true", help="'totality final' uses the HDR stack's own prominences")
+    p.add_argument("--sharpen", type=float, default=0.5,
+                   help="undo the blur measured on the Moon's edge: 0 off, 1 strongest (default 0.5)")
+    p.add_argument("--structure", type=float, default=0.0,
+                   help="bring out strands and loops inside them: 0 off (default), 0.3-0.6 more texture")
+    p.add_argument("--brightness", type=float, default=1.0,
+                   help="their brightness against the corona (default 1, as measured; 0.2-0.5 shows their structure)")
+    p.add_argument("--min-redness", type=float, default=1.1,
+                   help="how much redder than the corona light must be to count as a prominence (default 1.1)")
+    p.add_argument("--no-chromosphere", action="store_true", help="leave out the thin pink rim along the limb")
+    p.add_argument("--chromosphere-arcsec", type=float, default=12.0,
+                   help="height of the rim left out by --no-chromosphere, arcsec (default 12)")
+    p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
+
     p = sub.add_parser("prominences", help="find the prominences and write them as a layer (transparent elsewhere)")
     p.add_argument("project", help="project file (run 'totality stack' on it first)")
     p.add_argument("--height", type=float, default=0.3, help="how far above the solar limb to look, in solar radii "
                                                             "(default 0.3)")
     p.add_argument("--sensitivity", type=float, default=4.0,
                    help="red excess needed, in noise standard deviations (default 4; lower finds fainter ones)")
-    p.add_argument("--min-redness", type=float, default=1.2,
-                   help="red/green ratio needed; the white corona is about 1 (default 1.2)")
+    p.add_argument("--min-redness", type=float, default=1.1,
+                   help="how much redder than the corona light must be (default 1.1)")
     p.add_argument("--no-chromosphere", action="store_true", help="leave out the thin pink rim along the limb")
     p.add_argument("--chromosphere-arcsec", type=float, default=12.0,
                    help="height of the rim left out by --no-chromosphere, arcsec (default 12)")
@@ -382,6 +406,8 @@ def main(argv: list[str] | None = None) -> int:
         if not code:
             print(f"Final image written to {out}")
         return code
+    if args.command == "prominence-stack":
+        return cmd_prominence_stack(args)
     if args.command == "prominences":
         return cmd_prominences(args)
     if args.command == "final-prominences":
@@ -860,6 +886,29 @@ def cmd_earthshine(args) -> int:
         return code
     print()
     print(result.describe())
+    return 0
+
+
+def cmd_prominence_stack(args) -> int:
+    from .prominences import ProminenceParams
+    from .workflow import ProminenceStackOptions, WorkflowError, prominence_stack, save_prominence_settings
+
+    if not args.settings_only:
+        entry, code = _run(prominence_stack, args.project,
+                           ProminenceStackOptions(longest_stops=args.longest_stops, radii=args.radii), quiet=args.quiet)
+        if code:
+            return code
+        print(f"Prominence stack: {len(entry['frames'])} frame(s)"
+              + (f", blur at the Moon's edge {entry['blur_px']:.2f} px" if entry.get("blur_px") else ""))
+    params = ProminenceParams(min_redness=args.min_redness, chromosphere=not args.no_chromosphere,
+                              chromosphere_arcsec=args.chromosphere_arcsec, brightness=args.brightness,
+                              sharpen=args.sharpen, structure=args.structure)
+    try:
+        save_prominence_settings(args.project, params, use=not args.off)
+    except WorkflowError as exc:
+        print(exc)
+        return 1
+    print("Settings saved for 'totality final'" + (" (prominence stack off)" if args.off else ""))
     return 0
 
 

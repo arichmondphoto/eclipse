@@ -349,6 +349,8 @@ def stack_frames(
     image_crop: float = 1.0,
     progress: Optional[Say] = None,
     data_dirs: Optional[tuple] = None,
+    matches: Optional[dict] = None,
+    on_frame: Optional[Callable] = None,
 ) -> tuple[StackResult, np.ndarray, np.ndarray]:
     """Run brightness matching and the weighted, Moon-aware average.
 
@@ -356,13 +358,18 @@ def stack_frames(
     of the reference exposure; weight is (h, w) float32. The output covers the
     whole reference frame unless ``params.crop_radii`` asks for a square.
     A full D850 frame needs roughly 3 GB of memory at the peak.
+
+    ``matches``: brightness gains already measured (by index, as Stack wrote them), used as they
+    are, so a stack of some of the frames comes out in the units of the full stack. ``on_frame``:
+    called as ``on_frame(info, radiance, crop)`` with each frame's aligned radiance (before its
+    Moon is left out), for measurements.
     """
     say = progress or (lambda _m: None)
     params = params or StackParams()
     infos = list(infos)
     by_index = {f.index: f for f in infos}
     moon_frame = params.moon_frame if params.moon_frame is not None else ref_index
-    margin = moon_margin(params, by_index.get(moon_frame, by_index[ref_index]).moon_r)
+    margin = moon_margin(params, (by_index[moon_frame] if moon_frame in by_index else by_index[ref_index]).moon_r)
     say(f"left out round each frame's Moon: {margin:.1f} px"
         + (" (scaled to the Moon's size)" if params.moon_margin_px is None else ""))
     if moon_frame not in by_index:
@@ -382,7 +389,8 @@ def stack_frames(
     reduced: dict[int, tuple[np.ndarray, np.ndarray]] = {}
     cache: dict[int, RawMosaic] = {}
     wb = None
-    for f in infos:
+    given = matches
+    for f in (infos if given is None else ()):
         mos = load(f)
         wb = wb or mos.wb
         bx, by, bw, bh = source_box(f.matrix, crop)
@@ -400,7 +408,13 @@ def stack_frames(
         if len(cache) < 2:
             cache[f.index] = mos  # keep a couple to save one read; the rest are reloaded
         say(f"matching: read {f.file_name}")
-    matches = match_exposures(reduced, by_index, ref_index, params, say)
+    if given is None:
+        matches = match_exposures(reduced, by_index, ref_index, params, say)
+    else:
+        missing = [f.index for f in infos if f.index not in given]
+        if missing:
+            raise ValueError(f"no brightness gain for frame(s) {missing}: stack all the frames first")
+        matches = {f.index: given[f.index] for f in infos}
     reduced.clear()
     notes = []
     for m in matches.values():
@@ -419,6 +433,7 @@ def stack_frames(
     infos = sorted(infos, key=lambda f: -matches[f.index].gain)
     for f in infos:
         mos = cache.pop(f.index, None) or load(f)
+        wb = wb or mos.wb
         bx, by, bw, bh = source_box(f.matrix, crop)
         fr = region(mos, bx, by, bw, bh, calibs.get(f.index), image_crop, hot_pixels=params.hot_pixels)
         del mos
@@ -439,6 +454,8 @@ def stack_frames(
         radiance = v  # converted in place to save memory on full frames
         radiance -= m.colour_offsets()[None, None, :]
         radiance /= m.gain
+        if on_frame is not None:
+            on_frame(f, radiance, crop)
         covered = moon_mask(crop, f, margin)
         if f.index == moon_frame:
             moon_rgb = np.nan_to_num(radiance[moon_slices], nan=0.0).astype(np.float32)

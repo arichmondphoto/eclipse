@@ -32,12 +32,12 @@ step saves its results into one project file (`<event>/<event>.json`).
 
 | Path | What |
 | --- | --- |
-| `src/tse_core/workflow.py` | Steps as used by the GUI and CLI: `align`, `stack`, `enhance_project`, `earthshine`, `final_with_moon`, `final_image` (the older paste way), `prominence_layer`, `final_with_prominences` |
+| `src/tse_core/workflow.py` | Steps as used by the GUI and CLI: `align`, `stack`, `enhance_project`, `earthshine`, `final_with_moon`, `final_image` (the older paste way), `prominence_stack`, `prominence_layer`, `final_with_prominences` |
 | `src/tse_core/align.py`, `geometry.py`, `eclipse.py` | Phase correlation alignment, field rotation, the Sun's centre, Besselian elements |
 | `src/tse_core/stack.py` | Moon-aware HDR stacking with measured brightness matching |
 | `src/tse_core/enhance.py` | Stretch and filter layers; `MoonInput` lets the Moon be drawn with the same curve |
 | `src/tse_core/earthshine.py` | Moon-aligned stack, glare removal (limb terms, prominence fan), lunar surface, `merge_moon` (Moon into the HDR stack) |
-| `src/tse_core/prominences.py` | Prominences found by colour |
+| `src/tse_core/prominences.py` | Prominences: blur measured on the Moon's edge, their own light against the corona behind them, `swap_prominences` (the short frames' prominences into the HDR stack); the older layer found by colour |
 | `src/tse_core/viewzoom.py` | Zoom and pan arithmetic for the GUI's picture views (no Qt) |
 | `siril/Totality.py` | The Siril window, one tab per step |
 | `tools/cli_reference.py` | Generates README's command-line reference from the parser |
@@ -96,7 +96,7 @@ carefully against the PyQt6 API. Say so when handing it over.
   `~/Desktop/Eclipse 2024/limb_test_case` (README.txt, `limb_check.py`). Stage it from there when
   he asks to continue; never add it to the repository.
 - `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
-  FITS and SER frames, gain, mono; sharper prominences from the short exposures). Not to be
+  FITS and SER frames, gain, mono; prominences from the frames left out near the contacts). Not to be
   started unless the user asks; read it when they do.
 
 ## Commits

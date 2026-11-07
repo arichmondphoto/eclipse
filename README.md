@@ -26,14 +26,13 @@ elements for any eclipse from 1600 to 2400.
 | 3 Stack | Moon-aware linear HDR stacking with measured brightness matching | done |
 | 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N, Adaptive (MGN) and Adaptive (ACHF) layers; Soft Light / Overlay / Linear / Weighted average blend (Linear as each method's own publication combines it); full-resolution detail box; settings files | done |
 | 5 Earthshine | Moon-aligned stack of the long exposures; glare removed; the Moon put into the HDR stack and stretched with the corona | done |
-| 6 Prominences | Found by colour at the limb; transparent layer put on top | done (checked on a reduced copy of real data) |
+| 6 Prominences | The short exposures stacked round the Sun; their sharper prominences swapped into the final image before the stretch | done (checked on the 2024 frames) |
 
 Each step works in the Siril window and on the command line. Tested on the
 2024 eclipse (Nikon D850, 400 mm); the 2017 set is kept back as a blind test.
 Still to come: the blind test, and help for other cameras and operating
 systems before sharing the tool more widely. Ideas kept for later, if needed
-or requested (such as files from astronomy cameras like ZWO's, and sharper
-prominences from the short exposures), are in
+or requested (such as files from astronomy cameras like ZWO's), are in
 [docs/FUTURE.md](docs/FUTURE.md).
 
 ## Workflow
@@ -48,7 +47,8 @@ prominences from the short exposures), are in
 4. **Enhance:** tune the layers in a live preview, then write them full size.
 5. **Earthshine:** stack the Moon, then write the final image: the Moon put
    into the HDR stack and stretched together with the corona.
-6. **Prominences:** pick out the prominences and put them on top.
+6. **Prominences:** stack the short exposures, then write the final image
+   with their sharper prominences.
 
 Then finish in Photoshop (or not: steps 5 and 6 write a finished picture).
 
@@ -118,7 +118,7 @@ The window has one tab per step, and each step saves into the project file:
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
 | 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Photoshop paste only (old way)**: kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image**, **Write Moon layer (for Photoshop)** |
-| 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
+| 6 Prominences | 1 Prominence stack: longest exposure (stops above the shortest), **Stack prominences**. 2 In the final image: use the prominence stack, sharpening, structure, prominence brightness, redness needed, chromosphere on or off, rim height | The stack round the Sun before and after the prominences are swapped in; **Write final image** (as on the Earthshine tab) |
 
 Every setting has hover help explaining what it does and when to change it.
 Every picture view zooms: scroll (or **+** / **-**) to zoom about the pointer,
@@ -182,9 +182,8 @@ totality align "$P"                                      # the site from the pro
 totality stack "$P"
 totality enhance "$P" --blend natural=1,fnrgf_n=0.7,adaptive=0.1:overlay
 totality earthshine "$P"
-totality final "$P" -o "Eclipse 2024/with_moon.tif"
-totality prominences "$P"
-totality final-prominences "$P" -o "Eclipse 2024/finished.png"
+totality prominence-stack "$P" --brightness 0.3
+totality final "$P" -o "Eclipse 2024/finished.tif"
 ```
 
 `totality <command> --help` lists every option (all of them are also in the
@@ -889,30 +888,63 @@ are missing it asks you to stack the earthshine again.
 ## Prominences
 
 ```bash
-totality prominences eclipse2024.json              # writes <name>_prominences.tif
-totality final-prominences eclipse2024.json        # puts them on top of the final image
+totality prominence-stack eclipse2024.json --brightness 0.3   # stack the short frames, save the settings
+totality final eclipse2024.json                                # the final image, with them
 ```
 
-Prominences glow in red hydrogen light (and weaker blue lines), so they
-look pink or magenta once the corona is white. They are found by colour:
-pixels clearly redder than the corona at the same height. They come from
-the HDR stack, so every prominence the moving Moon uncovered at any time is
-there, and the layer stops at the Moon's edge, so nothing covers the Moon.
+Prominences glow in red hydrogen light (with weaker blue lines, and some
+yellow from helium), so they look pink once the corona is white. In the HDR
+stack they come mostly from the longest exposures not saturated there,
+where they are swollen and soft with a red glow round them; in the shortest
+exposures they are sharp. On the 2024 frames the edge of the prominence at
+5 o'clock spread over 2.5 double pixels in the HDR stack and 1.9-2.0 in
+single frames of 1/4000-1/1000 s.
+
+**Stack prominences** stacks the frames from the shortest aligned exposure
+up to **Longest exposure** stops longer (`--longest-stops`, default 2: on the
+2024 set the 7 frames from 1/1600 to 1/400 s), in a square round the Sun
+(`--radii`, 1.6 solar radii). It uses the HDR stack's own brightness
+matching, so the result is in the same units, and leaves each frame's Moon
+out as Stack does. It also measures how blurred each frame is, on the sharp
+step at its own Moon's edge (the distance between the points a quarter and
+three quarters of the way up the step; the slow glare inside the limb does
+not count): 1.30-1.46 px on the 2024 frames, 1.40 px the median. It writes
+`fits/<name>_prominence_hdr.fit` and `_prominence_weight.fit`.
+
+Then **Write final image** (on this tab or the Earthshine tab, or
+`totality final`) swaps the prominences in, in the linear stack before the
+stretch. In each stack a prominence's own light is what is left when the
+corona behind it is taken off; that corona is carried in from beside it, at
+the same distance from the Sun (near the limb the corona changes steeply
+with distance and slowly with angle). The HDR stack's prominence light is
+taken out and the prominence stack's, sharpened, put in, wherever either
+stack shows a prominence: light at least **Redness needed** times redder
+than the corona there and above 3 times the noise, on pieces that reach
+the limb. In the soft glow round them in the HDR stack (6-16 px on the
+2024 stack) only its colour excess is taken out, so the corona keeps its
+texture. Where the HDR stack has no data (saturated in every frame), the
+short frames fill it. Nothing changes inside the Moon (the one in the final
+image), so it still hides their bases.
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| **Look up to** (`--height`) | How far above the limb to look, in solar radii. | 0.3 |
-| **Red excess needed** (`--sensitivity`) | How far above the noise a pixel's red must stand. | 4 |
-| **Redness needed** (`--min-redness`) | How much redder than the corona a pixel must be. | 1.2 |
+| **Use the prominence stack** (`--off` turns it off) | Off, the final image keeps the HDR stack's own prominences. | on |
+| **Sharpening** (`--sharpen`) | Undoes the measured blur (Richardson-Lucy, up to 30 rounds). 0.5 brings out strands; 1 starts to show noise specks. | 0.5 |
+| **Structure** (`--structure`) | Brings out strands and loops inside them (the multi-scale method of Adaptive (MGN), on their own light). | 0 |
+| **Prominence brightness** (`--brightness`) | Their light against the corona's, before the stretch. They are far brighter than the corona, so at 1 their insides turn flat pink; 0.2-0.5 shows their structure and keeps the colour. | 1 |
+| **Redness needed** (`--min-redness`) | How much redder than the corona light must be to count. On the 2024 stack 99 % of the corona was within 1.08, and a faint prominence low by the limb reached 1.1-1.2. | 1.1 |
 | **Include the chromosphere** (`--no-chromosphere` leaves it out) | The thin pink rim along the limb. Left out, the bases of taller prominences stay. | on |
 | **Rim height** (`--chromosphere-arcsec`) | Red light lower than this counts as the rim. | 12 arcsec |
 
-The layer is transparent outside the prominences (TIFF and PNG), so it sits
-on top in Photoshop in Normal mode. **Write final image** on the
-Prominences tab (`totality final-prominences`) puts it on the final image
-from the Earthshine step, the last-written blend or natural layer
-(`--base`), or any picture (`--base-file`), in Normal mode by default, which
-keeps their colour over the bright inner corona.
+Within the first few pixels outside the limb (4 px on the 2024 stack), the
+final image takes the light from the earthshine stack and the corona
+continued in from further out (see *Earthshine*), so a prominence lower
+than that comes from there, not from the short frames.
+
+The command line can still write the prominences as a separate layer for
+Photoshop, transparent outside them (`totality prominences`, from the
+prominence stack if there is one), and put it on top of a picture
+(`totality final-prominences`).
 
 ## Picture formats
 
@@ -1283,6 +1315,25 @@ the finished image: Moon and corona stretched together from the stacks.
 | `--output`, `-o` | output file (.tif, .png or .jpg); default <name>_final.tif |
 | `--quiet` | print only the result, not each step |
 
+### `totality prominence-stack`
+
+stack the shortest exposures round the Sun; 'totality final' then swaps in their sharper prominences.
+
+| Option | What it does |
+| --- | --- |
+| `project` | project file (run 'totality stack' on it first) |
+| `--longest-stops` | frames from the shortest aligned exposure up to this many stops longer (default 2) |
+| `--radii` | the square stacked, in solar radii from the Sun's centre (default 1.6) |
+| `--settings-only` | only save the settings below for 'totality final' (no stacking) |
+| `--off` | 'totality final' uses the HDR stack's own prominences |
+| `--sharpen` | undo the blur measured on the Moon's edge: 0 off, 1 strongest (default 0.5) |
+| `--structure` | bring out strands and loops inside them: 0 off (default), 0.3-0.6 more texture |
+| `--brightness` | their brightness against the corona (default 1, as measured; 0.2-0.5 shows their structure) |
+| `--min-redness` | how much redder than the corona light must be to count as a prominence (default 1.1) |
+| `--no-chromosphere` | leave out the thin pink rim along the limb |
+| `--chromosphere-arcsec` | height of the rim left out by --no-chromosphere, arcsec (default 12) |
+| `--quiet` | print only the result, not each step |
+
 ### `totality prominences`
 
 find the prominences and write them as a layer (transparent elsewhere).
@@ -1292,7 +1343,7 @@ find the prominences and write them as a layer (transparent elsewhere).
 | `project` | project file (run 'totality stack' on it first) |
 | `--height` | how far above the solar limb to look, in solar radii (default 0.3) |
 | `--sensitivity` | red excess needed, in noise standard deviations (default 4; lower finds fainter ones) |
-| `--min-redness` | red/green ratio needed; the white corona is about 1 (default 1.2) |
+| `--min-redness` | how much redder than the corona light must be (default 1.1) |
 | `--no-chromosphere` | leave out the thin pink rim along the limb |
 | `--chromosphere-arcsec` | height of the rim left out by --no-chromosphere, arcsec (default 12) |
 | `--brightness` | brightness of the layer (1 = as measured) (default 1.0) |

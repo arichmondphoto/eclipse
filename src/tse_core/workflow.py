@@ -856,6 +856,7 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         params = replace(params, layers=())
     say("reading the HDR stack")
     data = load_hdr(path)
+    swap_project_prominences(path, project, data, say)
     es_rgb, es_head = read_fits(rgb_path)
     es_w, _ = read_fits(wpath)
     moon_data, _ = read_fits(mpath)
@@ -1066,13 +1067,209 @@ def _write_final(path, project, out, preview_side, output_file, name, say, recor
 # ---------------------------------------------------------------------------
 
 
-def load_sun_region(project_path):
-    """The HDR stack around the Sun (where prominences are), for quick, repeated runs."""
+@dataclass
+class ProminenceStackOptions:
+    longest_stops: float = 2.0  # frames up to this many stops longer than the shortest
+    radii: float = 1.6  # the square stacked, in solar radii from the Sun's centre
+
+
+def prominence_stack(project_path, opts: Optional[ProminenceStackOptions] = None, say: Optional[Say] = None,
+                     cancel=None) -> dict:
+    """Stack the shortest aligned exposures around the Sun for the prominences.
+
+    The prominences are sharpest in the shortest frames: in the HDR stack they come mostly from
+    the longest frames not saturated there, where they are swollen and soft (2024: edge widths
+    2.2-2.6 px in the 1/1600-1/1000 s frames, 3.25 px in the HDR stack). The frames are stacked
+    with the HDR stack's own brightness gains, so the result is in its units, each frame's Moon
+    left out as usual. On the way, each frame's blur is measured on its own Moon's edge; the
+    median is saved for the sharpening. Returns the project's ``prominence_stack`` entry."""
+    from .prominences import limb_blur
+    from .rawio import read_mosaic
+    from .stack import Match, StackParams, stack_frames
+
+    say = reporter(say, cancel)
+    o = opts or ProminenceStackOptions()
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    st = project.parameters.get("stack", {})
+    info_path = resolve(path, st.get("info"))
+    if not info_path:
+        raise WorkflowError("Stack the frames first (Stack tab): the prominence stack uses its brightness matching.")
+    info = json.loads(Path(info_path).read_text(encoding="utf-8"))
+    gains = {}
+    for m in info.get("matches", []):
+        m = dict(m)
+        if m.get("offsets") is not None:
+            m["offsets"] = tuple(m["offsets"])
+        gains[int(m["index"])] = Match(**m)
+    alignment, _ = load_alignment(path, st.get("align"))
+    frames, ref, infos, skipped = _frame_infos(project, alignment, False)
+    infos = [f for f in infos if f.index in gains and frames[f.index].exposure_s]
+    if not infos:
+        raise WorkflowError("No aligned frames with an exposure time to stack.")
+    t0 = min(frames[f.index].exposure_s for f in infos)
+    tmax = t0 * 2.0 ** o.longest_stops * 1.03  # a little over, for rounded shutter speeds
+    infos = sorted((f for f in infos if frames[f.index].exposure_s <= tmax), key=lambda f: frames[f.index].exposure_s)
+    say(f"prominence stack: {len(infos)} frame(s), {frames[infos[0].index].exposure_text} to "
+        f"{frames[infos[-1].index].exposure_text} s (up to {o.longest_stops:g} stops longer than the shortest)")
+    lights = [frames[f.index] for f in infos]
+    _locate_frames(path, lights)
+    try:
+        plan, crop_factor, _ = _calibrated_plan(path, project, lights, None, None, st.get("flat_mode", "master"),
+                                                say, out_dir=path.parent, name=path.stem)
+    except ValueError as exc:
+        raise WorkflowError(str(exc)) from exc
+    calibs = {fc.frame_index: fc for fc in plan.frames}
+    blurs = []
+
+    def measure(f, radiance, crop):
+        got = limb_blur(radiance, f.moon_x - crop[0], f.moon_y - crop[1], f.moon_r)
+        if got is not None:
+            blurs.append(got[0])
+            say(f"  {f.file_name}: blur at the Moon's edge {got[0]:.2f} px")
+
+    by_t = sorted(infos, key=lambda f: frames[f.index].exposure_s)
+    moon_frame = int(st.get("moon_frame")) if st.get("moon_frame") in [f.index for f in infos] else by_t[0].index
+    params = StackParams(crop_radii=o.radii, moon_frame=moon_frame)
+    fits_dir, json_dir = data_dirs(path)
+    name = f"{path.stem}_prominence"
+    try:
+        result, _h, _w = stack_frames(infos, lambda f: read_mosaic(frames[f.index].path), calibs,
+                                      tuple(alignment["image_size"]), ref, alignment.get("sun"), params,
+                                      out_dir=path.parent, name=name, image_crop=crop_factor, progress=say,
+                                      data_dirs=(fits_dir, json_dir), matches=gains, on_frame=measure)
+    except (RuntimeError, ValueError) as exc:
+        raise WorkflowError(str(exc)) from exc
+    sigma = float(np.median(blurs)) if blurs else None
+    if sigma is not None:
+        say(f"prominence stack: blur {sigma:.2f} px (median at the Moon's edge in {len(blurs)} frame(s))")
+    else:
+        say("prominence stack: the Moon's edge could not be measured; no sharpening")
+    entry = {**result.outputs, "frames": [f.index for f in infos], "longest_stops": o.longest_stops,
+             "radii": o.radii, "blur_px": sigma}
+    project.parameters["prominence_stack"] = entry
+    project.save(path)
+    return entry
+
+
+def prominence_params_from_project(project: EventProject):
+    """The Prominences tab's settings saved in the project (defaults where none)."""
+    from dataclasses import fields
+
+    from .prominences import ProminenceParams
+
+    saved = project.parameters.get("prominences", {}).get("params", {}) or {}
+    names = {f.name for f in fields(ProminenceParams)}
+    return ProminenceParams(**{k: v for k, v in saved.items() if k in names})
+
+
+def swap_project_prominences(path: Path, project: EventProject, data, say: Say, params=None) -> Optional[dict]:
+    """The prominence stack's prominences put into ``data.hdr`` in place (see
+    prominences.swap_prominences), if there is a prominence stack and it is switched on."""
+    from .enhance import Geometry
+    from .fits import read_fits
+    from .prominences import swap_prominences
+
+    ps = project.parameters.get("prominence_stack", {})
+    phdr, pw = resolve(path, ps.get("hdr")), resolve(path, ps.get("weight"))
+    if not (phdr and pw) or not ps.get("use", True):
+        return None
+    p = params or prominence_params_from_project(project)
+    prom, head = read_fits(phdr)
+    pweight, _ = read_fits(pw)
+    prom = np.moveaxis(np.asarray(prom, np.float32), 0, -1)
+    x0 = int(head.get("CROPX0", 0)) - int(data.header.get("CROPX0", 0))
+    y0 = int(head.get("CROPY0", 0)) - int(data.header.get("CROPY0", 0))
+    H, W = data.hdr.shape[:2]
+    ys, xs = slice(max(y0, 0), min(y0 + prom.shape[0], H)), slice(max(x0, 0), min(x0 + prom.shape[1], W))
+    if ys.stop <= ys.start or xs.stop <= xs.start:
+        say("prominences: the prominence stack does not overlap the HDR stack; not used")
+        return None
+    py, px = slice(ys.start - y0, ys.stop - y0), slice(xs.start - x0, xs.stop - x0)
+    h = data.header
+    g = Geometry(float(h["SUNX"]) - xs.start, float(h["SUNY"]) - ys.start, float(h["SUNR"]),
+                 float(h["MOONX"]) - xs.start, float(h["MOONY"]) - ys.start, float(h["MOONR"]))
+    hdr_sub, w_sub = data.hdr[ys, xs], data.weight[ys, xs]
+    return swap_prominences(hdr_sub, w_sub, prom[py, px], np.asarray(pweight, np.float32)[py, px], g, p,
+                            ps.get("blur_px"), float(h.get("PIXSCALE") or 2.4), say)
+
+
+def save_prominence_settings(project_path, params, use: bool = True) -> None:
+    """The Prominences tab's settings into the project, for Write final image (here and on the
+    Earthshine tab) and the command line's ``final``."""
+    from dataclasses import asdict
+
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    entry = dict(project.parameters.get("prominences", {}))
+    entry["params"] = asdict(params)
+    project.parameters["prominences"] = entry
+    if "prominence_stack" in project.parameters:
+        project.parameters["prominence_stack"]["use"] = bool(use)
+    project.save(path)
+
+
+def prominence_preview(project_path, params=None, say: Optional[Say] = None, cancel=None):
+    """The HDR stack round the Sun before and after the prominence stack's prominences go in, with
+    one quick stretch (display images, 0..1), and what was done. Nothing is written."""
+    from .prominences import ProminenceParams
+
+    say = reporter(say, cancel)
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    if not resolve(path, project.parameters.get("prominence_stack", {}).get("hdr")):
+        raise WorkflowError("Stack the prominences first (Stack prominences).")
+    say("reading the HDR stack")
+    data = load_hdr(path)
+    h = data.header
+    sx, sy, sr = float(h["SUNX"]), float(h["SUNY"]), float(h["SUNR"])
+    half = int(sr * 1.35)
+    ys = slice(max(0, int(sy) - half), min(data.hdr.shape[0], int(sy) + half))
+    xs = slice(max(0, int(sx) - half), min(data.hdr.shape[1], int(sx) + half))
+    before = data.hdr[ys, xs].copy()
+    p = params or ProminenceParams()
+    project.parameters.setdefault("prominence_stack", {})["use"] = True
+    info = swap_project_prominences(path, project, data, say, p)
+    after = data.hdr[ys, xs]
+    wb = np.array([float(h.get(k, 1.0)) for k in ("WBR", "WBG", "WBB")], np.float32)
+    lum = (before * wb).mean(axis=2)
+    top = float(np.percentile(lum[np.isfinite(lum)], 99.5))
+    show = lambda a: np.clip(np.arcsinh(30 * np.clip(a * wb, 0, None) / top) / math.asinh(30), 0, 1).astype(np.float32)
+    return show(before), show(after), info
+
+
+def load_sun_region(project_path, say: Optional[Say] = None):
+    """The stack around the Sun (where prominences are), for quick, repeated runs: the prominence
+    stack (Stack prominences) if there is one, else the HDR stack. Either way the Moon is the HDR
+    stack's, the one in the final image, which the prominences are cut at."""
+    from dataclasses import replace
+
+    from .fits import read_fits, read_fits_header
     from .prominences import sun_region
 
+    say = say or (lambda _m: None)
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    ps = project.parameters.get("prominence_stack", {})
+    phdr, pw = resolve(path, ps.get("hdr")), resolve(path, ps.get("weight"))
+    hdr_path = resolve(path, project.parameters.get("stack", {}).get("hdr"))
+    if phdr and pw and hdr_path:
+        main = read_fits_header(hdr_path)
+        data, head = read_fits(phdr)
+        weight, _ = read_fits(pw)
+        x0, y0 = int(head.get("CROPX0", 0)) - int(main.get("CROPX0", 0)), int(head.get("CROPY0", 0)) - int(main.get("CROPY0", 0))
+        head = dict(head, MOONX=float(main["MOONX"]) - x0, MOONY=float(main["MOONY"]) - y0, MOONR=float(main["MOONR"]))
+        region = sun_region(np.moveaxis(np.asarray(data, np.float32), 0, -1), np.asarray(weight, np.float32), head)
+        region = replace(region, origin=(region.origin[0] + x0, region.origin[1] + y0),
+                         canvas=(int(main["NAXIS2"]), int(main["NAXIS1"])), blur_px=ps.get("blur_px"),
+                         source=f"prominence stack ({len(ps.get('frames', []))} frames)")
+        say(f"prominences from the prominence stack ({len(ps.get('frames', []))} short frames"
+            + (f", blur {ps['blur_px']:.2f} px)" if ps.get("blur_px") else ")"))
+        return region
     data = load_hdr(project_path)
     region = sun_region(data.hdr, data.weight, data.header)
     del data
+    say("prominences from the HDR stack (Stack prominences for sharper ones from the short frames)")
     return region
 
 
@@ -1089,8 +1286,8 @@ def prominence_layer(project_path, params=None, output_file: Optional[str] = Non
     path = Path(project_path).resolve()
     p = params or ProminenceParams()
     if region is None:
-        say("reading the HDR stack")
-        region = load_sun_region(path)
+        say("reading the stack")
+        region = load_sun_region(path, say)
     say("finding prominences")
     result, layer, alpha = find_prominences(region, p)
     if preview:

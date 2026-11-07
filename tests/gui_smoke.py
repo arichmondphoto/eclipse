@@ -261,20 +261,24 @@ os.environ["STUB_SAVE"] = str(T / "out" / "from_file_final.tif")
 es.write_final()
 assert Path(es.final_path).name == "from_file_final.tif"
 assert EventProject.load(path).parameters["final"]["base_file"] == et.outputs["blend"]
-# Prominences on the real 2024 data: preview, layer as PNG, on top of the blend as a JPG.
+# Prominences on the real 2024 data. No RAW files here to stack the short frames, so the HDR stack
+# stands in for the prominence stack (the swap's mechanics, settings saved, the final image written).
 pt = win.prominences_tab
+pp = EventProject.load(path)
+st = pp.parameters["stack"]
+pp.parameters["prominence_stack"] = {"hdr": st["hdr"], "weight": st["weight"], "frames": [1, 2, 3], "blur_px": 1.4,
+                                     "longest_stops": 2.0}
+pp.save(path)
+win.reload_project()
+assert "3 frame(s)" in pt.stack_label.text() and "1.40 px" in pt.stack_label.text()
+pt.brightness.setValue(0.3)
 pt.preview()
-assert pt.region is not None and pt._shown
+assert pt._shown
 print("prominences:", pt.log.lines[-1].splitlines()[0])
-os.environ["STUB_SAVE"] = str(T / "out" / "proms")  # no extension typed: the chosen type (stub: TIFF)
-pt.write_layer()
-assert pt.layer_path.endswith(".tif") and Path(pt.layer_path).exists()
-pt.base.setCurrentIndex(pt.base.findData("blend"))
-pt.preview_final()
-assert pt._final_shown
 os.environ["STUB_SAVE"] = str(T / "out" / "with_proms.jpg")
 pt.write_final()
-assert pt.final_path.endswith("with_proms.jpg") and Path(pt.final_path).exists()
+assert es.final_path.endswith("with_proms.jpg") and Path(es.final_path).exists()
+assert EventProject.load(path).parameters["prominences"]["params"]["brightness"] == 0.3
 # The enhance layers as PNG.
 os.environ["STUB_SAVE"] = str(T / "out" / "pngs.png")
 et.run()
