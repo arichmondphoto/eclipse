@@ -33,11 +33,9 @@ a flat), since every capture program writes its headers a little differently.
 
 ## Prominences from the frames left out near the contacts
 
-Built 7 Nov 2026: Stack prominences (the short aligned frames, sharpened with the blur measured on
-the Moon's edge, swapped into the final image before the stretch). Not built: also using the
+Built 7 Nov 2026: Stack prominences (the short aligned frames), used to measure how much softer
+each prominence is in the HDR stack, which Write final image undoes. Not built: also using the
 frames marked as excluded near the contacts (on the 2024 set frames 0-4, 1/6400-1/2000 s, 30-35 s
 after second contact), which Align leaves out. They would need aligning to the existing reference
 (shift only when no field rotation is applied; a Moon fit for each), and brightness matching of
-their own, since the HDR stack has no gains for them. Also not built: prominences lower than the
-earthshine handover band (4 px on the 2024 stack) from the short frames; there the final image
-takes the light from the earthshine stack and the corona continued in from further out.
+their own, since the HDR stack has no gains for them.

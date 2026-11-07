@@ -37,7 +37,7 @@ step saves its results into one project file (`<event>/<event>.json`).
 | `src/tse_core/stack.py` | Moon-aware HDR stacking with measured brightness matching |
 | `src/tse_core/enhance.py` | Stretch and filter layers; `MoonInput` lets the Moon be drawn with the same curve |
 | `src/tse_core/earthshine.py` | Moon-aligned stack, glare removal (limb terms, prominence fan), lunar surface, `merge_moon` (Moon into the HDR stack) |
-| `src/tse_core/prominences.py` | Prominences: blur measured on the Moon's edge, their own light against the corona behind them, `swap_prominences` (the short frames' prominences into the HDR stack); the older layer found by colour |
+| `src/tse_core/prominences.py` | Prominences: blur measured on the Moon's edge, their own light against the corona behind them, `sharpen_prominences` (the HDR stack's prominences deconvolved by the extra blur measured against the short frames); the older layer found by colour |
 | `src/tse_core/viewzoom.py` | Zoom and pan arithmetic for the GUI's picture views (no Qt) |
 | `siril/Totality.py` | The Siril window, one tab per step |
 | `tools/cli_reference.py` | Generates README's command-line reference from the parser |

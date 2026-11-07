@@ -17,7 +17,7 @@ Four tabs, one per step, each saving into the event's project file:
    reduced-size preview, then the full-size 16-bit TIFF layers.
 5. Earthshine: the lunar surface from a Moon-aligned stack of the long
    exposures, as a layer that fits the corona layers' black disc.
-6. Prominences: the short exposures stacked round the Sun, their sharper prominences swapped into the final image
+6. Prominences: the HDR stack's prominences sharpened by as much as the short exposures show they are soft
    and put on top of the final image.
 
 Picture outputs can be 16-bit TIFF, 16-bit PNG or 8-bit JPG, all 300 dpi.
@@ -2325,7 +2325,7 @@ class EarthshineTab(StepTab):
 
 
 class ProminencesTab(StepTab):
-    """Stack the short exposures round the Sun, and put their sharper prominences into the final image."""
+    """Stack the short exposures round the Sun, and sharpen the HDR stack's prominences by what they show."""
 
     def __init__(self, window: "MainWindow") -> None:
         super().__init__(window)
@@ -2387,25 +2387,27 @@ class ProminencesTab(StepTab):
         self.results_layout.addWidget(self.view, 1)
 
         _tip(sbox, "The prominences are sharpest in the shortest exposures: in the HDR stack they come mostly from "
-             "the longest frames not saturated there, where they are swollen and soft. Stack prominences stacks the "
-             "short frames round the Sun, with the HDR stack's own brightness matching, and measures how blurred "
-             "they are on the Moon's sharp edge. Needs the HDR stack (Stack tab).")
+             "the longest frames not saturated there, where they are soft. Stack prominences stacks the short "
+             "frames round the Sun, with the HDR stack's own brightness matching, and measures how blurred they are "
+             "on the Moon's sharp edge. They are then used to measure how much softer the HDR stack's prominences "
+             "are, which Write final image undoes. Needs the HDR stack (Stack tab).")
         _tip(self.stops, "Which frames go in: from the shortest aligned exposure up to this many stops longer. "
              "2 (default) keeps the sharpest; 3-4 adds frames for less noise, a little softer. 0: the shortest "
              "exposure alone.", sf)
         _tip(self.stack_btn, "Stacks the short frames round the Sun (a few minutes) and saves the result with the "
              "project. Write final image then uses it.")
         _tip(box, "Write final image (here or on the Earthshine tab, where 'Use the prominence stack' turns it on "
-             "or off) swaps the HDR stack's soft prominences for the prominence stack's sharper ones, before the "
-             "stretch: the corona behind them and the Moon are left as they are, and the Moon still hides their "
-             "bases.")
-        _tip(self.sharpen, "Undoes the blur measured on the Moon's edge. 0.5 (default) brings out strands; 1 "
-             "sharper but starts to show noise specks; 0 off.", f)
-        _tip(self.structure, "Brings out fine strands and loops inside the prominences. 0 (default) off; 0.3-0.6 "
-             "for more texture. Goes well with Sharpening 0.5.", f)
+             "or off) sharpens the HDR stack's own prominences before the stretch, by as much as the short frames "
+             "show they are soft (measured for each prominence). The corona round them and the Moon are left as "
+             "they are.")
+        _tip(self.sharpen, "0.5 (default): the prominences as sharp as in the short frames. 1: sharper still (also "
+             "undoes the lens and air blur measured on the Moon's edge), a little noisier in faint ones. 0: as in "
+             "the HDR stack.", f)
+        _tip(self.structure, "Brings out fine strands and loops inside the prominences. 0 (default) off; 0.3 with "
+             "Sharpening 0.5 works well; more for stronger texture.", f)
         _tip(self.brightness, "How bright the prominences are against the corona. They are far brighter than the "
-             "corona, so at 1 (as measured) their insides turn flat pink: 0.2-0.5 shows their structure and keeps "
-             "the colour. Changes only the prominences.", f)
+             "corona, so at 1 (as measured) their insides turn flat pink: about 0.5 shows their structure. Much "
+             "lower turns them pale. Changes only the prominences.", f)
         _tip(self.min_redness, "How much redder than the corona light must be to count as a prominence. 1.1 "
              "(default) catches faint ones low by the limb; raise to 1.2-1.3 if patches of corona turn pink.", f)
         _tip(self.chromo, "The chromosphere is the thin pink rim along the edge of the Sun, seen near second and "

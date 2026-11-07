@@ -280,64 +280,6 @@ def test_prominence_layer_from_the_prominence_stack(tmp_path, monkeypatch):
     assert np.percentile(lay[corona][:, :3].max(axis=1), 99) < 0.05   # the white corona taken off
 
 
-def test_swap_puts_the_short_frames_prominences_into_the_hdr_stack():
-    """The HDR stack's prominences are swollen and soft (2024, 5 o'clock: edge 80-20 % over 2.49
-    superpixels against 1.9-2.0 in the short frames, and a red glow 1 % of the peak 3-8 px out);
-    the prominence stack's are sharp but noisier. The swap takes the HDR stack's prominence light
-    out and puts the prominence stack's in, linear: the corona (green, and red and blue in their
-    ratio to it) is left as it was, nothing changes on the Moon, and where the HDR stack had no
-    data the short frames fill it."""
-    from tse_core.prominences import ProminenceParams, swap_prominences
-
-    rng = np.random.default_rng(5)
-    rgb, wt, head, r, phi = _hdr()
-    corona = rgb[..., 1].copy()
-    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    # 15 px tall: within the default search height (0.3 solar radii; 2024: prominences 30-35 px of 413)
-    shape = ((r > R) & (r < R + 15) & (np.abs(((phi - 90 + 180) % 360) - 180) < 5)).astype(np.float32) * 0.6
-    sharp = ndimage.gaussian_filter(shape, 0.8)
-    # The HDR stack's: wider, with a 1 % glow; scaled from the 2024 stack to this Sun (60 px against
-    # 413): blur 1.6 px and glow 3 px here are 11 and 21 px there (measured glow: 6-16 px).
-    soft = ndimage.gaussian_filter(shape, 1.6) + 0.01 * ndimage.gaussian_filter(shape, 3.0)
-    base = np.stack([corona, corona, corona], axis=-1)
-    on_moon = np.hypot(xx - MX, yy - MY) < MR
-    hdr = base.copy()
-    hdr[..., 0] += soft
-    hdr[..., 2] += 0.35 * soft
-    prom = base.copy()
-    prom[..., 0] += sharp
-    prom[..., 2] += 0.35 * sharp
-    prom += rng.normal(0, 4e-4, prom.shape).astype(np.float32)
-    hdr[on_moon] = 0.0
-    prom[on_moon] = 0.0
-    weight = np.ones((H, W), np.float32)
-    hole = (np.abs(yy - (SY + R + 6)) < 1) & (np.abs(xx - SX) < 1)   # saturated in every long frame
-    hdr[hole] = 0.0
-    weight[hole] = 0.0
-    before = hdr.copy()
-    g = __import__("tse_core.enhance", fromlist=["Geometry"]).Geometry(SX, SY, R, MX, MY, MR)
-    info = swap_prominences(hdr, weight, prom, np.ones((H, W), np.float32), g,
-                            ProminenceParams(sharpen=0.0, structure=0.0))
-    assert info["count"] >= 1
-    # The prominence now has the short frames' shape (red over the corona).
-    red = hdr[..., 0] - hdr[..., 1]
-    # (Not the pixel touching the Moon: the corona behind it is carried in from beside it at the same
-    # distance, partly over the Moon; the final image replaces it anyway, see merge_moon's handover.)
-    by_moon = np.hypot(xx - MX, yy - MY) < MR + 1
-    ray = (np.abs(xx - SX) < 0.5) & (yy > SY + R) & (yy < SY + R + 30) & ~by_moon
-    got, want = red[ray], sharp[ray]
-    assert np.max(np.abs(got - want)) < 0.06
-    halo = (r > R + 16) & (r < R + 24) & (np.abs(((phi - 90 + 180) % 360) - 180) < 5)
-    # The HDR stack's glow gone: left only what carrying the corona across the prominence (10 deg)
-    # misses of its fine structure, which varies by a few % over that angle (here 0.03 per mode).
-    assert (np.abs(red - sharp)[halo] < 0.05 * corona[halo]).all()
-    # The corona untouched away from the prominence, in every colour (by it, the green changes too:
-    # prominences have some green light of their own, helium's yellow line).
-    away = (np.abs(((phi - 90 + 180) % 360) - 180) > 30) & (r > R + 3)
-    assert np.abs(hdr[away] - before[away]).max() < 1e-6
-    assert np.array_equal(hdr[on_moon], before[on_moon])          # nothing on the Moon
-    assert weight[hole].min() > 0 and hdr[hole][:, 0].min() > 0  # filled from the short frames
-
 
 def test_cli_prominence_stack_and_final_settings(tmp_path, monkeypatch, capsys):
     """totality prominence-stack: stacks the short frames and saves the settings 'totality final' uses."""
@@ -354,51 +296,6 @@ def test_cli_prominence_stack_and_final_settings(tmp_path, monkeypatch, capsys):
     assert EventProject.load(path).parameters["prominence_stack"]["use"] is False
 
 
-def test_swap_leaves_no_line_where_the_short_frames_start():
-    """Andy, Nov 2026: stepped pale lines in the prominences, which MGN made stand out. On his 3
-    o'clock prominence the short frames have no data for 7 px outside the final image's limb (their
-    Moon covered it), and their first pixels after that are darkened by the Moon's blurred edge.
-    The corona behind the prominence was measured in each stack separately, and in the short
-    frames it was too dark there: the swap put in 0.16 too much (at a pixel of 1.1-1.3). Both
-    stacks are in the same units with the same corona, so the HDR stack's corona is used for both,
-    and the short frames' pixels by their own Moon's edge are not used."""
-    from tse_core.enhance import Geometry
-    from tse_core.prominences import ProminenceParams, swap_prominences
-
-    rgb, wt, head, r, phi = _hdr()
-    corona = rgb[..., 1].copy()
-    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    shape = ((r > R) & (r < R + 15) & (np.abs(((phi - 90 + 180) % 360) - 180) < 5)).astype(np.float32) * 0.6
-    sharp = ndimage.gaussian_filter(shape, 0.8)
-    soft = ndimage.gaussian_filter(shape, 1.6)
-    base = np.stack([corona, corona, corona], axis=-1)
-    d_moon = np.hypot(xx - MX, yy - MY) - MR
-    # Green light too, as on the 2024 stack (helium, and their brightness: G 1.1 against 0.6 beside)
-    hdr = base.copy()
-    hdr += soft[..., None] * np.float32([1.0, 0.5, 0.35])
-    prom = base.copy()
-    prom += sharp[..., None] * np.float32([1.0, 0.5, 0.35])
-    hdr[d_moon < 0] = 0.0
-    pw = np.ones((H, W), np.float32)
-    gap = d_moon < 4.0                                       # the short frames' Moon covered more
-    prom[gap] = 0.0
-    pw[gap] = 0.0
-    edge = (d_moon >= 4.0) & (d_moon < 6.0)                  # darkened by their Moon's blurred edge
-    prom[edge] *= 0.7
-    prom += np.random.default_rng(7).normal(0, 4e-3, prom.shape).astype(np.float32) * (pw > 0)[..., None]
-    before = hdr.copy()
-    swap_prominences(hdr, np.ones((H, W), np.float32), prom, pw, Geometry(SX, SY, R, MX, MY, MR),
-                     ProminenceParams(sharpen=0.0, structure=0.0), blur_px=0.8)
-    # At brightness 1, unsharpened, a swapped pixel is the short frames' pixel in place of the HDR
-    # stack's (a corona estimate from either stack does not come into it): every pixel lies
-    # between the two (in green, which the glow round them leaves alone). The old way put the
-    # short frames' own, darker corona estimate in, and overshot.
-    use = (d_moon > 0) & (pw > 0) & (r < R + 30)
-    lo = np.minimum(before[..., 1], prom[..., 1])[use]
-    hi = np.maximum(before[..., 1], prom[..., 1])[use]
-    got = hdr[..., 1][use]
-    assert (got > lo - 1e-3).all() and (got < hi + 1e-3).all(), float(np.max(np.maximum(lo - got, got - hi)))
-
 
 def test_moon_cover_says_when_the_chromosphere_is_hidden():
     """Andy, Nov 2026: Include the chromosphere and Rim height changed nothing. In his final image
@@ -413,35 +310,72 @@ def test_moon_cover_says_when_the_chromosphere_is_hidden():
     assert moon_cover_px(near_contact) < 0
 
 
-def test_brightness_applies_where_the_short_frames_have_no_data():
-    """Andy's 2024 frames: at Prominence brightness 0.3 a straight edge crossed the 5 o'clock
-    prominence where the short frames' data begins; by the limb, where the HDR stack's prominence
-    stays, it stayed at full brightness. The setting applies there too."""
-    from tse_core.enhance import Geometry
-    from tse_core.prominences import ProminenceParams, swap_prominences
-
+def _soft_and_sharp(seed=5, extra=1.0, gap=0.0):
+    """The 2024 situation, scaled: a prominence as bright as on the 2024 stack (brighter than the
+    corona beside it), sharp in the short frames (with their noise), softer by ``extra`` px in the
+    HDR stack; the short frames' Moon covering ``gap`` px more outside the final image's limb."""
     rgb, wt, head, r, phi = _hdr()
     corona = rgb[..., 1].copy()
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    # As bright as on the 2024 stack: brighter than the corona beside it (its green alone 1.1-1.3
-    # against 0.6), here twice the corona by the limb.
-    shape = ((r > R) & (r < R + 15) & (np.abs(((phi - 90 + 180) % 360) - 180) < 5)).astype(np.float32) * 2.5
+    strands = (np.sin(np.arctan2(yy - SY, xx - SX) * 400) > 0.3)          # fine structure across it
+    shape = ((r > R) & (r < R + 15) & (np.abs(((phi - 90 + 180) % 360) - 180) < 6) & strands).astype(np.float32) * 2.5
+    colour = np.float32([1.0, 0.5, 0.35])                                 # with some green (helium)
+    sharp = ndimage.gaussian_filter(shape, 0.8)
     base = np.stack([corona, corona, corona], axis=-1)
+    hdr = base + ndimage.gaussian_filter(sharp, extra)[..., None] * colour
+    prom = base + sharp[..., None] * colour
+    prom += np.random.default_rng(seed).normal(0, 4e-3, prom.shape).astype(np.float32)
     d_moon = np.hypot(xx - MX, yy - MY) - MR
-    soft = ndimage.gaussian_filter(shape, 1.6)
-    hdr = base + soft[..., None] * np.float32([1.0, 0.5, 0.35])
-    prom = base + ndimage.gaussian_filter(shape, 0.8)[..., None] * np.float32([1.0, 0.5, 0.35])
     hdr[d_moon < 0] = 0.0
     pw = np.ones((H, W), np.float32)
-    pw[d_moon < 4.0] = 0.0
-    prom[d_moon < 4.0] = 0.0
+    pw[d_moon < gap] = 0.0
+    prom[d_moon < gap] = 0.0
+    return hdr, prom, pw, sharp, base, colour, r, phi, d_moon, xx, yy
+
+
+def test_sharpening_undoes_the_hdr_stacks_extra_blur():
+    """Andy, Nov 2026: the prominences are already in the HDR stack (little noise, right down to the
+    limb), only soft; use the short frames to sharpen them, not to replace them. The blur that turns
+    the short frames' prominence into the HDR stack's is measured (2024: 0.6-1.3 px) and undone in
+    the HDR stack only where the prominences are. Sharpening 0.5 brings it to the short frames'
+    sharpness; the corona elsewhere and the Moon are left as they were."""
+    from tse_core.enhance import Geometry
+    from tse_core.prominences import ProminenceParams, sharpen_prominences
+
+    hdr, prom, pw, sharp, base, colour, r, phi, d_moon, xx, yy = _soft_and_sharp(extra=1.0, gap=4.0)
     before = hdr.copy()
-    swap_prominences(hdr, np.ones((H, W), np.float32), prom, pw, Geometry(SX, SY, R, MX, MY, MR),
-                     ProminenceParams(sharpen=0.0, brightness=0.3), blur_px=0.8)
-    band = (np.abs(xx - SX) < 0.5) & (d_moon > 1) & (d_moon < 3.5) & (yy > SY)
-    light_before = (before[..., 0] - before[..., 1] * 0)[band] - corona[band]
-    light_after = hdr[..., 0][band] - corona[band]
-    # (0.3 of it, to the accuracy of the corona behind it carried in from beside it, which by the
-    # Moon is drawn partly from over the Moon: within a few % of the prominence here.)
-    ratio = light_after / light_before
-    assert (ratio > 0.25).all() and (ratio < 0.35).all(), np.round(ratio, 3)
+    info = sharpen_prominences(hdr, np.ones((H, W), np.float32), prom, pw, Geometry(SX, SY, R, MX, MY, MR),
+                               ProminenceParams(sharpen=0.5), blur_px=0.8)
+    assert info["blurs"] and abs(info["blurs"][0] - 1.0) < 0.25, info
+    prom_zone = (r > R + 5) & (r < R + 13) & (np.abs(((phi - 90 + 180) % 360) - 180) < 4)
+    want = base[..., 0] + sharp * colour[0]
+    err_before = np.abs(before[..., 0] - want)[prom_zone].mean()
+    err_after = np.abs(hdr[..., 0] - want)[prom_zone].mean()
+    assert err_after < 0.5 * err_before, (err_before, err_after)     # strands brought back
+    away = (np.abs(((phi - 90 + 180) % 360) - 180) > 30) & (d_moon > 0)
+    assert np.abs(hdr[away] - before[away]).max() < 1e-6              # the corona elsewhere untouched
+    assert np.array_equal(hdr[d_moon < 0], before[d_moon < 0])         # nothing on the Moon
+    # Where the short frames have no data (their Moon), the HDR stack's prominence is still there.
+    band = (d_moon > 0.5) & (d_moon < 3.5) & (np.abs(xx - SX) < 2) & (yy > SY)
+    kept = (hdr[..., 0] - base[..., 0])[band].sum() / (before[..., 0] - base[..., 0])[band].sum()
+    assert kept > 0.8, kept
+
+
+def test_prominence_brightness_takes_their_glow_too():
+    """At Prominence brightness 0.3 a pale outline was left round the prominences: their faint red
+    glow is below the colour test, so it stayed at full brightness. Their glow's colour excess is
+    dimmed too (the corona's own light there is left)."""
+    from tse_core.enhance import Geometry
+    from tse_core.prominences import ProminenceParams, sharpen_prominences
+
+    hdr, prom, pw, sharp, base, colour, r, phi, d_moon, xx, yy = _soft_and_sharp(extra=1.0)
+    hdr += (0.02 * ndimage.gaussian_filter(sharp, 4.0))[..., None] * colour   # a faint glow round it
+    before = hdr.copy()
+    sharpen_prominences(hdr, np.ones((H, W), np.float32), prom, pw, Geometry(SX, SY, R, MX, MY, MR),
+                        ProminenceParams(sharpen=0.0, brightness=0.3), blur_px=0.8)
+    ring = (r > R + 17) & (r < R + 21) & (np.abs(((phi - 90 + 180) % 360) - 180) < 4)
+    red_before = (before[..., 0] - before[..., 1])[ring]
+    red_after = (hdr[..., 0] - hdr[..., 1])[ring]
+    assert red_before.max() > 0.01
+    assert (red_after < 0.5 * red_before + 2e-3).all()
+    assert np.allclose(hdr[..., 1][ring], before[..., 1][ring], atol=1e-6)    # the corona's own light kept

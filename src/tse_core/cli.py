@@ -310,8 +310,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     p = sub.add_parser("prominence-stack",
-                       help="stack the shortest exposures round the Sun; 'totality final' then swaps in their sharper "
-                            "prominences")
+                       help="stack the shortest exposures round the Sun; 'totality final' then sharpens the HDR stack's "
+                            "prominences by as much as they show")
     p.add_argument("project", help="project file (run 'totality stack' on it first)")
     p.add_argument("--longest-stops", type=float, default=2.0,
                    help="frames from the shortest aligned exposure up to this many stops longer (default 2)")
@@ -319,9 +319,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="the square stacked, in solar radii from the Sun's centre (default 1.6)")
     p.add_argument("--settings-only", action="store_true",
                    help="only save the settings below for 'totality final' (no stacking)")
-    p.add_argument("--off", action="store_true", help="'totality final' uses the HDR stack's own prominences")
+    p.add_argument("--off", action="store_true", help="'totality final' leaves the HDR stack's prominences as they are")
     p.add_argument("--sharpen", type=float, default=0.5,
-                   help="undo the blur measured on the Moon's edge: 0 off, 1 strongest (default 0.5)")
+                   help="0.5: as sharp as the short frames (default); 1: also undo the blur measured on the Moon's edge; 0 off")
     p.add_argument("--structure", type=float, default=0.0,
                    help="bring out strands and loops inside them: 0 off (default), 0.3-0.6 more texture")
     p.add_argument("--brightness", type=float, default=1.0,

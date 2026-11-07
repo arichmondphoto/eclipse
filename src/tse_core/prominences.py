@@ -402,21 +402,46 @@ def corona_behind(rgb: np.ndarray, zone: np.ndarray, usable: np.ndarray, g: Geom
     return out
 
 
-def swap_prominences(hdr: np.ndarray, weight: np.ndarray, prom: np.ndarray, prom_weight: np.ndarray,
-                     g: Geometry, params: Optional[ProminenceParams] = None, blur_px: Optional[float] = None,
-                     pixscale: float = 2.4, say=None) -> dict:
-    """Put the prominence stack's prominences into the HDR stack, in place (linear, the same units).
+def extra_blur(eh: np.ndarray, ep: np.ndarray, ok: np.ndarray, top: float = 4.0) -> Optional[tuple[float, float, float]]:
+    """How much softer a prominence is in the HDR stack than in the short frames: the Gaussian sigma
+    (px) and factor by which the short frames' prominence light ``ep`` best gives the HDR stack's
+    ``eh`` (red), over ``ok`` (both have data, clear of the edges), and the misfit (rms, share of
+    the HDR stack's). On the 2024 stack: 0.9 px (5 % misfit), 1.3 px (11 %), 0.6 px (22 %)."""
+    best = None
+    for sg in np.arange(0.0, top + 1e-9, 0.1):
+        m = ndimage.gaussian_filter(ep, sg) if sg > 0 else ep
+        okk = ok & (ndimage.distance_transform_edt(ok) > 3 * max(sg, 0.5))
+        if okk.sum() < 30:
+            continue
+        den = float(np.sum(m[okk] ** 2))
+        if den <= 0:
+            continue
+        a = float(np.sum(m[okk] * eh[okk]) / den)
+        err = float(np.sqrt(np.mean((a * m[okk] - eh[okk]) ** 2) / max(np.mean(eh[okk] ** 2), 1e-30)))
+        if best is None or err < best[0]:
+            best = (err, float(sg), a)
+    if best is None:
+        return None
+    return best[1], best[2], best[0]
 
-    In the HDR stack the prominences come mostly from the longest frames not saturated there,
-    swollen and soft with a red glow; the short frames show them sharp. In both stacks their own
-    light is the light left when the corona (white: its red and blue in the corona's own ratio to
-    green) is taken off, so swapping it leaves the corona as it was: the HDR stack's prominence
-    light is taken out and the prominence stack's, sharpened with the blur measured on the Moon's
-    edge, put in, each where it stands above its own noise (0 within 3x the noise, all of it by
-    5x), nowhere else. Where the HDR stack has no data (saturated in every frame) the prominence
-    stack's pixels are used. Never on the Moon (the HDR stack's, which the final image draws):
-    nothing changes inside its limb. ``hdr``, ``prom``: (h, w, 3) camera RGB over the same pixels.
-    Returns what was done, for the log.
+
+def sharpen_prominences(hdr: np.ndarray, weight: np.ndarray, prom: Optional[np.ndarray],
+                        prom_weight: Optional[np.ndarray], g: Geometry, params: Optional[ProminenceParams] = None,
+                        blur_px: Optional[float] = None, pixscale: float = 2.4, say=None) -> dict:
+    """Sharpen the HDR stack's own prominences, in place (linear, before the stretch).
+
+    The prominences are already in the HDR stack, with little noise and right down to the limb, but
+    soft: there they come mostly from the longest frames not saturated there. The short frames
+    (the prominence stack) show how soft: for each prominence, the blur that turns their sharper
+    version into the HDR stack's is measured (2024: 0.6-1.3 px), and only where the prominences are
+    is the HDR stack's prominence light deconvolved (Richardson-Lucy). Sharpening 0.5 undoes that
+    extra blur (as sharp as the short frames, with the HDR stack's low noise); 1 also undoes the
+    blur measured on the Moon's edge (the lens and the air). A prominence's own light is the stack
+    minus the corona behind it, carried in from beside it, so the corona is left as it is; it is
+    found by colour (redder than the corona by ``min_redness`` and above 3x the noise, on pieces
+    that reach the limb). Then Structure (MGN on their light) and Prominence brightness. Where the
+    HDR stack has no data (saturated in every frame) the short frames fill it. Nothing changes
+    inside the Moon. Returns what was done, for the log.
     """
     p = params or ProminenceParams()
     say = say or (lambda _m: None)
@@ -425,105 +450,101 @@ def swap_prominences(hdr: np.ndarray, weight: np.ndarray, prom: np.ndarray, prom
     r = np.hypot(xx - g.sun_x, yy - g.sun_y)
     d_moon = np.hypot(xx - g.moon_x, yy - g.moon_y)
     outside = d_moon > g.moon_r
-    both = outside & (weight > 0) & (prom_weight > 0) & np.isfinite(hdr).all(axis=2) & np.isfinite(prom).all(axis=2)
-    # The whole prominence stack's square (no height limit: a limit would cut a tall prominence's
-    # glow), including where its frames' Moons covered the limb.
-    pys, pxs = np.nonzero(prom_weight > 0)
-    square = np.zeros((h, w), bool)
-    if pys.size:
-        square[pys.min():pys.max() + 1, pxs.min():pxs.max() + 1] = True
-    search = outside & square
-    plain = both & search & (d_moon > g.moon_r + 2)
-    eh, nh, krh, kbh = _emission(np.nan_to_num(hdr), r, g.sun_r, search, plain, p.min_redness)
-    ep, npn, krp, kbp = _emission(np.nan_to_num(prom), r, g.sun_r, search, plain, p.min_redness)
-    tol = max(p.min_redness - 1.0, 0.0)  # how much redder than the corona (Redness 1.2: 20 %)
-    ch = (krh + kbh) * np.nan_to_num(hdr[..., 1])
-    cp = (krp + kbp) * np.nan_to_num(prom[..., 1])
-    # One weight for both: where either stack shows a prominence, its light is the short frames'.
-    # (Found by colour: redder than the corona there, see _significance.)
+    have_p = np.zeros((h, w), bool) if prom is None else (prom_weight > 0) & np.isfinite(prom).all(axis=2)
+    # Holes in the HDR stack (saturated in every frame) filled from the short frames.
+    holes = outside & ~(weight > 0) & have_p
+    if holes.any():
+        hdr[holes] = prom[holes]
+        weight[holes] = prom_weight[holes]
     vh = outside & (weight > 0) & np.isfinite(hdr).all(axis=2)
-    vp = outside & (prom_weight > 0) & np.isfinite(prom).all(axis=2)
-    sw = np.maximum(_significance(eh, nh, ch, tol, vh) * vh, _significance(ep, npn, cp, tol, vp) * vp)
-    sw[~search] = 0.0
-    # Prominences stand on the limb: pieces that come no nearer than a tenth of the Sun's radius
-    # (specks far out in the corona or the sky) are left alone.
+    search = outside & (r < g.sun_r * 1.6)
+    plain = vh & search & (d_moon > g.moon_r + 2)
+    ec, nh, kr, kb = _emission(np.nan_to_num(hdr), r, g.sun_r, search, plain, p.min_redness)
+    tol = max(p.min_redness - 1.0, 0.0)
+    sw = _significance(ec, nh, (kr + kb) * np.nan_to_num(hdr[..., 1]), tol, vh) * vh
     lab, n = ndimage.label(sw > 0, structure=np.ones((3, 3)))
     if n:
         near = np.zeros(n + 1, bool)
         near[1:] = ndimage.minimum(r - g.sun_r, lab, np.arange(1, n + 1)) < 0.1 * g.sun_r
         sw *= near[lab]
-    sp = sw
-    # The HDR stack's own soft glow round them (2024: 1 % of the peak 3-8 superpixels out) is often
-    # fainter than the corona's colour tolerance: its light is taken out too wherever it is above
-    # its noise, within 5 % of the Sun's radius of a prominence (only taken out: the short frames'
-    # light goes in where it counts as prominence, not their noise).
+    if not (sw > 0).any():
+        say("prominences: none found to sharpen")
+        return {"count": 0, "pixels": 0, "filled_px": int(holes.sum()), "blurs": []}
+    # Room round them for the deconvolution and their glow: 5 % of the Sun's radius.
     reach = max(2, int(round(0.05 * g.sun_r)))
-    grown = ndimage.binary_dilation(sw > 0, iterations=reach)
-    lum_h = ndimage.gaussian_filter(eh[..., 0] + eh[..., 2], 0.7)
-    glow = grown & search & (lum_h > 3.0 * nh)
-    wh = np.maximum(sw, glow.astype(np.float32))
-    # There, their own light in every colour (hydrogen's red and blue, and helium's yellow, partly
-    # in green) against the corona behind them, carried in from beside them: so their brightness
-    # can be set without changing their colour.
-    zone = ndimage.binary_dilation(wh > 0, iterations=2) & search
-    use_h = outside & (weight > 0) & np.isfinite(hdr).all(axis=2) & ~zone
-    eh_colour = eh  # the HDR stack's red and blue beyond the corona's colour (green 0)
-    # The corona behind them from the HDR stack (clean) for both stacks: they are in the same units
-    # with the same corona, so at brightness 1 a swapped pixel is simply the short frames' pixel.
-    # (From each stack separately, the short frames' estimate by their own Moon's edge came out
-    # too dark, and the swap overshot: stepped lines, on Andy's 2024 stack +0.16 at 1.1-1.3.)
-    bg = corona_behind(hdr, zone, use_h, g)
+    zone = ndimage.binary_dilation(sw > 0, iterations=reach) & search
+    bg = corona_behind(hdr, zone, vh & ~zone, g)
     eh = np.where(zone[..., None], np.nan_to_num(hdr) - bg, 0.0).astype(np.float32)
-    ep = np.where(zone[..., None], np.nan_to_num(prom) - bg, 0.0).astype(np.float32)
-    # The short frames' pixels next to where they have no data (their own Moon's edge, blurred
-    # into them: on the 2024 stack 4-6 % darker for 3 px) are not used: within 3x the measured
-    # blur, the HDR stack's stay.
-    have_p = (prom_weight > 0) & np.isfinite(prom).all(axis=2)
-    clear = ndimage.distance_transform_edt(have_p) > 3.0 * float(blur_px or 1.0)
-    sw_all = sw.copy()  # where either stack shows a prominence
-    sw, wh = sw * clear, wh * clear  # (where the short frames have no data, the HDR stack's stays)
-    if p.sharpen > 0 and blur_px:
-        its = int(round(p.sharpen * 30))
-        bias = 3.0 * float(np.median(npn[search]))
+    # Each prominence's extra blur, from the short frames (where they have data, clear of their
+    # own Moon's blurred edge: 3x the blur measured there).
+    pieces, npc = ndimage.label(zone)
+    extra = np.zeros(npc + 1, np.float32)
+    blurs = []
+    if prom is not None and blur_px:
+        ep = np.where(zone[..., None], np.nan_to_num(prom) - bg, 0.0).astype(np.float32)
+        clear = ndimage.distance_transform_edt(have_p) > 3.0 * float(blur_px)
+        # The prominence and just round it (3x the blur: where blur shows, at its edges), not the
+        # corona further out, where the two stacks differ for other reasons.
+        edges = ndimage.binary_dilation(sw > 0, iterations=int(math.ceil(3.0 * float(blur_px))))
+        top = 3.0 * float(blur_px)
+        for k in range(1, npc + 1):
+            sl = ndimage.find_objects((pieces == k).astype(np.int8))[0]
+            ok = (pieces[sl] == k) & clear[sl] & vh[sl] & edges[sl]
+            got = extra_blur(eh[sl][..., 0], ep[sl][..., 0], ok, top=top)
+            if got is not None and got[2] < 0.5 and got[0] < top - 0.05:
+                extra[k] = got[0]
+                blurs.append(round(got[0], 2))
+    # Sharpening 0..0.5: the extra blur undone in proportion; 0.5..1: the Moon-edge blur too.
+    s = float(p.sharpen)
+    lens = float(blur_px or 0.0)
+    sig = np.where(s <= 0.5, 2 * s * extra, np.hypot(extra, (2 * s - 1) * lens)).astype(np.float32)
+    out = eh.copy()
+    bias = 3.0 * float(np.median(nh[search])) if search.any() else 1e-6
+    for k in range(1, npc + 1):
+        if sig[k] <= 0.05:
+            continue
+        sl = ndimage.find_objects((pieces == k).astype(np.int8))[0]
+        pad = int(math.ceil(4 * sig[k])) + 2
+        sl = (slice(max(0, sl[0].start - pad), min(h, sl[0].stop + pad)),
+              slice(max(0, sl[1].start - pad), min(w, sl[1].stop + pad)))
+        inside = pieces[sl] == k
         for c in range(3):
-            ep[..., c] = np.where(zone, richardson_lucy(ep[..., c] + bias, blur_px, its) - bias, 0.0)
+            dec = richardson_lucy(np.clip(eh[sl][..., c], 0, None) + bias, float(sig[k]), 20) - bias
+            out[sl][..., c] = np.where(inside, dec, out[sl][..., c])
     if p.structure > 0:
         from .enhance import mgn
 
         scales = [max(1.0, f * g.sun_r) for f in (0.003, 0.006, 0.012, 0.024)]
-        m = mgn(np.clip(ep.sum(axis=2), 0, None), zone, scales, 0.7, 0.0)
-        ep *= np.clip(1.0 + p.structure * 2.0 * (m - 0.5), 0.0, None)[..., None]
-    ep *= np.float32(p.brightness)
+        m = mgn(np.clip(out.sum(axis=2), 0, None), zone, scales, 0.7, 0.0)
+        out *= np.clip(1.0 + p.structure * 2.0 * (m - 0.5), 0.0, None)[..., None]
+    out *= np.float32(p.brightness)
     if not p.chromosphere:  # the thin rim along the solar limb, except the bases of taller prominences
         chromo_px = p.chromosphere_arcsec / pixscale
         low = (r - g.sun_r) < chromo_px
-        lab, n = ndimage.label(sp > 0.5, structure=np.ones((3, 3)))
+        lab, n = ndimage.label(sw > 0.5, structure=np.ones((3, 3)))
         tall = np.zeros(n + 1, bool)
         if n:
             tall[1:] = ndimage.maximum(r - g.sun_r, lab, np.arange(1, n + 1)) >= chromo_px
         bases = ndimage.binary_dilation(tall[lab] & ~low, iterations=int(math.ceil(chromo_px)) + 2)
-        rim = low & ~bases
-        ep[rim] = 0.0  # the rim's light is taken out, none put back
-    # Where they are: the HDR stack's prominence light out, the short frames' in. In the glow round
-    # them only its colour excess out (red and blue beyond the corona's colour), so the corona keeps
-    # its own texture there.
-    # Where the short frames have no data the HDR stack's prominence light stays, at the same
-    # brightness setting (else a seam where the short frames' data begins).
-    keep = (sw_all - sw)[..., None] * np.float32(p.brightness - 1.0) * eh
-    change = (sw[..., None] * (ep - eh) - (wh - sw)[..., None] * eh_colour + keep) * outside[..., None]
-    hdr += change.astype(np.float32)
-    holes = outside & ~(weight > 0) & (prom_weight > 0) & np.isfinite(prom).all(axis=2)
-    hdr[holes] = prom[holes]
-    weight[holes] = prom_weight[holes]
-    kept = int(((sp > 0.5) & outside).sum())
-    lab, n = ndimage.label((sp > 0.5) & outside, structure=np.ones((3, 3)))
-    area = ndimage.sum(np.ones_like(sp), lab, np.arange(1, n + 1)) if n else np.zeros(0)
+        out[low & ~bases] = 0.0
+    # Where they are; and in their faint red glow round them (above the noise, within the zone,
+    # often fainter than the colour test) only its colour excess, at the same brightness, so no
+    # pale outline is left round them and the corona keeps its own texture.
+    lum_c = ndimage.gaussian_filter(ec[..., 0] + ec[..., 2], 0.7)
+    glow = np.clip((lum_c / np.maximum(nh, 1e-30) - 3.0) / 2.0, 0.0, 1.0) * zone * vh
+    glow = np.maximum(glow - sw, 0.0)
+    change = sw[..., None] * (out - eh) + glow[..., None] * np.float32(p.brightness - 1.0) * ec
+    hdr += (change * outside[..., None]).astype(np.float32)
+    kept = int((sw > 0.5).sum())
+    lab, n = ndimage.label(sw > 0.5, structure=np.ones((3, 3)))
+    area = ndimage.sum(np.ones_like(sw), lab, np.arange(1, n + 1)) if n else np.zeros(0)
     count = int((area >= max(4.0, (g.sun_r / 100.0) ** 2)).sum())
-    info = {"count": count, "pixels": kept,
-            "filled_px": int(holes.sum()), "sharpened": bool(p.sharpen > 0 and blur_px)}
-    say(f"prominences: {count} from the short frames ({kept} px)"
-        + (f", sharpened with the blur measured on the Moon's edge ({blur_px:.2f} px)" if info["sharpened"] else "")
-        + (f"; {info['filled_px']} px the HDR stack had no data for filled from them" if info["filled_px"] else ""))
+    info = {"count": count, "pixels": kept, "filled_px": int(holes.sum()), "blurs": blurs}
+    say(f"prominences: {count} sharpened ({kept} px)"
+        + (f"; softer than in the short frames by {', '.join(f'{b:.1f}' for b in blurs)} px" if blurs else
+           "; no short frames to measure how soft they are: not sharpened" if not blur_px else "")
+        + (f"; {info['filled_px']} px the HDR stack had no data for filled from the short frames"
+           if info["filled_px"] else ""))
     return info
 
 

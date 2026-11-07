@@ -861,7 +861,7 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     data = load_hdr(path)
     if prominences is not None:
         project.parameters.setdefault("prominence_stack", {})["use"] = bool(prominences)
-    swap_project_prominences(path, project, data, say, prominence_params)
+    sharpen_project_prominences(path, project, data, say, prominence_params)
     es_rgb, es_head = read_fits(rgb_path)
     es_w, _ = read_fits(wpath)
     moon_data, _ = read_fits(mpath)
@@ -1175,12 +1175,13 @@ def prominence_params_from_project(project: EventProject):
     return ProminenceParams(**{k: v for k, v in saved.items() if k in names})
 
 
-def swap_project_prominences(path: Path, project: EventProject, data, say: Say, params=None) -> Optional[dict]:
-    """The prominence stack's prominences put into ``data.hdr`` in place (see
-    prominences.swap_prominences), if there is a prominence stack and it is switched on."""
+def sharpen_project_prominences(path: Path, project: EventProject, data, say: Say, params=None) -> Optional[dict]:
+    """The HDR stack's prominences in ``data.hdr`` sharpened in place, as far as the prominence
+    stack shows they are softer (see prominences.sharpen_prominences), if there is a prominence
+    stack and it is switched on."""
     from .enhance import Geometry
     from .fits import read_fits
-    from .prominences import swap_prominences
+    from .prominences import sharpen_prominences
 
     ps = project.parameters.get("prominence_stack", {})
     phdr, pw = resolve(path, ps.get("hdr")), resolve(path, ps.get("weight"))
@@ -1202,8 +1203,8 @@ def swap_project_prominences(path: Path, project: EventProject, data, say: Say, 
     g = Geometry(float(h["SUNX"]) - xs.start, float(h["SUNY"]) - ys.start, float(h["SUNR"]),
                  float(h["MOONX"]) - xs.start, float(h["MOONY"]) - ys.start, float(h["MOONR"]))
     hdr_sub, w_sub = data.hdr[ys, xs], data.weight[ys, xs]
-    return swap_prominences(hdr_sub, w_sub, prom[py, px], np.asarray(pweight, np.float32)[py, px], g, p,
-                            ps.get("blur_px"), float(h.get("PIXSCALE") or 2.4), say)
+    return sharpen_prominences(hdr_sub, w_sub, prom[py, px], np.asarray(pweight, np.float32)[py, px], g, p,
+                               ps.get("blur_px"), float(h.get("PIXSCALE") or 2.4), say)
 
 
 def save_prominence_settings(project_path, params, use: Optional[bool] = None) -> None:
@@ -1253,7 +1254,7 @@ def prominence_preview(project_path, params=None, say: Optional[Say] = None, can
         say("no earthshine stack yet: the corona and prominences without the Moon")
         data = load_hdr(path)
         project.parameters.setdefault("prominence_stack", {})["use"] = True
-        swap_project_prominences(path, project, data, say, params)
+        sharpen_project_prominences(path, project, data, say, params)
         ep = enhance_params_from_project(path, project)
         ep = replace(ep, layers=("natural",), blend={}) if base == "natural" else replace(ep, layers=())
         frame = prepare(data.hdr, data.weight, data.header, ep, progress=say)
