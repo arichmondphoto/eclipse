@@ -89,6 +89,12 @@ carefully against the PyQt6 API. Say so when handing it over.
 - `docs/PLAN_bray_falls_look.md`: the plan to make the final image look like Bray Falls' blended
   2024 image (corona tone, fine structure, the Moon, a crisp limb). Read it first when the user
   asks to continue, and tick items off as they are done.
+- **The Moon's edge in the final image** (paused 7 Nov 2026 at d870fee; Andy: "better but not
+  perfect"): a 1 px step where the Moon meets the corona, at the filter layers' black disc (on his
+  stack 0.757 to 0.858 at 1.5 px, MGN 45 % Weighted Average). His test case, a 3000 px crop of his
+  2024 stack with his earthshine files and settings, is on his computer in
+  `~/Desktop/Eclipse 2024/limb_test_case` (README.txt, `limb_check.py`). Stage it from there when
+  he asks to continue; never add it to the repository.
 - `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
   FITS and SER frames, gain, mono; sharper prominences from the short exposures). Not to be
   started unless the user asks; read it when they do.
