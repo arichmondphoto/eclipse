@@ -101,10 +101,13 @@ def _black_array(mos) -> np.ndarray:
 
 
 def _flat_label(key: str) -> str:
-    # "f8.0_fl400" -> "f/8, 400 mm"
+    # "f8.0_fl400" -> "f/8, 400 mm"; "f?_fl?" -> "f-number and focal length not recorded"
     try:
         f, fl = key[1:].split("_fl")
-        return f"f/{float(f):g}, {fl} mm"
+        if f == "?" and fl == "?":
+            return "f-number and focal length not recorded"
+        return f"{'f-number not recorded' if f == '?' else f'f/{float(f):g}'}, " \
+               f"{'focal length not recorded' if fl == '?' else fl + ' mm'}"
     except ValueError:
         return key
 

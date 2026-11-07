@@ -6,7 +6,7 @@ import math
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timedelta, timezone
 from fractions import Fraction
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 RAW_EXTENSIONS = {
     ".nef": "Nikon",
@@ -80,9 +80,11 @@ class FrameMeta:
         This is only a starting estimate. The HDR stage replaces it with the
         brightness scale measured from the image data.
         """
-        if not (self.exposure_s and self.aperture_f and self.iso):
+        if not (self.exposure_s and self.iso):
             return None
-        return math.log2(self.exposure_s * (self.iso / 100.0) / (self.aperture_f**2))
+        # No f-number recorded (a camera on a telescope, a manual lens): taken as the same for every
+        # frame, so only exposure time and ISO count (f/1 here, as only differences are used).
+        return math.log2(self.exposure_s * (self.iso / 100.0) / (self.aperture_f or 1.0) ** 2)
 
     # ---------------------------------------------------------- persistence
     def to_dict(self) -> dict[str, Any]:
@@ -99,6 +101,34 @@ class FrameMeta:
         setattr(self, name, value)
         if name not in self.overrides:
             self.overrides.append(name)
+
+
+OPTICS = ("focal_length_mm", "aperture_f")
+
+
+def fill_optics(frames: Iterable["FrameMeta"], focal_length_mm: Optional[float],
+                aperture_f: Optional[float]) -> int:
+    """Use the focal length and f-number typed on the Frames tab for frames whose files do not
+    record them (0 or missing). A recorded value is never replaced; frames filled earlier follow a
+    changed value, and go back to unknown when it is cleared. Returns how many frames were filled."""
+    typed = {"focal_length_mm": focal_length_mm or None, "aperture_f": aperture_f or None}
+    filled = 0
+    for f in frames:
+        used = False
+        for name, value in typed.items():
+            if name in f.overrides:
+                if value is None:
+                    setattr(f, name, None)
+                    f.overrides.remove(name)
+                else:
+                    setattr(f, name, float(value))
+            elif not getattr(f, name) and value is not None:
+                f.apply_override(name, float(value))
+            else:
+                continue
+            used = used or value is not None
+        filled += used
+    return filled
 
 
 # ---------------------------------------------------------------------------

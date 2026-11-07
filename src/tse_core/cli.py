@@ -32,6 +32,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--csv", help="write the frame table to this CSV file")
     p.add_argument("--project", help="create or update this project file (.json)")
     p.add_argument("--lens", help="force this lensfun lens profile")
+    p.add_argument("--focal-length", type=float,
+                   help="focal length in mm, used only for frames (and flats) whose files do not record it, "
+                        "e.g. a camera on a telescope; optional, nothing needs it (saved in the project; 0 clears)")
+    p.add_argument("--f-number", type=float,
+                   help="f-number (focal ratio), used only for frames (and flats) whose files do not record it; "
+                        "optional: without it every frame is taken to be at the same f-number (saved in the "
+                        "project; 0 clears)")
     p.add_argument("--no-exiftool", action="store_true", help="do not use exiftool even if installed")
     p.add_argument("--eclipse", help="the eclipse, by its date, YYYY-MM-DD (default: the frames' date)")
     p.add_argument("--lat", type=float, help="site latitude in degrees, north positive (saved in the project)")
@@ -405,9 +412,13 @@ def cmd_inventory(args) -> int:
     project = EventProject.load(path) if path and path.exists() else EventProject(name=Path(args.folder).name)
     for attr, value in (("eclipse_date", args.eclipse), ("latitude", args.lat), ("longitude", args.lon),
                         ("elevation_m", args.elev), ("camera_utc_offset_h", args.camera_utc_offset),
-                        ("clock_error_s", args.clock_error)):
+                        ("clock_error_s", args.clock_error), ("focal_length_mm", args.focal_length),
+                        ("aperture_f", args.f_number)):
         if value is not None:
-            setattr(project, attr, value)
+            setattr(project, attr, value or None)
+    from .frames import fill_optics
+    if fill_optics(inv.frames, project.focal_length_mm, project.aperture_f):
+        print("The focal length and f-number given are used for frames whose files do not record them.")
     _contacts(inv, project, args)
     report = detect_brackets(inv.frames)
     _print_table(inv)
@@ -421,6 +432,7 @@ def cmd_inventory(args) -> int:
         darks=read_frames(find_raw_files(args.darks)) if args.darks else [],
         flats=read_frames(find_raw_files(args.flats)) if args.flats else [],
     )
+    fill_optics(calib.flats, project.focal_length_mm, project.aperture_f)
     db = _db(args.lensfun_db)
     forced = VignettingProfile.load(args.profile) if args.profile else None
     library = load_profile_library(args.profile_dir)

@@ -321,9 +321,12 @@ def _dark_key(f: FrameMeta) -> Optional[str]:
 
 
 def _flat_key(f: FrameMeta) -> Optional[str]:
-    if not f.aperture_f or not f.focal_length_mm:
-        return None
-    return f"f{f.aperture_f:.1f}_fl{round(f.focal_length_mm)}"
+    """Flats match lights taken with the same f-number and focal length. What a file does not record
+    (a camera on a telescope) is '?': flats with no lens data match lights with none, as through the
+    same optics, but never lights that record other settings."""
+    a = f"{f.aperture_f:.1f}" if f.aperture_f else "?"
+    fl = f"{round(f.focal_length_mm)}" if f.focal_length_mm else "?"
+    return f"f{a}_fl{fl}"
 
 
 def _iso_key(f: FrameMeta) -> Optional[str]:

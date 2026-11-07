@@ -111,6 +111,9 @@ def _calibration_frames(project_path, project: EventProject, say):
                 f"choose the {kind} folder again on the Frames tab")
         found = [g for g in found if g]
         groups[kind] = metadata.read_frames(found) if found else []
+    from .frames import fill_optics
+    if fill_optics(groups["flats"], project.focal_length_mm, project.aperture_f):
+        say("flats: the focal length and f-number typed on the Frames tab are used where the files do not say")
     return CalibrationFrames(**groups)
 
 
@@ -257,9 +260,10 @@ def _frame_infos(project: EventProject, alignment: dict, include_rejected: bool)
     track_off = {order[k]: float(v) for k, v in enumerate(resid) if k < len(order)}
 
     def _ev(fm):  # light gathered, using the shutter's real time behind its rounded label
-        if not (fm.exposure_s and fm.aperture_f and fm.iso):
+        if not (fm.exposure_s and fm.iso):
             return None
-        return math.log2(true_exposure(fm.exposure_s) * fm.iso / 100.0 / fm.aperture_f**2)
+        # No f-number recorded (a telescope): the same for every frame (see FrameMeta.exposure_value).
+        return math.log2(true_exposure(fm.exposure_s) * fm.iso / 100.0 / (fm.aperture_f or 1.0) ** 2)
 
     ev_ref = _ev(frames[ref]) if ref in frames else None
     infos, skipped = [], []

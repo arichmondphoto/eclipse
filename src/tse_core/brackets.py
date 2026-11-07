@@ -81,6 +81,7 @@ class BracketReport:
     brackets: list[Bracket]
     sequence_count: int
     unplaced: list[int]  # frames without usable exposure data
+    no_f_number: int = 0  # frames whose files do not record the f-number
 
     def describe(self) -> str:
         lines = [f"{len(self.brackets)} bracket(s) in {self.sequence_count} sequence(s)"]
@@ -94,6 +95,9 @@ class BracketReport:
                 )
         if self.unplaced:
             lines.append(f"  {len(self.unplaced)} frame(s) without exposure data were not placed")
+        if self.no_f_number:
+            lines.append(f"  {self.no_f_number} frame(s) do not record the f-number (a telescope or a manual "
+                         "lens): taken as the same for every frame, so exposure time and ISO set the brightness")
         return "\n".join(lines)
 
 
@@ -137,7 +141,7 @@ def detect_brackets(
             for i in b.frame_indices:
                 by_index[i].bracket_id = b.bracket_id
                 by_index[i].sequence_id = b.sequence_id
-    return BracketReport(brackets, len(sequences), unplaced)
+    return BracketReport(brackets, len(sequences), unplaced, sum(1 for f in lights if not f.aperture_f))
 
 
 def _split_sequences(frames: list[FrameMeta], min_pause_s: float, factor: float) -> list[list[FrameMeta]]:

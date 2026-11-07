@@ -99,7 +99,7 @@ from tse_core.viewzoom import ViewZoom  # noqa: E402
 from tse_core.enhance import (  # noqa: E402
     ACHF_SCALES, ACHF_WEIGHTS, LAYERS, MGN_SCALES, MGN_WEIGHTS, SUN_R_2024, EnhanceParams)
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
-from tse_core.frames import format_exposure  # noqa: E402
+from tse_core.frames import fill_optics, format_exposure  # noqa: E402
 from tse_core.inventory import Inventory, ProjectFolder, find_raw_files  # noqa: E402
 from tse_core.lensfun import LensfunDatabase, download_database  # noqa: E402
 from tse_core.metadata import read_frames  # noqa: E402
@@ -231,6 +231,24 @@ class FramesTab(QWidget):
         self.lens_combo.addItems([AUTOMATIC, NO_PROFILE])
         self.lens_combo.currentIndexChanged.connect(lambda _: self.replan())
         form.addRow("Lens profile:", self.lens_combo)
+        self.focal = QLineEdit()
+        self.focal.setPlaceholderText("mm; only if the files do not say")
+        self.fnum = QLineEdit()
+        self.fnum.setPlaceholderText("only if the files do not say")
+        form.addRow("Focal length:", self.focal)
+        form.addRow("f-number:", self.fnum)
+        _tip(self.focal, "Optional. For a camera on a telescope, or a manual lens, whose files do not record "
+             "the focal length. It is only used for frames (and flats) whose files leave it out, never over a "
+             "recorded value, and nothing needs it: it gives the Moon search a first guess at the Moon's size, "
+             "and lets flats be matched by it. Leave it blank if you are not sure. Click Apply after changing "
+             "it.", form)
+        _tip(self.fnum, "Optional. For a camera on a telescope (its focal ratio, e.g. 7 for f/7), or a manual "
+             "lens, whose files do not record the f-number. Only used for frames (and flats) whose files leave "
+             "it out. Blank is fine: the frames are then taken to be all at the same f-number, so the exposure "
+             "time and ISO set how bright each one is, which is right for a telescope. If the aperture of a manual "
+             "lens was changed between frames, no single value fits: leave it blank, and Stack's measured "
+             "brightness matching sorts the brightness out. Click Apply after changing it.",
+             form)
         self.bias_dir, self.dark_dir, self.flat_dir = QLineEdit(), QLineEdit(), QLineEdit()
         calib_tips = {
             "Bias folder:": "Optional. A folder of bias frames: the shortest exposures with the lens cap on, at "
@@ -380,6 +398,8 @@ class FramesTab(QWidget):
         self.elev.setText(_txt(p.elevation_m))
         self.tz.setText(_txt(p.camera_utc_offset_h))
         self.clock_error.setText(_txt(p.clock_error_s))
+        self.focal.setText(_txt(p.focal_length_mm))
+        self.fnum.setText(_txt(p.aperture_f))
         self.event_report = self.fit_report = ""
 
     def use_project_folder(self, folder: str) -> bool:
@@ -453,10 +473,16 @@ class FramesTab(QWidget):
         try:
             lat, lon, elev = _float(self.lat), _float(self.lon), _float(self.elev)
             tz, ce = _float(self.tz), _float(self.clock_error)
+            fl, fn = _float(self.focal), _float(self.fnum)
         except ValueError as exc:
             QMessageBox.warning(self, "Event", str(exc))
             return False
         p = self.project
+        p.focal_length_mm, p.aperture_f = fl or None, fn or None
+        filled = fill_optics(self.inventory.frames, p.focal_length_mm, p.aperture_f)
+        if filled:
+            self.link.log(f"Totality: the focal length and f-number typed are used for {filled} frame(s) whose "
+                          "files do not record them")
         p.eclipse_date = self.eclipse_combo.currentData() or ""
         p.latitude, p.longitude, p.elevation_m = lat, lon, elev if elev is not None else 0.0
         p.camera_utc_offset_h, p.clock_error_s = tz, ce
@@ -550,6 +576,7 @@ class FramesTab(QWidget):
             darks=read_frames(self.project.dark_files) if self.project.dark_files else [],
             flats=read_frames(self.project.flat_files) if self.project.flat_files else [],
         )
+        fill_optics(calib.flats, self.project.focal_length_mm, self.project.aperture_f)
         self.plan = plan_calibration(
             self.inventory.lights(),
             self.db,

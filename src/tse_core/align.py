@@ -572,10 +572,9 @@ def align_sequence(
     params = scaled_params(params, sun_radius_from_moon(float(np.median([f.moon.radius for f in frames]))))
     say(f"settings: rho {params.rho:.1f} px, mask blur {params.mask_blur:.1f} px, window {w} px")
 
+    mid, sequence = visit_order([f.exposure for f in frames])
     order = sorted(range(len(frames)), key=lambda i: math.log(frames[i].exposure))
-    mid = order[len(order) // 2]
     log_e = {i: math.log(frames[i].exposure) for i in order}
-    sequence = sorted(order, key=lambda i: (abs(log_e[i] - log_e[mid]), log_e[i]))
 
     results: dict[int, FrameAlignment] = {
         mid: FrameAlignment(frames[mid].index, Transform(centre_x=centre[0], centre_y=centre[1]), 1.0, float("inf"), 0.0, 1.0,
@@ -653,7 +652,7 @@ def align_sequence(
         meas = {}
         for i in sequence[1:]:
             f = frames[i]
-            if abs(log_e[i] - log_e[mid]) > math.log(2) * params.rotation_max_stops:
+            if round(abs(log_e[i] - log_e[mid]) / math.log(2), 6) > params.rotation_max_stops:
                 continue
             img_p, _ = prepared(f)
             d, _tx, _ty, used, rms = refine_rotation(anchor_p, warp(img_p, results[i].transform, order=1), anchor_m,
@@ -788,6 +787,18 @@ def _drift_model(frames, mid: int, meas: dict, notes: list[str]) -> dict[int, fl
     med = float(np.median(d))
     notes.append(f"no capture times; rotation set to the median measured value {med:+.4f} deg")
     return {i: med for i in range(len(frames)) if i != mid}
+
+
+def visit_order(exposures: list[float]) -> tuple[int, list[int]]:
+    """The middle exposure, and the order frames are aligned in: outward from it by distance in
+    stops, the shorter first where two are as far (rounded to a millionth of a stop, so the order
+    does not hang on rounding noise and is the same for any common scale of the exposures, such as
+    an f-number that is not recorded)."""
+    log_e = [math.log(e) for e in exposures]
+    order = sorted(range(len(exposures)), key=lambda i: log_e[i])
+    mid = order[len(order) // 2]
+    return mid, sorted(order, key=lambda i: (round(abs(log_e[i] - log_e[mid]) / math.log(2), 6),
+                                             round((log_e[i] - log_e[mid]) / math.log(2), 6), i))
 
 
 class _Accumulator:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from . import __version__
-from .frames import FrameMeta
+from .frames import FrameMeta, fill_optics
 from .inventory import Inventory
 
 PROJECT_FORMAT = 1
@@ -43,6 +43,11 @@ class EventProject:
     mirrored: bool = False  # optics give a mirror image (e.g. a telescope with a star diagonal)
     clock_error_s: Optional[float] = None  # true UT minus camera UT, when known
 
+    # Typed on the Frames tab for frames whose files do not record them (a camera on a telescope,
+    # a manual lens); never used over a recorded value. Empty = not known (nothing needs them).
+    focal_length_mm: Optional[float] = None
+    aperture_f: Optional[float] = None
+
     lens_profile: str = ""  # forced lensfun lens label, empty = automatic
     use_lensfun: bool = True
     bias_files: list[str] = field(default_factory=list)
@@ -56,7 +61,9 @@ class EventProject:
     # ----------------------------------------------------------- inventory
     @property
     def inventory(self) -> Inventory:
-        return Inventory([FrameMeta.from_dict(d) for d in self.frames])
+        frames = [FrameMeta.from_dict(d) for d in self.frames]
+        fill_optics(frames, self.focal_length_mm, self.aperture_f)
+        return Inventory(frames)
 
     def store_inventory(self, inventory: Inventory) -> None:
         """Store the inventory exactly as it is now."""

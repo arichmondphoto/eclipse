@@ -310,11 +310,25 @@ controls = {"RAW folder": ft.folder, "Browse": ft.browse_btn, "exiftool": ft.use
             "Latitude": ft.lat, "Longitude": ft.lon, "Elevation": ft.elev, "Camera time zone": ft.tz,
             "Clock error": ft.clock_error, "Compute contacts": ft.compute_btn,
             "Second contact": ft.c2, "Third contact": ft.c3, "Bias": ft.bias_dir, "Darks": ft.dark_dir,
+            "Focal length": ft.focal, "f-number": ft.fnum,
             "Flats": ft.flat_dir, "report": ft.report, **{f"{k} button": b for k, b in ft.setting_buttons.items()},
             **{f"folder button {i}": b for i, b in enumerate(ft.calib_browse)}}
 missing = [k for k, w in controls.items() if len(w.toolTip()) < 30]
 print("Frames tab controls without hover help:", missing or "none")
 assert not missing
+
+# Focal length and f-number typed for frames whose files do not record them (a telescope): kept in
+# the project, used only where a file leaves them out.
+for f in ft.inventory.frames:
+    f.focal_length_mm = f.aperture_f = None
+ft.focal.setText("1000")
+ft.fnum.setText("10")
+assert ft._store_event()
+assert (ft.project.focal_length_mm, ft.project.aperture_f) == (1000.0, 10.0)
+assert {(f.focal_length_mm, f.aperture_f) for f in ft.inventory.frames} == {(1000.0, 10.0)}
+ft.focal.setText("")
+ft.fnum.setText("")
+assert ft._store_event() and ft.project.focal_length_mm is None
 
 # Event: contacts computed from the eclipse and site (2024, at the site above, camera on UTC-5).
 from datetime import datetime as _dt
