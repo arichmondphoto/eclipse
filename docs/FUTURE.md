@@ -42,7 +42,7 @@ their own, since the HDR stack has no gains for them.
 
 ## Wavelet-optimized whitening (WOW) next to MGN on the Enhance tab
 
-Pinned 7 Nov 2026; Andy wants it added. WOW (Auchère et al., 2023, A&A 670, A66) splits the
+Pinned 7 Nov 2026; Andy wants it added. WOW (Auchère et al., 2023, Astronomy & Astrophysics) splits the
 image into wavelet layers (à trous, B3-spline kernel, ln N / ln 2 scales; the layers add up
 exactly to the image), divides each layer by its local power (the squared layer smoothed with that
 scale's own kernel) and adds them back with equal weight, so there are no scale weights to set.
