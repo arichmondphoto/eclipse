@@ -89,6 +89,8 @@ carefully against the PyQt6 API. Say so when handing it over.
 - `docs/PLAN_bray_falls_look.md`: the plan to make the final image look like Bray Falls' blended
   2024 image (corona tone, fine structure, the Moon, a crisp limb). Read it first when the user
   asks to continue, and tick items off as they are done.
+- `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
+  FITS and SER frames, gain, mono). Not to be started unless the user asks; read it when they do.
 
 ## Commits
 
