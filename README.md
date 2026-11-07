@@ -104,8 +104,7 @@ The script finds the core package in `../src`, so keep the folders together.
 To update, pull the repository (`git pull`) and run the script again. The
 window title shows the version and the commit it is running (for example
 `Totality - A Solar Eclipse Toolkit 0.1.0 (8e54fa8)`), so you can check an
-update took effect. (Until Nov 2026 the script was `SolarEclipseToolkit.py`;
-if Siril still lists it, remove that old copy from your scripts folder.)
+update took effect.
 
 The window has one tab per step, and each step saves into the project file:
 
@@ -157,8 +156,7 @@ which format, starting in the project folder.
 
 ## Command line
 
-The command is `totality` (it was `tse` before 31 Oct 2026; run
-`pip install -e .` again after updating so the new name is installed).
+The command is `totality` (run `pip install -e .` again after updating).
 
 A whole event, from a project folder:
 
@@ -292,9 +290,7 @@ toolkit checks your exposure brackets against the contacts. A bracket is shot
 in one go, so if one is cut in two by a contact (or no frame falls inside
 totality), nothing is marked without asking, and it says which clock error
 would put every bracket inside. You can also type the contacts, in the
-camera's clock. Projects from before November 2026 kept typed contacts with a
-separate clock offset; they are converted on opening (same frames inside).
-Bracket detection and Moon tracking only use time differences, so a wrong
+camera's clock. Bracket detection and Moon tracking only use time differences, so a wrong
 clock never affects them.
 
 ## HDR stacking (Phase 3)
@@ -331,12 +327,8 @@ exposure ratio is the same for every colour), measured on the mean of the
 colours; the offset, the light that does not scale with exposure (twilight
 that changes during totality, scattered light, small black-level
 differences), is then fitted **per colour** with that gain, because that
-light has a colour of its own: the eclipse sky is blue. Stacks made before
-Nov 2026 took one offset, fitted on the mean colour, off red, green and blue
-alike; with blue light that over-corrected red, and on the 2024 stack red
-was below zero over almost all the sky beyond 6 solar radii (hidden when
-the sky is removed, a cyan sky with corners falling to black with **Keep the
-sky**). The stack log's table lists the offsets per colour.
+light has a colour of its own: the eclipse sky is blue (one offset for all
+three colours would over-correct red under a blue sky). The stack log's table lists the offsets per colour.
 
 **Merging.** Each pixel is the inverse-variance weighted mean of the frames'
 radiance estimates. Weights fall to zero approaching saturation and inside
@@ -389,7 +381,7 @@ pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | `nrgf` | normalizing-radial-graded filter (Morgan et al. 2006): each circle around the Sun normalized to the same mean and spread |
 | `fnrgf` | Fourier NRGF (Druckmüllerová et al. 2011): mean and spread follow position angle too, so faint and bright regions at the same height get similar contrast |
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
-| `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the linear image, as in Morgan & Druckmüller 2014 ("the original image normalised by exposure time"; until 6 Nov 2026 the log image): fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
+| `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the linear image, as in Morgan & Druckmüller 2014 ("the original image normalised by exposure time"): fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
 | `achf` | **Adaptive (ACHF)**: Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; defined in Druckmüllerová 2013): the log image minus its local mean under a kernel that follows the circles round the Sun, at its own six scales (size and strength each), Moon left out. Written only on request (`--layers ...,achf`): a few minutes on a full frame |
 | `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light, Overlay or Linear at the given strengths; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay`, or `:linear` for the combination each method's own publication uses (below) (`--blend none` to skip); the same thing you would do with layers in Photoshop |
 
@@ -421,15 +413,13 @@ thesis, Appendix:
 interval <0, 1>"). Adaptive (MGN) on Linear goes in as Morgan & Druckmüller (2014) add it:
 I = h C'g + ((1 - h) / n) sum g_i arctan(k C_i) (Morgan & Druckmüller 2014,
 eq. 5), the detail centred on 0 and in radians, (layer - 0.5) pi, since the
-layer itself stores it as 0.5 + mean / pi to be seen on its own (until
-6 Nov 2026 the 0..1 picture went in: a third of the detail, and 0.15 of
-grey added). The natural layer, after any Soft Light or Overlay layers, has
+layer itself stores it as 0.5 + mean / pi to be seen on its own. The natural layer, after any Soft Light or Overlay layers, has
 weight 1 (K1); each Linear layer's strength is its K2 and may go to 1000 %
 (her software's "common values are 10 or lower"). MGN's h = 0.7 is 43 %
 ((1 - h) / h): with **Stretch: Gamma** (3.2) as the base that is
 Morgan & Druckmüller's (2014) own image. On the binned 2024 stack, Log base with MGN on Linear at
-43 %: fine-detail contrast in the corona 0.064 (0.021 the old way), the sky
-0.08 grey (0.24), the corona's median 0.30 (0.48), nothing clipped. Their
+43 %: fine-detail contrast in the corona 0.064 (0.021 on Weighted average),
+the sky 0.08 grey (0.24), the corona's median 0.30 (0.48), nothing clipped. Their
 own image (Gamma 3.2 base) is far darker on an eclipse: 32 % of the
 corona at 1.2-3 solar radii clipped to black (7 % with Gamma white point
 99.9 %); Morgan & Druckmüller (2014) say nothing about clipping or display.
@@ -461,16 +451,14 @@ Log): that is the noise of the data, shown as it is, not clipped away.
 
 **Weighted average** (`:average`, offered for Adaptive (MGN) and Adaptive
 (ACHF) only) is the same weighted average with the layer as its own 0..1
-picture: how Linear treated these two before 6 Nov 2026, kept because the
-earlier looks can be preferred (for MGN a third of the detail of the
-form of Morgan & Druckmüller 2014's
-detail; for ACHF its detail on log brightness through its soft curve; the
-sky lifted a little either way). For the other layers Linear already works
-that way, so it is not offered there (a settings file or command line that
-gives it is read as Linear). (A plain sum without the
-division, tried first, turned 42% of the 2024 crop flat black: the
-natural layer puts the sky at black and the filter layers carry its noise
-as detail of both signs.) In Photoshop, one layer: Normal mode at opacity
+picture, a gentler look than Linear (for MGN about a third of the detail
+of the form of Morgan & Druckmüller 2014; for ACHF its detail on log
+brightness through its soft curve; the sky lifted a little either way).
+For the other layers Linear already works that way, so it is not offered
+there (a settings file or command line that gives it is read as Linear).
+The sum is divided by K1 + K2: a plain sum would turn much of the picture
+flat black, as the natural layer puts the sky at black and the filter
+layers carry its noise as detail of both signs. In Photoshop, one layer: Normal mode at opacity
 K2 / (1 + K2).
 
 Before filtering, the sky (twilight glow, its gradient across the frame,
@@ -561,11 +549,8 @@ scales to keep noise down; the noise gate does that from the data. The
 sizes are pixels, as Morgan & Druckmüller (2014) give them: a frame of reference is a 400 mm
 lens on a 45-megapixel full-frame camera (Sun about 410 px in radius); raise
 them in proportion with a longer lens or smaller pixels. The reduced
-preview divides them by its reduction. Until 5 Nov 2026 the scales were 0.6%
-to 20% of the Sun's radius (about 2.5 to 83 px on that setup) with equal
-weights; on the 2024 crop their (2014) scales give a little more contrast
-overall and a finer grain (the 1.25 px scale is mostly noise there), with
-the noise gate on a little less.
+preview divides them by its reduction. On a typical stack the 1.25 px
+scale is mostly noise: lower its weight or use the noise gate.
 
 Adaptive (ACHF): Druckmüller's adaptive circular high-pass filter, as
 defined in H. Druckmüllerová's PhD thesis (*Application of Adaptive Filters
@@ -630,7 +615,7 @@ contrast, so it keeps more of the difference between bright and faint
 structure than Adaptive (MGN), and more noise in the faint corona. On the
 2024 crop (2530 px square, 6.4 megapixels) it took 28 s at the default
 settings against 4 s for Adaptive (MGN), and 111 s with the two large scales
-on (Nov 2026, on the development machine); a full 45-megapixel frame has 7x
+on, on the development machine; a full 45-megapixel frame has 7x
 the pixels, so it is off unless ticked (Enhance tab) or listed in
 `--layers`, and the preview computes it only when it is ticked, blended or
 shown.
@@ -656,10 +641,7 @@ sizes are kept in pixels, as Morgan & Druckmüller (2014) give them; the other s
 in the methods' own units. Not saved: the detail box (it
 belongs to the project) and three internal widths in pixels. Settings a
 file does not have stay as they were, settings since removed from the
-toolkit are skipped, and the log lists both. A file from before 4 Nov 2026
-gives a different picture: the filter layers' display changed then (see
-the fixed output scales below; Adaptive (MGN) shows weaker at the same
-strength).
+toolkit are skipped, and the log lists both.
 
 ### The detail box
 
@@ -719,12 +701,7 @@ natural layer is X and each layer's blend strength plays K2 (or 1 - h).
 NRGF-family values beyond the ends clip to white or black: on the 2024
 crop about 0.5% of pixels, two thirds of them in the crop's far corners
 (where circles are completed from further in), the rest single pixels
-(stars, noise peaks) and a few prominences. Until 4 Nov 2026 these layers
-went through an extra arctan S-curve of ours (1.6x the contrast near
-mid-grey, compressed towards black and white); NRGF and FNRGF keep the
-same contrast near mid-grey without it, while Adaptive (MGN) is now 0.63x
-as strong there (0.38x with the noise gate, which had its own scale): raise
-its blend strength or **Strength** (k) for the earlier look. ACHF's layer
+(stars, noise peaks) and a few prominences. ACHF's layer
 keeps a soft curve for being seen on its own and for Soft Light, Overlay
 and Weighted average; on Linear its g goes into the linear stack as
 Druckmüllerová's thesis (2013) has it, with no curve.
@@ -811,7 +788,7 @@ fall-off only allowed to decrease, so a mare in the fan is not taken for
 glare), which the maria do not follow. The prominence's place on the limb
 (on it or just outside) is searched within 2 degrees for the fit that leaves
 least behind. Up to four such sources are fitted, brightest first. On the 2024 stack this removed the fan
-at 74 degrees. It is **off by default** (since Nov 2026); `--prominence-glare`
+at 74 degrees. It is **off by default**; `--prominence-glare`
 (or **Remove the glare fanning out from a bright prominence** on the tab)
 turns it on. Off, the fan and its spikes stay in the lunar surface as the
 data has them. Removing them cannot bring back what is under them (on the 2024 Moon a
@@ -819,9 +796,7 @@ mare: removal leaves noise there, not the mare), so with it off nothing is
 inferred.
 
 Glare far brighter than any lunar surface is shown as recorded, rolled off
-towards white: nothing is filled in or smoothed over. (Until 5 Nov 2026 such
-spots were replaced by a 6 px blur of their surroundings; on the 2024 Moon
-that drew a faceted grey blob with a dark wedge over the prominence's fan.)
+towards white: nothing is filled in or smoothed over.
 
 **A dark, clean Moon.** On the 2024
 D850 earthshine stack the lunar surface is mostly noise at every scale up to
@@ -882,9 +857,7 @@ so it is the same on any lens and camera; default 0, the noise alone decides;
 with the brightness just inside, taken round the limb in ~16 px steps
 (a median, so single noisy pixels do not show as teeth) and blended in. That is where the corona layers' black disc ends, so no dark
 ring shows between them. No shading is drawn over the disc: the lunar
-surface is as bright at the limb as the data makes it (until 5 Nov 2026 a
-vignette darkened it towards the limb, by default to 40% of the middle; it
-dimmed the maria by the limb that are really there). The stretch is set from the
+surface is as bright at the limb as the data makes it. The stretch is set from the
 body of the disc. `<name>_earthshine_weight.fit` holds the stack weights
 next to the linear stack.
 
@@ -906,7 +879,7 @@ your last Enhance run then stretch Moon and corona together, so the limb is
 the stack's own: one curve, one colour treatment, no seam. A prominence is
 the same red on both sides of the limb, and nothing at the limb is cut,
 pasted, softened or matched. It needs the files the Earthshine step writes
-now (`_earthshine_rgb.fit`, `_moon_surface.fit`); with older ones it asks
+(`_earthshine_rgb.fit`, `_moon_surface.fit`); if they are missing it asks
 you to stack the earthshine again. Enhance does not need running again.
 
 * *Where the two stacks meet.* Just outside the limb neither stack is used as
@@ -933,8 +906,8 @@ you to stack the earthshine again. Enhance does not need running again.
   never used.
 * *Noise and colour.* The two stacks' weights are in different units; each
   is turned into a noise level from its own pixel scatter, so the stretch
-  knows how good the Moon's pixels are. (With the HDR's one-frame weights the
-  colour inside the limb was faded to grey as if it were noise.)
+  knows how good the Moon's pixels are (the HDR stack's one-frame weights
+  would fade the colour inside the limb to grey as if it were noise).
 * *Filter layers.* NRGF, FNRGF and both adaptive layers have no data on the
   Moon, so in the blend they fade out over the 4 px outside the limb (with
   Linear, their weights do).
@@ -946,7 +919,7 @@ you to stack the earthshine again. Enhance does not need running again.
 `--base natural` uses the natural layer instead of the blend. Writes
 `<name>_final.tif` (or `-o`).
 
-The older way, pasting the earthshine layer (`<name>_earthshine.tif`, still
+Another way, pasting the earthshine layer (`<name>_earthshine.tif`, still
 written for Photoshop) into any image with a blend mode, is `--paste` or
 `--base-file` (on the tab: **Paste into a file**).
 
@@ -1043,8 +1016,8 @@ out). When nothing matched it says "NONE applied". The folders chosen on
 the Frames tab are saved with the project as soon as a step runs, so
 Apply is not needed first. The earthshine stack is
 calibrated exactly as the HDR stack was, so the two stay in the same
-units; if the HDR stack was made before Stack used the calibration frames,
-the earthshine log says to run Stack again. The Align step uses the lens
+units; if the HDR stack was made without the calibration frames, the
+earthshine log says to run Stack again. The Align step uses the lens
 profile only: vignetting and dust do not affect the alignment, which
 works on fine structure.
 
@@ -1235,7 +1208,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--output`, `-o` | output folder (default: next to the project) |
 | `--name` | output file name prefix (default: the project name) |
 | `--layers` | comma-separated layers to write, from natural, nrgf, fnrgf, fnrgf_n, adaptive, achf (default: all but achf, which takes minutes on a full frame) |
-| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' or ':linear' (combined as each method's own publication does: NRGF, FNRGF and FNRGF-N as Druckmuellerova, Morgan & Habbal 2011, typically 0.3-1; adaptive as Morgan & Druckmueller 2014, 0.43 for their mix; achf as Druckmuellerova's thesis 2013, added to the linear stack before the natural stretch, typically 20-50 with the log stretch, about twice that with gamma) or, for adaptive and achf only, ':average' (the earlier, gentler look, typically 0.4-0.6); default soft light, e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
+| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' or ':linear' (combined as each method's own publication does: NRGF, FNRGF and FNRGF-N as Druckmuellerova, Morgan & Habbal 2011, typically 0.3-1; adaptive as Morgan & Druckmueller 2014, 0.43 for their mix; achf as Druckmuellerova's thesis 2013, added to the linear stack before the natural stretch, typically 20-50 with the log stretch, about twice that with gamma) or, for adaptive and achf only, ':average' (a gentler look, typically 0.4-0.6); default soft light, e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
 | `--order` | FNRGF Fourier order (default 10) |
 | `--segments` | FNRGF angular segments (default 50) |
 | `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
@@ -1273,9 +1246,9 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--stops` | use frames within this many stops of the longest exposure (default 6) |
 | `--no-limb-glare` | do not model the steep glare just inside the limb (shows as a bright rim) |
 | `--prominence-glare` | fit and remove the fan of glare (and spikes) round a bright prominence (default off: the fan is shown as the data has it; removing it cannot bring back what is under it) |
-| `--no-prominence-glare` | the default since Nov 2026; kept so older command lines still run |
+| `--no-prominence-glare` | leave the glare fan in (the default) |
 | `--limb-shape` | fit the limb glare as light fading inward, round the limb, which keeps maria by the limb (default off) |
-| `--no-limb-shape` | the default since Nov 2026; kept so older command lines still run |
+| `--no-limb-shape` | no limb shape (the default) |
 | `--channel` | colour channels to make the earthshine from (default auto: chosen on the stack; the red channel carries most of the chromosphere glare) |
 | `--glare-order` | smoothness of the glare removed from the disc: polynomial order, 1-6 (default 6, the most flexible; 2 = a gentle gradient) |
 | `--smooth` | smoothing of the layer in pixels (default 0 = none) |
@@ -1302,7 +1275,7 @@ the finished image: Moon and corona stretched together from the stacks.
 | Option | What it does |
 | --- | --- |
 | `project` | the project file (.json) |
-| `--paste` | the older way: paste the earthshine layer into an enhanced layer with a blend mode (needed with --base-file) |
+| `--paste` | another way: paste the earthshine layer into an enhanced layer with a blend mode (needed with --base-file) |
 | `--base` | enhanced layer to use as the corona (default: blend, the last one written) |
 | `--base-file` | use this image as the corona instead (the size of the HDR stack) |
 | `--strength` | brightness of the lunar surface, 1 = as made by the earthshine step (default 1) |

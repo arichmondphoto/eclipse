@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
                         "Habbal 2011, typically 0.3-1; adaptive as Morgan & Druckmueller 2014, 0.43 for their mix; "
                         "achf as Druckmuellerova's thesis 2013, added to the linear stack before the natural "
                         "stretch, typically 20-50 with the log stretch, about twice that with gamma) or, for "
-                        "adaptive and achf only, ':average' (the earlier, gentler look, typically 0.4-0.6); "
+                        "adaptive and achf only, ':average' (a gentler look, typically 0.4-0.6); "
                         "default soft light, "
                         "e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s)")
     p.add_argument("--order", type=int, default=10, help="FNRGF Fourier order (default 10)")
@@ -239,12 +239,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="fit and remove the fan of glare (and spikes) round a bright prominence (default off: the "
                         "fan is shown as the data has it; removing it cannot bring back what is under it)")
     p.add_argument("--no-prominence-glare", action="store_true",
-                   help="the default since Nov 2026; kept so older command lines still run")
+                   help="leave the glare fan in (the default)")
     p.add_argument("--limb-shape", action="store_true",
                    help="fit the limb glare as light fading inward, round the limb, which keeps maria by the limb "
                         "(default off)")
     p.add_argument("--no-limb-shape", action="store_true",
-                   help="the default since Nov 2026; kept so older command lines still run")
+                   help="no limb shape (the default)")
     p.add_argument("--channel", default="auto", choices=["auto", "all", "green", "green+blue", "blue"],
                    help="colour channels to make the earthshine from (default auto: chosen on the stack; the red "
                         "channel carries most of the chromosphere glare)")
@@ -284,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("final", help="the finished image: Moon and corona stretched together from the stacks")
     p.add_argument("project", help="the project file (.json)")
     p.add_argument("--paste", action="store_true",
-                   help="the older way: paste the earthshine layer into an enhanced layer with a blend mode "
+                   help="another way: paste the earthshine layer into an enhanced layer with a blend mode "
                         "(needed with --base-file)")
     p.add_argument("--base", default="blend", choices=["blend", "natural"],
                    help="enhanced layer to use as the corona (default: blend, the last one written)")
