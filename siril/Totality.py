@@ -297,7 +297,17 @@ class FramesTab(QWidget):
             self.setting_buttons[text] = b
         form.addRow(buttons)
         left.addWidget(options)
-        bl.addLayout(left, 0)
+        left.addStretch(1)
+        # The Event and Calibration boxes scroll, so the divider above them can be dragged right down
+        # and the frame table given the room (as a fixed column they held the table to about two rows).
+        left_w = QWidget()
+        left_w.setLayout(left)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setWidget(left_w)
+        left_scroll.setMinimumWidth(420)
+        self.settings_scroll = left_scroll
+        bl.addWidget(left_scroll, 0)
         self._settings_form = form
         self._event_form = ef
         self._fill_eclipses()
@@ -309,7 +319,13 @@ class FramesTab(QWidget):
         self.report.setFont(font)
         bl.addWidget(self.report, 1)
         splitter.addWidget(bottom)
-        splitter.setSizes([420, 260])
+        splitter.setChildrenCollapsible(False)
+        self.table.setMinimumHeight(200)   # about eight rows at the least
+        bottom.setMinimumHeight(120)
+        splitter.setStretchFactor(0, 3)    # a taller window goes mostly to the frame table
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([520, 300])
+        self.frames_split = splitter
         layout.addWidget(splitter, 1)
         self._frames_tips(self._settings_form)
 
