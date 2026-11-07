@@ -815,8 +815,11 @@ def enhance_params_from_project(path, project):
 
 def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1.0,
                     preview_side: Optional[int] = None, name: Optional[str] = None, say: Optional[Say] = None,
-                    cancel=None, output_file: Optional[str] = None, enhance_params=None):
+                    cancel=None, output_file: Optional[str] = None, enhance_params=None, moon_only: bool = False):
     """The final picture with the Moon in it, drawn in one go with the corona.
+
+    With ``moon_only`` returns (picture, Moon mask) without writing, for pasting the Moon as drawn
+    here into another picture (see :func:`final_image`).
 
     The Moon-aligned earthshine stack (linear, same units) replaces the inside of the lunar disc
     in the HDR stack, and the Enhance step's settings stretch Moon and corona together, so the
@@ -879,6 +882,7 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         es_rgb, moon_data = binned(es_rgb), binned(moon_data)
         ox, oy = (ox + sx0) // b, (oy + sy0) // b
         centre = ((centre[0] - sx0 + 0.5) / b - 0.5, (centre[1] - sy0 + 0.5) / b - 0.5)
+    no_data = ~(np.asarray(data.weight) > 0) if moon_only else None  # black in the corona layers
     moon, shift = merge_moon(data.hdr, data.weight, data.header, es_rgb, es_w, (ox, oy), centre,
                              params.moon_margin_px, say)
     surface = np.moveaxis(np.asarray(moon_data[:3], np.float32), 0, -1) * float(strength)
@@ -891,6 +895,14 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     _, colour = enhance(data.hdr, data.weight, data.header, params, out_dir=None, progress=say, moon=moon,
                         keep={base_layer})
     out = colour[base_layer]
+    if moon_only:  # for pasting: the Moon as drawn here, cut where the corona layers' black disc ends
+        hh, ww = out.shape[:2]
+        yy, xx = np.mgrid[0:hh, 0:ww]
+        mx, my, mr = (float(data.header[k]) for k in ("MOONX", "MOONY", "MOONR"))
+        disc = np.hypot(xx - mx, yy - my) <= mr + params.moon_margin_px
+        # Where the corona layers are black: the disc, and pixels the HDR stack had no data for
+        # (saturated in every frame, by a bright prominence), which the Moon's stack fills here.
+        return out, disc | no_data[:hh, :ww]
     if preview_side:
         return out
     say("writing the final image")
@@ -905,8 +917,12 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
 def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, mode: str = "screen",
                 preview_side: Optional[int] = None, name: Optional[str] = None,
                 say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None,
-                base_file: Optional[str] = None):
-    """The chosen enhanced layer with the earthshine blended into the lunar disc.
+                base_file: Optional[str] = None, enhance_params=None):
+    """The chosen enhanced layer with the Moon pasted into the lunar disc.
+
+    Once Enhance layers are written, the Moon pasted is the Moon as Blend draws it (see
+    :func:`final_with_moon`), cut to the corona layers' black disc, so pasting it into that blend
+    gives the Blend final image. Otherwise the earthshine layer itself is pasted.
 
     ``base_file`` uses any image file as the corona instead of an enhanced layer (it must be the
     size of the HDR stack, for example a blend written earlier or one finished elsewhere).
@@ -933,8 +949,27 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
     if preview_side:
         w, h = image_size(base_path)
         step = max(1, int(math.ceil(max(h, w) / preview_side)))
-    say(f"final image, older way: pasting {Path(earth_path).name} into {Path(base_path).name}")
     base = read_image(base_path, step)
+    es = project.parameters.get("earthshine", {})
+    can_draw = all(resolve(path, es.get(k)) for k in ("info", "rgb", "weight", "moon_surface")) and (
+        enhance_params is not None or resolve(path, project.parameters.get("enhance", {}).get("info")))
+    if can_draw:
+        # The Moon as Blend draws it (Moon and corona stretched together with the Enhance settings),
+        # cut to the corona layers' black disc: pasted into that blend it gives the Blend final image.
+        say(f"final image, pasting: the Moon as Blend draws it (Enhance settings, lunar surface strength "
+            f"{strength:g}) into {Path(base_path).name}")
+        img, mask = final_with_moon(path, "blend", strength, preview_side=preview_side, say=say,
+                                    enhance_params=enhance_params, moon_only=True)
+        earth = np.zeros_like(base)
+        hh, ww = min(base.shape[0], img.shape[0]), min(base.shape[1], img.shape[1])
+        earth[:hh, :ww] = img[:hh, :ww] * mask[:hh, :ww, None]
+        out = composite(base, earth, 1.0, mode)
+        return _write_final(path, project, out, preview_side, output_file, name, say,
+                            {"base": base_layer, "base_file": str(base_file or ""), "strength": strength, "mode": mode,
+                             "moon": "as Blend draws it"})
+    say(f"final image, pasting {Path(earth_path).name} into {Path(base_path).name} (no Enhance layers written "
+        "yet, so the earthshine layer itself: write the full-size layers on the Enhance tab to paste the Moon as "
+        "Blend draws it)")
     earth = read_image(earth_path, step)
     if base.shape != earth.shape:
         raise WorkflowError(f"{Path(base_path).name} is {base.shape[1] * step} x {base.shape[0] * step} px but the "
@@ -954,13 +989,17 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
         except (OSError, ValueError):
             moon = None
     out = composite(base, earth, strength, mode, moon=moon, limb_px=limb_px, reach=reach)
+    return _write_final(path, project, out, preview_side, output_file, name, say,
+                        {"base": base_layer, "base_file": str(base_file or ""), "strength": strength, "mode": mode})
+
+
+def _write_final(path, project, out, preview_side, output_file, name, say, record: dict):
     if preview_side:
         return out
     say("writing the final image")
     final = Path(output_file) if output_file else path.parent / f"{name or path.stem}_final.tif"
     final = write_image(final, out)
-    project.parameters["final"] = {"file": str(final), "base": base_layer, "base_file": base_file or "",
-                                   "strength": strength, "mode": mode}
+    project.parameters["final"] = {"file": str(final), **record}
     project.save(path)
     return str(final)
 
@@ -1061,7 +1100,7 @@ def final_with_prominences(project_path, base: str = "final", strength: float = 
     say("writing the image")
     final = Path(output_file) if output_file else path.parent / f"{path.stem}_final_prominences.tif"
     final = write_image(final, out)
-    project.parameters["final_prominences"] = {"file": str(final), "base": base, "base_file": base_file or "",
+    project.parameters["final_prominences"] = {"file": str(final), "base": base, "base_file": str(base_file or ""),
                                                "strength": strength, "mode": mode}
     project.save(path)
     return str(final)

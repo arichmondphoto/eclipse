@@ -1031,3 +1031,70 @@ def test_a_frame_with_ticks_by_the_limb_counts_less_there():
     assert out[3.0] < 0.75 * out[0.0], out
     assert any("count less" in n and "f4" in n for n in notes[3.0]), notes[3.0]
     assert not any("frame pixels far from" in n for n in notes[0.0])
+
+
+def test_pasting_puts_in_the_moon_as_blend_draws_it(tmp_path):
+    """Andy, Nov 2026: the pasted Moon looked completely different from the Moon in Blend/Natural.
+    Pasting now uses the Moon as Blend draws it (Moon and corona stretched together), cut to the
+    corona layers' black disc: inside the disc it is the Blend final image's Moon, outside it the
+    corona file is left as it is (the Blend final image also blends the two stacks over the first
+    few px outside the limb, which a pasted picture keeps from its own corona)."""
+    import tifffile
+
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams, enhance
+    from tse_core.imageout import write_image
+
+    proj, rr, phi, r = _moon_project(tmp_path)
+    tifffile.imwrite(tmp_path / "e_earthshine.tif", np.zeros(rr.shape + (3,), np.uint16), photometric="rgb")
+    from tse_core.project import EventProject
+    p = EventProject.load(proj)
+    p.parameters["earthshine"]["earthshine"] = "e_earthshine.tif"   # the old layer: black, so it would show
+    p.save(proj)
+    from tse_core.fits import read_fits, write_fits
+    wt, _ = read_fits(tmp_path / "e_weight.fit")      # saturated in every frame just outside the disc
+    hole = (rr > r + 1.7) & (rr < r + 2.6) & (np.abs(phi) < 0.15)   # (as by a bright prominence)
+    wt[hole] = 0
+    write_fits(tmp_path / "e_weight.fit", wt)
+    params = EnhanceParams(layers=(), blend={"natural": 1.0})
+    data = W.load_hdr(proj)
+    _, col = enhance(data.hdr.copy(), data.weight, data.header, params, out_dir=None, keep={"blend"})
+    blend = write_image(tmp_path / "e_blend.tif", col["blend"])          # the corona, black disc
+    want = W.final_with_moon(proj, "blend", 0.6, enhance_params=params, output_file=str(tmp_path / "a.tif"))
+    msgs = []
+    got = W.final_image(proj, "blend", 0.6, "screen", base_file=str(blend), enhance_params=params,
+                        output_file=str(tmp_path / "b.tif"), say=msgs.append)
+    a = tifffile.imread(want).astype(np.float32) / 65535
+    b = tifffile.imread(got).astype(np.float32) / 65535
+    disc = rr < r + 1
+    assert a[disc].mean() > 0.05                                   # there is a Moon to compare
+    assert np.abs(a[disc] - b[disc]).max() < 3 / 65535             # the same Moon
+    corona = tifffile.imread(blend).astype(np.float32) / 65535
+    out = rr > r + 2
+    assert (corona[hole].max(axis=1) == 0).all() and a[hole].mean() > 0.05   # black there, filled in Blend
+    assert np.abs(a[hole] - b[hole]).max() < 3 / 65535             # and pasted the same
+    black = corona.max(axis=2) == 0
+    assert np.abs(b[out & ~black] - corona[out & ~black]).max() < 3 / 65535   # the corona file untouched
+    assert any("as Blend draws it" in m for m in msgs), msgs
+
+
+def test_pasting_without_enhance_layers_uses_the_earthshine_layer(tmp_path):
+    """Before any Enhance layers are written there are no settings to draw the Moon with: the
+    earthshine layer itself is pasted, and the log says how to get the Moon as Blend draws it."""
+    import tifffile
+
+    from tse_core import workflow as W
+    from tse_core.project import EventProject
+
+    proj, rr, phi, r = _moon_project(tmp_path)
+    earth = np.where((rr < r)[..., None], 30000, 0).astype(np.uint16) * np.ones(3, np.uint16)
+    tifffile.imwrite(tmp_path / "e_earthshine.tif", earth, photometric="rgb")
+    tifffile.imwrite(tmp_path / "e_base.tif", np.zeros_like(earth), photometric="rgb")
+    p = EventProject.load(proj)
+    p.parameters["earthshine"]["earthshine"] = "e_earthshine.tif"
+    p.save(proj)
+    msgs = []
+    out = W.final_image(proj, "blend", 1.0, "screen", base_file=str(tmp_path / "e_base.tif"),
+                        preview_side=10000, say=msgs.append)
+    assert abs(float(out[rr < r - 5].mean()) - 30000 / 65535) < 0.01
+    assert any("write the full-size layers on the Enhance tab" in m for m in msgs), msgs

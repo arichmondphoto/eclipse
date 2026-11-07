@@ -1951,13 +1951,14 @@ class EarthshineTab(StepTab):
         f.addRow(self.colour)
 
         # Only for the separate earthshine layer (pasting it in, or Photoshop).
-        layer_box = QGroupBox("Earthshine layer for Photoshop / pasting only")
+        layer_box = QGroupBox("Earthshine layer file for Photoshop only")
         fl = QFormLayout(layer_box)
         self.keep_glare = spin(0.0, 1.0, 0.05, 0.1)
         fl.addRow("Keep glare (glow):", self.keep_glare)
         self.limb_soften = spin(0.0, 6.0, 0.5, 0.0, " px")
         fl.addRow("Soften the limb:", self.limb_soften)
-        fl.addRow(QLabel("Not used by the final image below: there the limb is the stack's own."))
+        fl.addRow(QLabel("Only for <name>_earthshine.tif, the layer file for Photoshop. The final image below "
+                         "(and pasting) draws the Moon with the corona instead."))
         self.layer_box = layer_box
 
         self.settings_layout.addWidget(stack_box)
@@ -1999,9 +2000,11 @@ class EarthshineTab(StepTab):
              "the lunar disc, and Moon and corona are stretched together with the settings of your last 'Write "
              "full-size layers' run, so the limb is the stack's own: one curve, one colour, no seam. The seas and "
              "highlands are then added inside. Blend gives that run's blend, Natural the natural layer alone.\n\n"
-             "'Paste into a file…' is the older way: the earthshine layer pasted into an image you choose, with the "
-             "Blend mode below. The image must be the full size of the HDR stack (not cropped or resized), so the "
-             "Moon lines up.", ff)
+             "'Paste into a file…': the Moon as Blend draws it (with your Enhance settings and the Lunar surface "
+             "strength) is pasted into an image you choose, inside the corona layers' black disc, with the Blend "
+             "mode below; the rest of that image is left as it is. Use it for a corona finished elsewhere. The "
+             "image must be the full size of the HDR stack (not cropped or resized), so the Moon lines up. Before "
+             "any 'Write full-size layers' run, the earthshine layer itself is pasted instead.", ff)
         _tip(self.strength, "Brightness of the seas and highlands added inside the Moon: 1 (default) = as made by "
              "the earthshine step (its Brightness setting), 0 = none, above 1 brightens a faint Moon (and its "
              "noise).", ff)
@@ -2241,6 +2244,14 @@ class EarthshineTab(StepTab):
         self.layer_path = result.outputs.get("earthshine", "")
         self.open_btn.setEnabled(bool(self.layer_path))
         self.view.show_file(result.outputs.get("crop", ""))
+        # Then the Moon as the final image draws it (with the Enhance settings), so what is set here
+        # is what Blend, Natural and pasting give.
+        if self.main.frames_tab.project.parameters.get("enhance", {}).get("info"):
+            self.log.appendPlainText("Showing the Moon as the final image draws it (Preview of the final image).")
+            QTimer.singleShot(0, self.preview_final)
+        else:
+            self.log.appendPlainText("This is the earthshine layer itself. To see the Moon as the final image draws "
+                                     "it, run 'Write full-size layers' on the Enhance tab once, then Preview.")
 
 
 # ---------------------------------------------------------------------------
