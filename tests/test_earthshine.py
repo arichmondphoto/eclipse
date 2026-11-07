@@ -773,6 +773,46 @@ def test_no_step_where_the_stacks_hand_over_outside_the_limb(tmp_path):
     assert ratio(2.5) > 0.9
 
 
+def test_corona_darkened_by_the_moons_edge_is_not_used(tmp_path):
+    """Andy, Nov 2026: a faint line round the limb in the final image. On the 2024 stack the corona
+    just outside the limb is darkened by the Moon's blurred edge in frames whose Moon sat just past
+    the stacking margin, mostly on one side: at 6-8 o'clock 30 % below the corona's own trend 3 px
+    out, 5 % at 10 px; elsewhere a few % at 3 px. The weights do not show it, so the HDR stack was
+    used from 3 px all round, and the corona continued inwards to the limb met a 1 px darker ring
+    there. Now the darkening is measured per direction from the corona's own trend and taken off,
+    so the corona keeps its structure, and a prominence there (darkened the same way) its shape."""
+    from tse_core.earthshine import merge_moon
+    from tse_core.fits import read_fits
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    hdr, head = read_fits(tmp_path / "e_hdr.fit")
+    wt, _ = read_fits(tmp_path / "e_weight.fit")
+    ew, _ = read_fits(tmp_path / "e_earthshine_weight.fit")
+    es, eh = read_fits(tmp_path / "e_earthshine_rgb.fit")
+    truth = np.moveaxis(hdr, 0, -1).copy()
+    d = rr - r
+    side = (phi > -0.5) & (phi < 2.4)                     # one side, with the prominence at 0
+    dark = np.where(side & (d > 0), 0.3 * np.exp(-np.clip(d - 3.0, 0, None) / 4.0), 0.0)
+    H = (truth * (1 - dark)[..., None]).astype(np.float32)   # as the 2024 stack at 6-8 o'clock
+    merge_moon(H, wt.astype(np.float32).copy(), head, es.astype(np.float32), ew.astype(np.float32), (40, 30),
+               (float(eh["MOONX"]), float(eh["MOONY"])))
+
+    def ratio(a, where):
+        m = (rr > r + a) & (rr < r + a + 0.5) & where
+        return float(np.median(H[m].mean(axis=1) / truth[m].mean(axis=1)))
+
+    core = (phi > 1.2) & (phi < 2.1)
+    got = [round(ratio(a, core), 3) for a in np.arange(1.0, 12.0, 0.5)]
+    assert min(got) > 0.92, got                          # the old code: 0.70 at 3 px
+    steps = np.abs(np.diff(got))
+    assert steps.max() < 0.04, got                       # no line
+    other = (phi < -0.6) & (phi > -2.6)                  # the side not darkened: left as it was
+    assert all(abs(ratio(a, other) - 1) < 0.03 for a in np.arange(4.0, 12.0, 1.0))
+    prom = np.abs(phi) < 0.03                            # the prominence: as it is, not smoothed over
+    assert all(abs(ratio(a, prom) - 1) < 0.08 for a in np.arange(3.0, 10.0, 1.0)), \
+        [round(ratio(a, prom), 3) for a in np.arange(3.0, 10.0, 1.0)]
+
+
 def test_hdr_reliable_zone_is_measured_from_the_weights():
     """Where the HDR stack's corona is used from follows its weights (the Moon covering frames),
     not a fixed number of pixels: 3 px at one scale, 8 px at a longer focal length, while the

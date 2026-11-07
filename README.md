@@ -812,7 +812,14 @@ holds few frames there (the Moon covered it part of the time). So the
 earthshine stack's limb hands over to the HDR corona from where the HDR
 stack is reliable, measured from its weights; the log says where ("the HDR
 stack's corona is used from N px outside the limb"; 3 px on the 2024
-stack). By a bright prominence, where the long earthshine frames saturate,
+stack). Just outside that, the HDR stack's corona is still darkened by the
+Moon's blurred edge in frames whose Moon was just past the stacking margin,
+mostly on one side of the Moon (on the 2024 stack up to a third at 3 px out,
+at 6-8 o'clock). Measured direction by direction against the corona's own
+trend further out, the darkening is taken off (linear; a prominence there
+keeps its shape), and the log says by how much ("the corona just outside the
+limb was darkened by the Moon's edge: brightened by up to N %"). The corona
+continued inwards to the limb follows that same trend. By a bright prominence, where the long earthshine frames saturate,
 the light inside the limb is taken from the last well-exposed earthshine
 pixel to the limb. The filter layers have no data on the Moon: they keep full strength wherever
 they have data (out to the corona layers' black disc), and on the Moon count

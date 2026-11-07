@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import math
+import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Sequence
@@ -1299,14 +1300,16 @@ def register_moon(hdr_lum: np.ndarray, es_lum: np.ndarray, es_good: np.ndarray, 
 
 
 def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: float, floor: float,
-                 inner: float = 30.0, outer: float = 3.0) -> Optional[np.ndarray]:
+                 inner: float = 30.0, outer: float = 3.0, slopes: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
     """Light by the limb where neither stack is reliable, interpolated along each radius.
 
     For each direction, in log brightness: inside the limb from the outermost fully trusted
     pixel (trust >= 0.95, at most ``inner`` px in) to the limb, where the light is the corona
     ``outer`` px out times the drop across the limb seen in the nearest directions where both
     stacks are reliable (the Moon's edge is a step, not a slope); outside the limb, the corona
-    ``outer`` px out. Returns an image (h, w, 3) (a copy of ``img`` away from those spans), or None.
+    ``outer`` px out. ``slopes``: the corona's rise inwards per direction (log brightness per px,
+    as ``limb_darkening_gain`` measures it), else measured over the 2 px beyond ``outer``. Returns
+    an image (h, w, 3) (a copy of ``img`` away from those spans), or None.
     """
     h, w = trust.shape
     na = max(int(2 * math.pi * r), 360)
@@ -1327,10 +1330,17 @@ def _radial_fill(img: np.ndarray, trust: np.ndarray, cx: float, cy: float, r: fl
         return None
     out_val = ndimage.gaussian_filter1d(0.5 * (L[j_out] + L[j_out + 1]), 1.0, axis=0, mode="wrap")
     # The corona keeps brightening towards the limb: continued inwards from ``outer`` px out with
-    # its own slope there (log brightness per px, measured over the next 2 px, at most 0.2).
-    j_o2 = min(int(np.searchsorted(radii, r + outer + 3.0)), len(radii) - 1)
-    slope = (out_val - ndimage.gaussian_filter1d(L[j_o2], 1.0, axis=0, mode="wrap")) / max(radii[j_o2] - radii[j_out], 1.0)
-    slope = np.clip(ndimage.gaussian_filter1d(slope, 2.0, axis=0, mode="wrap"), 0.0, 0.2)
+    # its own slope (log brightness per px, at most 0.2): its trend further out where measured (over
+    # 2 px per direction, the clip at 0 turned noise into a rise: the continued corona came out a
+    # few % too bright, a faint line where the stack takes over), else over the next 2 px.
+    if slopes is not None:
+        nbs = len(slopes)
+        sl = np.interp(ang * nbs / (2 * math.pi) - 0.5, np.arange(nbs), slopes, period=nbs)  # bin centres
+        slope = np.repeat(np.clip(sl, 0.0, 0.2)[:, None], 3, axis=1)
+    else:
+        j_o2 = min(int(np.searchsorted(radii, r + outer + 3.0)), len(radii) - 1)
+        slope = (out_val - ndimage.gaussian_filter1d(L[j_o2], 1.0, axis=0, mode="wrap")) / max(radii[j_o2] - radii[j_out], 1.0)
+        slope = np.clip(ndimage.gaussian_filter1d(slope, 2.0, axis=0, mode="wrap"), 0.0, 0.2)
     # The drop across the limb, from directions where the earthshine stack is good to the edge.
     good_dir = (T[j_lim - 1: j_lim + 1] >= 0.95).all(axis=0) & inside[j_out]
     corona_at = out_val + slope * (radii[j_out] - radii[j_edge])  # the corona continued to ``outer`` px
@@ -1403,6 +1413,80 @@ def hdr_reliable_from(weight: np.ndarray, rr: np.ndarray, r: float, default: flo
     return float(np.clip(edge, 2.0, 0.03 * r))
 
 
+# Directions taken together (degrees) when measuring the darkening by the Moon's edge.
+DARKENING_SPAN = 18.0
+
+
+def limb_darkening_gain(lum: np.ndarray, weight: np.ndarray, rr: np.ndarray, phi: np.ndarray, r: float,
+                        start: float = 0.0, nb: int = 180) -> Optional[np.ndarray]:
+    """How much the HDR stack's corona just outside the limb is darkened by the Moon's edge.
+
+    Frames whose Moon sat just past the stacking margin still darken the corona there with the
+    Moon's blurred edge, which the weights do not show; mostly on one side (on the 2024 D850 stack
+    at 6-8 o'clock 30 % below the corona's own trend 3 px out, 5 % at 10 px; elsewhere a few %
+    at 3 px, and none from 5 px). Measured per direction: the median of each 1 px ring in ``nb``
+    directions, then the median over the 9 neighbouring directions (18 degrees at 180, so a
+    prominence does not count), fitted in log against the distance from the limb between 4 % and
+    10 % of the radius out. Inwards of that, the shortfall below the line, from ``start`` px out
+    (where the stack is used from) to where it first ends (never growing outwards), is the
+    darkening; nearer the limb the same as at ``start``. ``phi``: the angle round the Moon (radians). Returns (gain per pixel, 1 where nothing is darkened; the trend's rise inwards per
+    direction, log brightness per px), or None if it cannot tell.
+    """
+    fit0 = int(max(12, round(0.04 * r)))
+    fit1 = int(max(30, round(0.10 * r)))
+    d = rr - r
+    m = (d >= 0) & (d < fit1) & (weight > 0) & np.isfinite(lum) & (lum > 0)
+    if m.sum() < 20 * nb:
+        return None
+    q = 0.5  # ring width (px): the first half pixel past the stacking margin is the darkest
+    nr, n0 = int(round(fit1 / q)), int(round(fit0 / q))
+    ri = np.minimum((d[m] / q).astype(int), nr - 1)
+    bi = (np.mod(phi[m], 2 * math.pi) * nb / (2 * math.pi)).astype(int) % nb
+    lab = ri * nb + bi
+    have = np.unique(lab)
+    med = np.full(nr * nb, np.nan)
+    med[have] = ndimage.median(lum[m], lab, index=have)
+    P = med.reshape(nr, nb)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        half = int(round(DARKENING_SPAN / 2 * nb / 360.0))
+        P = np.nanmedian(np.stack([np.roll(P, k, axis=1) for k in range(-half, half + 1)]), axis=0)
+        L = np.log(P)
+    ds = (np.arange(nr) + 0.5) * q
+    D = np.zeros((n0, nb))
+    slopes = np.full(nb, np.nan)
+    j0 = min(int(start / q), n0 - 1)
+    for b in range(nb):
+        f = np.isfinite(L[n0:, b])
+        if f.sum() < 0.5 * (nr - n0):
+            continue
+        c = np.polyfit(ds[n0:][f], L[n0:, b][f], 1)
+        slopes[b] = -c[0]
+        short = np.nan_to_num(np.polyval(c, ds[:n0]) - L[:n0, b], nan=0.0)
+        # Each ring's scatter: lightly averaged along the radius for the amount, over 1.5 px for
+        # where the darkening ends (from ``start`` out to the first ring not below the line).
+        # (Only rings from ``start`` out: the ones inside hold few frames.)
+        pad = np.pad(short[j0:], 1, mode="edge")
+        amount = np.convolve(pad, np.array([1.0, 2.0, 1.0]) / 4, mode="valid")
+        alive = np.minimum.accumulate(np.convolve(pad, np.ones(3) / 3, mode="valid")) > 0
+        D[j0:, b] = np.where(alive, np.maximum(amount, 0.0), 0.0)
+        D[:j0, b] = D[j0, b]
+    if np.isnan(slopes).all():
+        return None
+    ok = ~np.isnan(slopes)
+    slopes = np.clip(np.interp(np.arange(nb), np.arange(nb)[ok], slopes[ok], period=nb), 0.0, 0.2)
+    if not D.any():
+        return np.ones(lum.shape, np.float32), slopes
+    # Per pixel: between ring centres and directions (wrapping round the limb).
+    near = (d >= 0) & (d < fit0)
+    jr = np.clip(d[near] / q - 0.5, 0.0, n0 - 1)
+    ja = np.mod(phi[near], 2 * math.pi) * nb / (2 * math.pi) - 0.5
+    Dw = np.concatenate([D[:, -1:], D, D[:, :1]], axis=1)
+    g = np.ones(lum.shape, np.float32)
+    g[near] = np.exp(ndimage.map_coordinates(Dw, [jr, ja + 1.0], order=1, mode="nearest"))
+    return g, slopes
+
+
 def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.ndarray, es_weight: np.ndarray,
                origin: tuple[int, int], es_centre: tuple[float, float], margin_px: float = 1.5,
                say: Optional[Say] = None):
@@ -1466,6 +1550,22 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
 
     rs = rr[sy, sx]
     edge = hdr_reliable_from(wsub, rs, mr)
+    # The corona just outside the limb is still darkened by the Moon's blurred edge in frames whose
+    # Moon was just past the stacking margin: measured from the corona's own trend and taken off
+    # (linear; its noise grows by the same factor). Uncorrected, the corona continued inwards from
+    # ``edge`` met a darker ring there: a faint line round the limb.
+    got = limb_darkening_gain(sub.mean(axis=2), wsub, rs, np.arctan2((yy - cy)[sy, sx], (xx - cx)[sy, sx]), mr,
+                              start=edge)
+    gain, slopes = got if got is not None else (None, None)
+    if gain is not None and (gain > 1.0).any():
+        sub *= gain[..., None]
+        wsub /= gain * gain
+        near = (rs >= mr + edge) & (rs < mr + edge + 1.0) & (wsub > 0)
+        top = float(np.percentile(gain[near], 99)) if near.any() else 1.0
+        dark = gain[(rs >= mr) & (wsub > 0)] > 1.03
+        say(f"Moon: the corona just outside the limb was darkened by the Moon's edge: brightened by up to "
+            f"{100 * (top - 1):.0f} % where the HDR stack is used from (more than 3 % on "
+            f"{int(dark.sum())} px)")
     say(f"Moon: the HDR stack's corona is used from {edge:.1f} px outside the limb (where enough of its "
         f"frames are not covered by the Moon)")
     c_hdr = noise_constant(sub.mean(axis=2), wsub, (wsub > 0) & (rs >= mr + edge) & (rs < mr + 0.5 * mr))
@@ -1535,7 +1635,7 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
         floor = max(float(np.median(es_c[(rs < 0.8 * mr) & es_ok[sy, sx]])) * 0.05, 1e-12) \
             if (es_ok[sy, sx] & (rs < 0.8 * mr)).any() else 1e-12
         rad = _radial_fill(sub, tc, cx - sx.start, cy - sy.start, mr, floor,
-                           inner=max(10.0, 0.07 * mr), outer=edge)
+                           inner=max(10.0, 0.07 * mr), outer=edge, slopes=slopes)
         if rad is not None:
             k = np.where(target, tc, 1.0)[..., None]
             sub[:] = np.where(target[..., None], k * es_c + (1 - k) * rad, sub)
