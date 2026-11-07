@@ -855,14 +855,15 @@ def test_defaults_as_andy_uses_them():
     """Nov 2026, from Andy's work on the 2024 Moon: a faint glow (0.10) and no extra softening are
     what blend best when pasting, and the prominence glare is left as the data has it (removing it
     cannot bring back what is under it). Later in Nov: no smoothing of any kind by default (the
-    surface as the stack has it), full brightness, and the most flexible glare surface (order 6).
-    The command line has the same defaults."""
+    surface as the stack has it), and full brightness. Glare smoothness 3.5 (7 Nov 2026, after
+    comparing 3, 3.5 and 4 on his stack: most of order 4's glare removal with more of order 3's
+    maria contrast). The command line has the same defaults."""
     import sys
     from pathlib import Path
 
     p = EarthshineParams()
     assert (p.keep_glare, p.limb_soften, p.source_glare) == (0.1, 0.0, False)
-    assert (p.smooth, p.edge_smooth, p.surface_denoise, p.brightness, p.glare_order) == (0.0, 0.0, 0.0, 1.0, 6)
+    assert (p.smooth, p.edge_smooth, p.surface_denoise, p.brightness, p.glare_order) == (0.0, 0.0, 0.0, 1.0, 3.5)
     assert p.limb_shape is False
     sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
     from cli_reference import parser
@@ -870,7 +871,7 @@ def test_defaults_as_andy_uses_them():
     sp = parser()._subparsers._group_actions[0].choices["earthshine"]
     a = sp.parse_args(["proj.json"])
     assert (a.keep_glare, a.limb_soften, a.prominence_glare) == (0.1, 0.0, False)
-    assert (a.smooth, a.edge_smooth, a.surface_denoise, a.brightness, a.glare_order) == (0.0, 0.0, 0.0, 1.0, 6)
+    assert (a.smooth, a.edge_smooth, a.surface_denoise, a.brightness, a.glare_order) == (0.0, 0.0, 0.0, 1.0, 3.5)
     assert a.limb_shape is False and sp.parse_args(["proj.json", "--limb-shape"]).limb_shape is True
 
 
@@ -1136,3 +1137,24 @@ def test_moon_layer_over_the_blend_gives_the_blend_final_image(tmp_path):
     assert a[rr > r + 30].max() == 0                                                     # only the Moon
     assert EventProject.load(proj).parameters["moon_layer"]["strength"] == 0.4
     assert any("Moon layer" in m for m in msgs), msgs
+
+
+def test_half_steps_of_glare_smoothness_average_the_two_neighbouring_fits():
+    """Andy, Nov 2026: Glare smoothness in half steps, 0-6. A polynomial has whole orders only, so
+    3.5 is the average of the order-3 and order-4 glare surfaces fitted to the data; whole numbers
+    are exactly as before, and 0 (one even level) is allowed."""
+    from tse_core.earthshine import glare_fit, glare_surface
+
+    n, r, c = 240, 90.0, 120.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - c, yy - c)
+    u, v = (xx - c) / r, (yy - c) / r
+    rng = np.random.default_rng(5)
+    img = (1.0 + 0.3 * u + 0.2 * u * v + 0.15 * u ** 3 - 0.1 * v ** 4 + 0.01 * rng.normal(size=(n, n))).astype(np.float32)
+    inside = rr < r - 3
+    g3 = glare_surface(img, inside, c, c, r, 3)
+    g4 = glare_surface(img, inside, c, c, r, 4)
+    assert np.allclose(glare_fit(img, inside, c, c, r, 3.5), 0.5 * (g3 + g4), atol=1e-6)
+    assert np.array_equal(glare_fit(img, inside, c, c, r, 4.0), g4)
+    g0 = glare_fit(img, inside, c, c, r, 0)
+    assert np.ptp(g0[inside]) < 1e-6 and abs(float(g0[inside].mean()) - float(np.median(img[inside]))) < 0.1

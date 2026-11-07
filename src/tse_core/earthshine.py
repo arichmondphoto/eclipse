@@ -44,7 +44,10 @@ class EarthshineParams:
     # Stay this far inside the lunar limb (limb glare, chromosphere), full-res px. None: scaled to
     # the Moon's size, 0.7% of its radius, at least 2 px (3 px for the 2024 D850 at 400 mm).
     margin_px: Optional[float] = None
-    glare_order: int = 6  # polynomial order of the glare; lower = gentler (2 is a plain gradient)
+    # Glare smoothness: polynomial order of the glare surface, 0-6 in half steps (a half step is the
+    # average of the two neighbouring orders' fits); lower = gentler (2 is a plain gradient). 3.5 from
+    # Andy's comparison of 3, 3.5 and 4 on the 2024 stack (Nov 2026).
+    glare_order: float = 3.5
     smooth: float = 0.0  # Gaussian smoothing of the shown layer, px (0 = none)
     brightness: float = 1.0  # brightest lunar surface in the layer, 0..1
     edge_smooth: float = 0.0  # most smoothing where the noise is high near the limb, px
@@ -179,6 +182,20 @@ def glare_surface(img: np.ndarray, inside: np.ndarray, cx: float, cy: float, r: 
         band[a : a + 256] = True
         out[a * w : min(h, a + 256) * w] = basis(band) @ coef
     return out.reshape(h, w).astype(np.float32)
+
+
+def glare_fit(img: np.ndarray, inside: np.ndarray, cx: float, cy: float, r: float, order: float,
+              limb: bool = False) -> np.ndarray:
+    """:func:`glare_surface` for Glare smoothness ``order`` in half steps (0-6): a whole order as it
+    is; between two orders, the average of the two surfaces fitted to the data (a polynomial has
+    whole orders only, so this is the in-between flexibility)."""
+    order = min(max(float(order), 0.0), 6.0)
+    lo, hi = int(math.floor(order)), int(math.ceil(order))
+    g = glare_surface(img, inside, cx, cy, r, lo, limb=limb)
+    if hi == lo:
+        return g
+    t = np.float32(order - lo)
+    return ((1 - t) * g + t * glare_surface(img, inside, cx, cy, r, hi, limb=limb)).astype(np.float32)
 
 
 # Fall-off lengths in lunar radii, with a floor in pixels (lens blur does not shrink with a
@@ -511,7 +528,7 @@ def limb_falloff(res: np.ndarray, good: np.ndarray, cx: float, cy: float, r: flo
 def remove_glare(img: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, p: "EarthshineParams"):
     """The lunar surface left after taking away the glare: returns (detail, glare)."""
     est = img
-    glare = glare_surface(est, good, cx, cy, r, p.glare_order, limb=p.limb_glare)
+    glare = glare_fit(est, good, cx, cy, r, p.glare_order, limb=p.limb_glare)
     if p.limb_glare:
         if p.limb_shape:
             glare = glare + limb_falloff(np.where(good, est - glare, 0.0).astype(np.float32), good, cx, cy, r,
@@ -552,7 +569,7 @@ def choose_channel(rgb: np.ndarray, good: np.ndarray, cx: float, cy: float, r: f
     scores = {}
     for name in ("all", "green", "green+blue"):
         img = channel_image(rgb, name)
-        plain = np.where(good, img - glare_surface(img, good, cx, cy, r, p.glare_order, limb=True), 0.0)
+        plain = np.where(good, img - glare_fit(img, good, cx, cy, r, p.glare_order, limb=True), 0.0)
         det, _ = remove_glare(img, good, cx, cy, r, quick)
         big = ndimage.gaussian_filter(det, max(2.0, 0.014 * r))
         surface = float(np.percentile(big[body], 95) - np.percentile(big[body], 5)) + 1e-30

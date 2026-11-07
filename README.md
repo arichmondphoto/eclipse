@@ -734,7 +734,7 @@ clean:
 
 | Setting | What it does | Default | Typical |
 | --- | --- | --- | --- |
-| **Glare smoothness** (`--glare-order`) | How flexible the glare surface taken off the disc is. If large maria look washed out, lower it. | 6 | 2 removes only a gentle gradient |
+| **Glare smoothness** (`--glare-order`) | How flexible the glare surface taken off the disc is, 0-6 in half steps. Higher removes uneven glare better (bright arcs by the edge) but flattens the large maria more; lower keeps them bolder. A half step averages the two neighbouring whole orders' fits. | 3.5 | 3-4; 2 removes only a gentle gradient |
 | **Remove the bright glare along the limb** (`--no-limb-glare` turns it off) | The glare climbs steeply in the last pixels inside the limb; this follows it round the limb and takes it away. | on | |
 | **Remove the glare fanning out from a bright prominence** (`--prominence-glare`) | Fits the fan of glare and spikes a bright prominence throws onto the Moon, and takes it away. Off, the fan is shown as recorded; on, what was under it cannot come back (on the 2024 Moon, a mare became noise). | off | |
 | **Keep maria by the limb** (`--limb-shape`) | Takes away only light that fades inward from the limb, so a mare right by the limb is kept. | off | |
@@ -766,6 +766,11 @@ mostly noise (short exposures, low ISO or a bright sky).
 * The glare from the inner corona across the disc, a gentle gradient, is
   taken off with a smooth surface (**Glare smoothness**), fitted from a
   margin just inside the limb (0.7 % of the Moon's radius, at least 2 px).
+  The surface is a 2-D polynomial of that order, robustly fitted; a half step
+  is the average of the two neighbouring orders' surfaces. On the 2024 stack
+  the large-scale maria contrast was 0.42 of the shown range at 3, 0.32 at
+  3.5 and 0.29 at 4, while 3 left a bright arc of glare by the upper-left
+  limb that 3.5 mostly and 4 fully removed.
 * Close to the limb the glare is 10-20x the earthshine and changes within a
   few degrees round the limb. Terms that fall off with distance inside the
   limb take out its average shape; the rest is followed round the limb with
@@ -1227,7 +1232,7 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--limb-shape` | fit the limb glare as light fading inward, round the limb, which keeps maria by the limb (default off) |
 | `--no-limb-shape` | no limb shape (the default) |
 | `--channel` | colour channels to make the earthshine from (default auto: chosen on the stack; the red channel carries most of the chromosphere glare) |
-| `--glare-order` | smoothness of the glare removed from the disc: polynomial order, 1-6 (default 6, the most flexible; 2 = a gentle gradient) |
+| `--glare-order` | smoothness of the glare removed from the disc, 0-6 in half steps: higher follows uneven glare better but flattens the maria more (default 3.5; 2 = a gentle gradient, 0 = one even level; a half step averages the two neighbouring polynomial orders) |
 | `--smooth` | smoothing of the layer in pixels (default 0 = none) |
 | `--brightness` | brightest lunar surface in the layer, 0-1 (default 1) |
 | `--keep-glare` | earthshine layer file for Photoshop (<name>_earthshine.tif): how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1) |

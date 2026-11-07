@@ -1920,9 +1920,11 @@ class EarthshineTab(StepTab):
         # 2. The seas and highlands: glare taken away, then stretched and shaded.
         box = QGroupBox("2  Lunar surface (seas and highlands)")
         f = QFormLayout(box)
-        self.glare = QSpinBox()
-        self.glare.setRange(1, 6)
-        self.glare.setValue(6)
+        self.glare = QDoubleSpinBox()
+        self.glare.setRange(0.0, 6.0)
+        self.glare.setSingleStep(0.5)
+        self.glare.setDecimals(1)
+        self.glare.setValue(3.5)
         f.addRow("Glare smoothness:", self.glare)
         self.limb_glare = QCheckBox("Remove the bright glare along the limb")
         self.limb_glare.setChecked(True)
@@ -2086,9 +2088,12 @@ class EarthshineTab(StepTab):
              "camera has twice as many green pixels, so green usually gives a cleaner Moon than the average of all "
              "three. Automatic tries all, green and green + blue on your stack and picks the cleanest; the log "
              "shows the scores.", fs)
-        _tip(self.glare, "How flexible the glare surface removed from the disc is (polynomial order). 6 (default) "
-             "is the most flexible and follows uneven glare best. If large maria look washed out, lower it: "
-             "2 removes only a gentle gradient, 1 a straight gradient.", f)
+        _tip(self.glare, "How flexible the glare surface taken off the disc is, from 0 to 6 in half steps. "
+             "Higher follows uneven glare better (bright arcs by the edge go) but also takes away more of the "
+             "large maria's contrast; lower keeps the maria bolder and leaves more glare. 3.5 (default) keeps most "
+             "of the glare removal of 4 with more of the maria contrast of 3. 2 removes only a gentle gradient, 1 "
+             "a tilt, 0 one even level.\n\nWhole numbers are the order of the polynomial fitted to the glare; a "
+             "half step averages the two neighbouring fits. Needs Stack earthshine again.", f)
         _tip(self.smooth, "Softens the noise in the layer, in pixels. 0 (default) = none, the surface as the "
              "stack has it; 1 for a little, 2-3 for very noisy data (Edge-preserving smoothing keeps the "
              "maria's edges crisper)."

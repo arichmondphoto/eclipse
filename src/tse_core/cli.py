@@ -255,9 +255,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--channel", default="auto", choices=["auto", "all", "green", "green+blue", "blue"],
                    help="colour channels to make the earthshine from (default auto: chosen on the stack; the red "
                         "channel carries most of the chromosphere glare)")
-    p.add_argument("--glare-order", type=int, default=6,
-                   help="smoothness of the glare removed from the disc: polynomial order, 1-6 (default 6, the most "
-                        "flexible; 2 = a gentle gradient)")
+    p.add_argument("--glare-order", type=float, default=3.5,
+                   help="smoothness of the glare removed from the disc, 0-6 in half steps: higher follows uneven "
+                        "glare better but flattens the maria more (default 3.5; 2 = a gentle gradient, 0 = one even "
+                        "level; a half step averages the two neighbouring polynomial orders)")
     p.add_argument("--smooth", type=float, default=0.0, help="smoothing of the layer in pixels (default 0 = none)")
     p.add_argument("--brightness", type=float, default=1.0,
                    help="brightest lunar surface in the layer, 0-1 (default 1)")
