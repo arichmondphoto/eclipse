@@ -147,9 +147,21 @@ Eclipse 2024/
 
 **Project → New from folder…** in the GUI, or `totality inventory "Eclipse 2024"`
 on the command line, reads the light frames from `lights/` and the
-calibration frames from the other subfolders, saves the project file as
-`Eclipse 2024/Eclipse 2024.json`, and writes every result (alignment,
-stack) into the folder. Opening that folder again reopens the project.
+calibration frames from the other subfolders and saves the project file as
+`Eclipse 2024/Eclipse 2024.json`. Opening that folder again reopens the
+project. The steps add two folders of data files:
+
+```
+Eclipse 2024/
+    Eclipse 2024.json   the project file (open this)
+    fits/        every .fit file: the HDR stack and its weights, the
+                 earthshine stacks, the vignetting correction, and
+                 masters/ (the master bias, darks and flats)
+    json/        every other .json file: the alignment, the stack's and
+                 earthshine's details, the Enhance settings used
+```
+
+Files from an older project at the top of the folder are still found.
 Wherever a picture is written (enhanced layers, earthshine and prominence
 layers, final images), the GUI asks where to save, under what name and in
 which format, starting in the project folder.
@@ -344,7 +356,9 @@ detected and given zero weight.
 Frames the Sun-centre fit flagged as off the Moon's track are skipped
 unless `--include-rejected` is given.
 
-**Outputs** go next to the project unless `-o` says otherwise. By default
+**Outputs:** the `.fit` files go in a `fits` folder and the `.json` files in a
+`json` folder inside the project folder; the preview picture goes next to the
+project (or in the `-o` folder). By default
 they are the full frame, the same size as the RAW files and with the Sun
 where it is in the reference frame, so they line up with your originals in
 Photoshop and keep faint streamers out to the frame edges. Pixels near the
@@ -625,7 +639,8 @@ The command line also takes the attenuation factors of the paper
 
 **Save settings…** on the Enhance tab writes every setting on the tab to a
 file you name. **Load settings…** sets the tab from such a file, on any
-project, or from the `<name>_enhance.json` written beside full-size layers,
+project, or from the `<name>_enhance.json` that **Write full-size layers**
+saves in the project's `json` folder,
 so the exact settings of an earlier picture can be had back. On the command
 line, `totality enhance <project> --settings <file>` starts from the file,
 and options typed on the same line take its place for what they set (for
@@ -925,8 +940,8 @@ A dark only corrects light frames with its own exposure time and ISO, so
 for a bracket shoot darks at each shutter speed (10-20 each is plenty).
 
 **Masters are built once.** The first Stack (or earthshine stack) saves each
-master bias, dark and flat as a FITS file in a `masters` folder beside the
-project (they open in Siril), and later runs read them back instead of the
+master bias, dark and flat as a FITS file in `fits/masters` inside the
+project folder (they open in Siril), and later runs read them back instead of the
 frames. A master is built again when a file in its group is added, removed
 or replaced, and a master flat also when the bias taken off it changes; the
 old one is then deleted. The log says which masters were reused. Each is
@@ -1099,7 +1114,7 @@ align the light frames of a project on the corona and find the Sun's centre.
 | `--rotation` | field rotation: smooth drift over time (default), per frame, or none |
 | `--any-angle` | search any rotation and scale (alt-az mounts) |
 | `--rho` | tangential filter length in superpixels (default: from the Sun's size) |
-| `--output`, `-o` | alignment results file (default: next to the project) |
+| `--output`, `-o` | alignment results file (default: json/<project>_align.json in the project folder) |
 | `--profile-dir` | folder of saved own-flats profiles |
 | `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
 | `--quiet` | print only the result, not each step |
@@ -1112,7 +1127,7 @@ merge the aligned frames into one linear HDR image.
 | --- | --- |
 | `project` | project file (run 'totality align' on it first) |
 | `--align` | alignment results file (default: the one saved by 'totality align') |
-| `--output`, `-o` | output folder (default: next to the project) |
+| `--output`, `-o` | folder for the pictures (default: next to the project); the .fit and .json files always go in the fits and json folders inside the project folder |
 | `--name` | output file name prefix (default: the project name) |
 | `--square` | quicker run: output only a square 10 solar radii wide around the Sun (default: the full frame, the same size as the RAW files) |
 | `--radii` | like --square, but this many solar radii from the centre to the edge |
@@ -1131,9 +1146,9 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | Option | What it does |
 | --- | --- |
 | `project` | project file (run 'totality stack' on it first) |
-| `--settings` | Enhance settings file to start from (saved with 'Save settings...' on the Enhance tab, or the <name>_enhance.json written beside earlier layers); options given here as well override the file |
+| `--settings` | Enhance settings file to start from (saved with 'Save settings...' on the Enhance tab, or the <name>_enhance.json in the project's json folder); options given here as well override the file |
 | `--hdr` | HDR FITS file (default: the one saved by 'totality stack') |
-| `--output`, `-o` | output folder (default: next to the project) |
+| `--output`, `-o` | folder for the pictures (default: next to the project); the .fit and .json files always go in the fits and json folders inside the project folder |
 | `--name` | output file name prefix (default: the project name) |
 | `--layers` | comma-separated layers to write, from natural, nrgf, fnrgf, fnrgf_n, adaptive, achf (default: all but achf, which takes minutes on a full frame) |
 | `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' or ':linear' (combined as each method's own publication does: NRGF, FNRGF and FNRGF-N as Druckmuellerova, Morgan & Habbal 2011, typically 0.3-1; adaptive as Morgan & Druckmueller 2014, 0.43 for their mix; achf as Druckmuellerova's thesis 2013, added to the linear stack before the natural stretch, typically 20-50 with the log stretch, about twice that with gamma) or, for adaptive and achf only, ':average' (a gentler look, typically 0.4-0.6); default soft light, e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
@@ -1189,7 +1204,7 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--surface-denoise` | edge-preserving smoothing of the lunar surface, px (0 = off; e.g. 4): maria keep crisp edges |
 | `--edge-smooth` | most smoothing of the noisier pixels near the limb, px (default 0 = none; e.g. 3) |
 | `--include-rejected` | also use frames marked as rejected |
-| `--output`, `-o` | output folder (default: next to the project) |
+| `--output`, `-o` | folder for the pictures (default: next to the project); the .fit and .json files always go in the fits and json folders inside the project folder |
 | `--name` | output file name prefix (default: the project name) |
 | `--format` | picture type: 16-bit TIFF (default), 16-bit PNG or 8-bit JPG; all 300 dpi |
 | `--profile-dir` | folder of saved own-flats profiles (default: your profile library) |

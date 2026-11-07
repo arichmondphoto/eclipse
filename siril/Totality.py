@@ -279,7 +279,7 @@ class FramesTab(QWidget):
             box.addWidget(b)
             form.addRow(label, box)
             _tip(edit, calib_tips[label] + " Put the camera's RAW files here as they are (any number): the "
-                 "first Stack averages them into a master, saves it in the 'masters' folder beside the project, "
+                 "first Stack averages them into a master, saves it in fits/masters inside the project folder, "
                  "and later runs reuse it until a file in the folder is added, removed or replaced. Click Apply "
                  "after changing it.", form)
             _tip(b, "Choose the " + label.rstrip(":").lower() + ".")
@@ -659,7 +659,8 @@ class FramesTab(QWidget):
             return
         by_index = {f.index: f for f in self.inventory.frames}
         written = set()
-        out_dir = self.project_dir()
+        out_dir = self.project_dir() / "fits"  # .fit files in their own folder in the project folder
+        out_dir.mkdir(parents=True, exist_ok=True)
         for fc in lensfun_frames:
             f = by_index[fc.frame_index]
             if not (f.width and f.height):
@@ -906,7 +907,7 @@ class AlignTab(StepTab):
         run.clicked.connect(self.run)
         _tip(run, "Measures every light frame's shift and rotation against the reference frame on the corona, "
              "finds the Sun's true centre from the Moon's path, and saves the result with the project "
-             "(<name>_align.json). Nothing is resampled yet: Stack uses it. Takes several minutes for a full bracket.")
+             "(json/<name>_align.json in the project folder). Nothing is resampled yet: Stack uses it. Takes several minutes for a full bracket.")
         self.run_buttons.append(run)
         self.settings_layout.addWidget(run)
         self.settings_layout.addStretch(1)
@@ -1038,7 +1039,7 @@ class StackTab(StepTab):
         run = QPushButton("Stack frames")
         run.clicked.connect(self.run)
         _tip(run, "Calibrates (darks, bias, flats), aligns and merges every light frame into one linear HDR stack "
-             "(<name>_hdr.fit) with its weights and a preview, matching each frame's brightness to the others. "
+             "(fits/<name>_hdr.fit in the project folder) with its weights and a preview, matching each frame's brightness to the others. "
              "Needs Align first. Re-run it after changing anything on the Frames tab or here.")
         self.run_buttons.append(run)
         self.settings_layout.addWidget(run)
@@ -1525,11 +1526,12 @@ class EnhanceTab(StepTab):
              "(ACHF) sizes are saved relative to the Sun, so they suit a stack taken with another lens. The detail "
              "box is not saved.")
         _tip(self.load_settings_btn, "Sets every setting on this tab from a file saved with 'Save settings…', or "
-             "from the <name>_enhance.json written beside full-size layers (the exact settings they were made "
-             "with). Settings the file does not have stay as they are, and the log lists them.")
+             "from the <name>_enhance.json that 'Write full-size layers' saves in the project's json folder (the "
+             "exact settings those layers were made with). Settings the file does not have stay as they are, and the log lists them.")
         _tip(self.run_btn, "Makes the ticked layers at full resolution and writes them, plus the blend, under a name "
              "and in a folder you choose (each layer as <name>_<layer>), as TIFF (16-bit), PNG (16-bit) or JPG "
-             "(8-bit), with <name>_enhance.json holding the settings used (Load settings… reads it; the Earthshine "
+             "(8-bit). The settings used are saved as <name>_enhance.json in the project's json folder (Load "
+             "settings… reads it; the Earthshine "
              "tab's final image uses the last run's settings). A few minutes for a full frame, more with "
              "Adaptive (ACHF).")
 
@@ -1657,8 +1659,10 @@ class EnhanceTab(StepTab):
 
     def save_settings(self) -> None:
         ft = self.main.frames_tab
-        start = ft.project_dir() / f"{ft.project.name}_enhance_settings.json" if ft.project_path else \
+        start = ft.project_dir() / "json" / f"{ft.project.name}_enhance_settings.json" if ft.project_path else \
             Path.home() / "enhance_settings.json"
+        if ft.project_path:
+            start.parent.mkdir(parents=True, exist_ok=True)
         name, _ = QFileDialog.getSaveFileName(self, "Save Enhance settings", str(start), "Enhance settings (*.json)")
         if not name:
             return
@@ -1671,7 +1675,8 @@ class EnhanceTab(StepTab):
 
     def load_settings(self) -> None:
         ft = self.main.frames_tab
-        start = str(ft.project_dir()) if ft.project_path else str(Path.home())
+        jdir = ft.project_dir() / "json"
+        start = str(jdir if jdir.is_dir() else ft.project_dir()) if ft.project_path else str(Path.home())
         name, _ = QFileDialog.getOpenFileName(self, "Load Enhance settings", start, "Enhance settings (*.json)")
         if not name:
             return

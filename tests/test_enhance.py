@@ -1,6 +1,7 @@
 """Phase 4: NRGF, FNRGF, FNRGF-N, adaptive filter, natural layer, colour, CLI."""
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -155,6 +156,8 @@ def test_cli_enhance(tmp_path, capsys):
         t = tifffile.imread(saved[k])
         assert t.shape == (240, 320, 3) and t.dtype == np.uint16
     assert "nrgf" not in saved
+    assert Path(saved["info"]).parent == tmp_path / "json"            # the settings used, in json/
+    assert Path(saved["natural"]).parent == tmp_path                  # pictures beside the project
     assert cli.main(["enhance", str(path), "--blend", "bogus=1"]) == 1
     assert cli.main(["enhance", str(path), "--layers", "nope"]) == 1
     assert cli.main(["enhance", str(path), "--white", "camera", "--blend", "none", "--layers", "natural",

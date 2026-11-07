@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="field rotation: smooth drift over time (default), per frame, or none")
     p.add_argument("--any-angle", action="store_true", help="search any rotation and scale (alt-az mounts)")
     p.add_argument("--rho", type=float, help="tangential filter length in superpixels (default: from the Sun's size)")
-    p.add_argument("--output", "-o", help="alignment results file (default: next to the project)")
+    p.add_argument("--output", "-o", help="alignment results file (default: json/<project>_align.json in the project folder)")
     p.add_argument("--profile-dir", help="folder of saved own-flats profiles")
     p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("stack", help="merge the aligned frames into one linear HDR image")
     p.add_argument("project", help="project file (run 'totality align' on it first)")
     p.add_argument("--align", help="alignment results file (default: the one saved by 'totality align')")
-    p.add_argument("--output", "-o", help="output folder (default: next to the project)")
+    p.add_argument("--output", "-o", help="folder for the pictures (default: next to the project); the .fit and .json files always go in the fits and json folders inside the project folder")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--square", action="store_true",
                    help="quicker run: output only a square 10 solar radii wide around the Sun "
@@ -151,10 +151,10 @@ def main(argv: list[str] | None = None) -> int:
     enhance_parser = p
     p.add_argument("project", help="project file (run 'totality stack' on it first)")
     p.add_argument("--settings", help="Enhance settings file to start from (saved with 'Save settings...' on the "
-                                      "Enhance tab, or the <name>_enhance.json written beside earlier layers); "
+                                      "Enhance tab, or the <name>_enhance.json in the project's json folder); "
                                       "options given here as well override the file")
     p.add_argument("--hdr", help="HDR FITS file (default: the one saved by 'totality stack')")
-    p.add_argument("--output", "-o", help="output folder (default: next to the project)")
+    p.add_argument("--output", "-o", help="folder for the pictures (default: next to the project); the .fit and .json files always go in the fits and json folders inside the project folder")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--layers", default=",".join(DEFAULT_LAYERS),
                    help=f"comma-separated layers to write, from {', '.join(LAYERS)} (default: all but achf, which "
@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--edge-smooth", type=float, default=0.0,
                    help="most smoothing of the noisier pixels near the limb, px (default 0 = none; e.g. 3)")
     p.add_argument("--include-rejected", action="store_true", help="also use frames marked as rejected")
-    p.add_argument("--output", "-o", help="output folder (default: next to the project)")
+    p.add_argument("--output", "-o", help="folder for the pictures (default: next to the project); the .fit and .json files always go in the fits and json folders inside the project folder")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--format", choices=["tif", "png", "jpg"], default="tif",
                    help="picture type: 16-bit TIFF (default), 16-bit PNG or 8-bit JPG; all 300 dpi")

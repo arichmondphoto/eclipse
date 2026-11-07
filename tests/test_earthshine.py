@@ -172,6 +172,12 @@ def test_workflow_and_cli(tmp_path, monkeypatch, run, capsys):
     assert "Lunar surface detail" in out
     saved = EventProject.load(tmp_path / "e.json").parameters["earthshine"]
     assert Path(saved["earthshine"]).exists() and sorted(saved["frames"]) == [0, 1, 2, 3]
+    # Andy, Nov 2026: data files in their own folders inside the project folder, pictures beside it;
+    # the align and stack files at the top (an existing project's layout) are still found.
+    for k in ("linear", "rgb", "weight", "moon_surface"):
+        assert Path(saved[k]).parent == tmp_path / "fits", (k, saved[k])
+    assert Path(saved["info"]).parent == tmp_path / "json"
+    assert Path(saved["earthshine"]).parent == tmp_path
 
 
 def test_composite_fills_disc_and_keeps_corona():

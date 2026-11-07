@@ -1693,7 +1693,8 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
 
 def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[EnhanceParams] = None,
             out_dir=None, name: str = "corona", progress: Optional[Say] = None,
-            fmt: str = "tif", moon: Optional[MoonInput] = None, keep: Optional[set] = None) -> tuple[EnhanceResult, dict]:
+            fmt: str = "tif", moon: Optional[MoonInput] = None, keep: Optional[set] = None,
+            json_dir=None) -> tuple[EnhanceResult, dict]:
     """``hdr`` is (h, w, 3) linear. Writes one image per layer to ``out_dir`` (``fmt``: tif, png or
     jpg; see ``imageout``); without ``out_dir`` returns the layers instead as {name: (h, w, 3)
     float32 in 0..1}. The same as :func:`prepare` then :func:`render` of the whole image."""
@@ -1722,8 +1723,10 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
         info = {"params": {k: (list(v) if isinstance(v, tuple) else v) for k, v in asdict(p).items()},
                 "white": wb.tolist(), "background": bg.tolist(), "noise_level": nlev, "scales": scales,
                 "geometry": asdict(geometry_from_header(header))}
-        (out / f"{name}_enhance.json").write_text(json.dumps(info, indent=2, default=float), encoding="utf-8")
-        paths["info"] = str(out / f"{name}_enhance.json")
+        jdir = Path(json_dir) if json_dir is not None else out  # the settings used, in json/ of the project
+        jdir.mkdir(parents=True, exist_ok=True)
+        (jdir / f"{name}_enhance.json").write_text(json.dumps(info, indent=2, default=float), encoding="utf-8")
+        paths["info"] = str(jdir / f"{name}_enhance.json")
     return EnhanceResult(paths, wb.tolist(), nlev, bg.tolist(), scales, notes), colour
 
 

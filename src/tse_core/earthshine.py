@@ -721,6 +721,7 @@ def stack_earthshine(
     progress: Optional[Say] = None,
     fmt: str = "tif",
     white: Optional[Sequence[float]] = None,
+    data_dirs: Optional[tuple] = None,
 ) -> tuple[EarthshineResult, np.ndarray, np.ndarray]:
     """Stack the frames on the Moon. ``matches``: frame index -> Match (gain, offset) from the HDR stack.
 
@@ -835,7 +836,7 @@ def stack_earthshine(
         outputs = _write(lum, detail, shown, good, weight, crop, canvas, (cx, cy), moon_r, p, out_dir, name, fmt,
                          keep_from, rgb, img=img, glare=extras.get("glare"), white=white,
                          tint=(surface_tint(rgb, detail, chan, good, cx, cy, moon_r, p, white, notes)
-                               if p.colour and p.saturation > 0 else None))
+                               if p.colour and p.saturation > 0 else None), data_dirs=data_dirs)
     return EarthshineResult([f.index for f in use], shifts, crop, snr, outputs, notes), lum, detail
 
 
@@ -1023,25 +1024,31 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
 def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, out_dir, name, fmt="tif",
            keep_from: Optional[float] = None, rgb: Optional[np.ndarray] = None,
            img: Optional[np.ndarray] = None, glare: Optional[np.ndarray] = None,
-           white: Optional[Sequence[float]] = None, tint: Optional[np.ndarray] = None) -> dict:
+           white: Optional[Sequence[float]] = None, tint: Optional[np.ndarray] = None,
+           data_dirs: Optional[tuple] = None) -> dict:
+    """The earthshine files: pictures in ``out_dir``; the .fit files and the .json in ``data_dirs``
+    (fits, json folders), else in ``out_dir`` too."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    fout, jout = (Path(d) for d in data_dirs) if data_dirs else (out, out)
+    fout.mkdir(parents=True, exist_ok=True)
+    jout.mkdir(parents=True, exist_ok=True)
     X0, Y0, w, h = crop
     cx, cy = centre
     header = {"OBJECT": "Earthshine", "CROPX0": X0, "CROPY0": Y0, "MOONX": cx, "MOONY": cy, "MOONR": moon_r,
               "COMMENT": "Moon-aligned linear stack in units of the reference exposure"}
-    lin_path = out / f"{name}_earthshine.fit"
+    lin_path = fout / f"{name}_earthshine.fit"
     write_fits(lin_path, lum, header)
-    write_fits(out / f"{name}_earthshine_weight.fit", weight.astype(np.float32), header)
+    write_fits(fout / f"{name}_earthshine_weight.fit", weight.astype(np.float32), header)
     if rgb is not None:
-        write_fits(out / f"{name}_earthshine_rgb.fit", rgb, header)
+        write_fits(fout / f"{name}_earthshine_rgb.fit", rgb, header)
     img = compose_layer(shown, good, weight, cx, cy, moon_r, p, keep_from, linear=img, glare=glare,
                         rgb=rgb if p.colour else None, white=white, tint=tint)
     moon_path = None
     if glare is not None:
         surface, vis = moon_surface(shown, good, glare, cx, cy, moon_r, p,
                                     p.margin(moon_r) if keep_from is None else keep_from, tint)
-        moon_path = out / f"{name}_moon_surface.fit"
+        moon_path = fout / f"{name}_moon_surface.fit"
         write_fits(moon_path, np.concatenate([np.moveaxis(surface, -1, 0), vis[None]], axis=0).astype(np.float32),
                    {**header, "COMMENT": "planes: surface R, G, B (display 0..1), visibility"})
     crop_tif = write_image(with_format(out / f"{name}_earthshine_crop.tif", fmt), img)
@@ -1056,14 +1063,14 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     if hh > 0 and ww > 0:
         layer[ty0 : ty0 + hh, tx0 : tx0 + ww] = img[sy0 : sy0 + hh, sx0 : sx0 + ww]
     layer_tif = write_image(with_format(out / f"{name}_earthshine.tif", fmt), layer)
-    info = out / f"{name}_earthshine.json"
+    info = jout / f"{name}_earthshine.json"
     moon = [cx + X0 - canvas[0], cy + Y0 - canvas[1], moon_r]  # in the layer's (canvas) pixels
     info.write_text(json.dumps({"crop": crop, "canvas": canvas, "moon": moon, "params": asdict(p)}, indent=2),
                     encoding="utf-8")
     outputs = {"earthshine": str(layer_tif), "crop": str(crop_tif), "linear": str(lin_path), "info": str(info)}
     if rgb is not None:
-        outputs["rgb"] = str(out / f"{name}_earthshine_rgb.fit")
-        outputs["weight"] = str(out / f"{name}_earthshine_weight.fit")
+        outputs["rgb"] = str(fout / f"{name}_earthshine_rgb.fit")
+        outputs["weight"] = str(fout / f"{name}_earthshine_weight.fit")
     if moon_path is not None:
         outputs["moon_surface"] = str(moon_path)
     return outputs

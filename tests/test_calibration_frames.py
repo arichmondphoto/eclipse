@@ -221,7 +221,7 @@ def test_masters_are_built_once_and_reused_until_the_folder_changes(tmp_path, mo
     reads = _counting(monkeypatch)
     first, log1 = _stack(path, tmp_path, flat_mode="master")
     assert _calib_reads(reads, "dark_") and _calib_reads(reads, "flat_") and _calib_reads(reads, "bias_")
-    saved = sorted(p.name for p in (tmp_path / "masters").glob("*.fit"))
+    saved = sorted(p.name for p in (tmp_path / "fits" / "masters").glob("*.fit"))
     assert any("dark" in n for n in saved) and any("flat" in n for n in saved) and any("bias" in n for n in saved)
     assert "saved" in log1
 
@@ -236,10 +236,26 @@ def test_masters_are_built_once_and_reused_until_the_folder_changes(tmp_path, mo
     reads.clear()
     _stack(path, tmp_path, flat_mode="master")
     assert _calib_reads(reads, "dark_") and not _calib_reads(reads, "flat_") and not _calib_reads(reads, "bias_")
-    assert len([p for p in (tmp_path / "masters").glob("*dark*.fit")]) == 1   # the old one removed
+    assert len([p for p in (tmp_path / "fits" / "masters").glob("*dark*.fit")]) == 1   # the old one removed
 
     # A bias frame replaced: the bias, and the flats it is taken off, are built again.
     (tmp_path / "bias_1.NEF").write_bytes(b"changed")
     reads.clear()
     _stack(path, tmp_path, flat_mode="master")
     assert _calib_reads(reads, "bias_") and _calib_reads(reads, "flat_") and not _calib_reads(reads, "dark_")
+
+
+def test_data_files_go_in_fits_and_json_folders(tmp_path, monkeypatch):
+    """Andy, Nov 2026: every .fit file the steps write goes in fits/ inside the project folder and every
+    .json file (but the project file) in json/; pictures stay beside the project. The alignment file
+    here sits at the top, as in an existing project, and is still found."""
+    path = _project(tmp_path, monkeypatch)
+    _stack(path, tmp_path, flat_mode="compare")
+    st = EventProject.load(path).parameters["stack"]
+    assert Path(st["hdr"]).parent == tmp_path / "fits" and Path(st["weight"]).parent == tmp_path / "fits"
+    assert Path(st["vignetting"]).parent == tmp_path / "fits"
+    assert Path(st["flat_vs_profile"]).parent == tmp_path / "fits"
+    assert Path(st["info"]).parent == tmp_path / "json"
+    assert Path(st["preview"]).parent == tmp_path
+    assert sorted(p.name for p in tmp_path.glob("*.fit")) == []
+    assert sorted(p.name for p in tmp_path.glob("*.json")) == ["ecl.json", "ecl_align.json"]

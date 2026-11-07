@@ -44,6 +44,13 @@ def reporter(say: Optional[Say] = None, cancel: Optional[Callable[[], bool]] = N
     return _say
 
 
+def data_dirs(project_path) -> tuple[Path, Path]:
+    """Where the steps put their data files: (.fit files, .json files) in their own folders inside the
+    project folder, ``fits`` and ``json``. The project file and the pictures stay beside them."""
+    base = Path(project_path).resolve().parent
+    return base / "fits", base / "json"
+
+
 def resolve(project_path, stored: Optional[str]) -> str:
     """Find a file the project refers to, wherever the program was started from.
 
@@ -56,7 +63,8 @@ def resolve(project_path, stored: Optional[str]) -> str:
         return ""
     p = Path(stored)
     base = Path(project_path).resolve().parent
-    for cand in ((p,) if p.is_absolute() else ()) + (base / p, base / p.name, p):
+    for cand in ((p,) if p.is_absolute() else ()) + (base / p, base / p.name, base / "fits" / p.name,
+                                                       base / "json" / p.name, p):
         if cand.exists():
             return str(cand.resolve())
     return ""
@@ -136,9 +144,10 @@ def _calibrated_plan(project_path, project: EventProject, lights, lensfun_db, pr
         why = flat_mismatch(lights, calib)
         if why:
             say("warning: " + why)
-        # Masters are saved in masters/ beside the project and reused while their frames are unchanged.
+        # Masters are saved in fits/masters in the project folder and reused while their frames are unchanged.
         info = attach_masters(plan, calib, lambda p: rawio.read_mosaic(p), lights, flat_mode, crop, say,
-                              out_dir=out_dir, name=name, cache_dir=Path(project_path).resolve().parent / "masters")
+                              out_dir=data_dirs(project_path)[0], name=name,
+                              cache_dir=data_dirs(project_path)[0] / "masters")
     for w in plan.warnings:
         say("warning: " + w)
     for line in describe_frames(plan):
@@ -206,7 +215,8 @@ def align(project_path, opts: AlignOptions, say: Optional[Say] = None, cancel=No
                                eclipse_date=project.eclipse_date, progress=say)
     except (RuntimeError, ValueError) as exc:
         raise WorkflowError(str(exc)) from exc
-    out = Path(opts.output) if opts.output else path.with_name(path.stem + "_align.json")
+    out = Path(opts.output) if opts.output else data_dirs(path)[1] / (path.stem + "_align.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
     result.save(out)
     project.parameters["align"] = {"file": str(out), "rho": opts.rho, "rotation": opts.rotation,
                                    "window": opts.window, "clock_error": opts.clock_error_s}
@@ -218,7 +228,7 @@ def load_alignment(project_path, align_file: Optional[str] = None) -> tuple[dict
     path = Path(project_path).resolve()
     project = EventProject.load(path)
     align_path = Path(resolve(path, align_file or project.parameters.get("align", {}).get("file"))
-                      or resolve(path, path.stem + "_align.json") or path.with_name(path.stem + "_align.json"))
+                      or resolve(path, path.stem + "_align.json") or data_dirs(path)[1] / (path.stem + "_align.json"))
     if not align_path.exists():
         raise WorkflowError(f"No alignment results at {align_path}; run the Align step first.")
     return json.loads(align_path.read_text(encoding="utf-8")), align_path
@@ -316,8 +326,9 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
     small, text = correction_preview(calibs.get(ref), tuple(alignment["image_size"]), crop_factor)
     say(text)
     if small is not None:
-        out_dir.mkdir(parents=True, exist_ok=True)
-        vpath = out_dir / f"{name}_vignetting.fit"
+        fits_dir = data_dirs(path)[0]
+        fits_dir.mkdir(parents=True, exist_ok=True)
+        vpath = fits_dir / f"{name}_vignetting.fit"
         write_fits(vpath, small, {"COMMENT": "Correction applied by Stack (frames divided by this), 1/8 size"})
         say(f"  saved as {vpath.name} (1/8 size; 1.0 = the middle)")
         calib_info = {**calib_info, "vignetting": str(vpath)}
@@ -325,7 +336,8 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
     try:
         result, _hdr, _w = stack_frames(infos, lambda f: read_mosaic(frames[f.index].path), calibs,
                                         tuple(alignment["image_size"]), ref, alignment.get("sun"), params,
-                                        out_dir=out_dir, name=name, image_crop=crop_factor, progress=say)
+                                        out_dir=out_dir, name=name, image_crop=crop_factor, progress=say,
+                                        data_dirs=data_dirs(path))
     except (RuntimeError, ValueError) as exc:
         raise WorkflowError(str(exc)) from exc
     project.parameters["stack"] = {"align": str(align_path), "radii": opts.radii, "moon_frame": result.moon_frame,
@@ -678,7 +690,7 @@ def enhance_project(project_path, params, hdr_file: Optional[str] = None, output
         say(n)
     out_dir = Path(output) if output else path.parent
     result, _ = enhance(data.hdr, data.weight, data.header, params, out_dir=out_dir, name=name or path.stem, fmt=fmt,
-                        progress=say)
+                        progress=say, json_dir=data_dirs(path)[1])
     project = EventProject.load(path)
     project.parameters["enhance"] = {"hdr": data.path, **result.layers}
     project.save(path)
@@ -772,7 +784,7 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
         result, _lum, _detail = stack_earthshine(use, lambda f: read_mosaic(frames[f.index].path), calibs, matches,
                                                  moon_xy, moon_r, canvas, p, out_dir=out_dir,
                                                  name=name or path.stem, image_crop=crop_factor, progress=say,
-                                                 fmt=fmt, white=white)
+                                                 fmt=fmt, white=white, data_dirs=data_dirs(path))
     except (RuntimeError, ValueError) as exc:
         raise WorkflowError(str(exc)) from exc
     project.parameters["earthshine"] = {**result.outputs, "frames": result.frames}

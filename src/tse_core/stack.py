@@ -348,6 +348,7 @@ def stack_frames(
     name: str = "stack",
     image_crop: float = 1.0,
     progress: Optional[Say] = None,
+    data_dirs: Optional[tuple] = None,
 ) -> tuple[StackResult, np.ndarray, np.ndarray]:
     """Run brightness matching and the weighted, Moon-aware average.
 
@@ -489,7 +490,7 @@ def stack_frames(
     outputs = {}
     if out_dir is not None:
         outputs = write_outputs(hdr, weight, crop, matches, by_index, ref_index, moon_frame, sun, out_dir, name,
-                                wb=wb)
+                                wb=wb, data_dirs=data_dirs)
     result = StackResult(crop, [matches[i] for i in sorted(matches)], moon_frame, sun, outputs, notes)
     return result, hdr, weight
 
@@ -551,7 +552,10 @@ def stretch_preview(hdr: np.ndarray, wb: Optional[Sequence[float]] = None, stren
     return (np.clip(y, 0, 1) * 65535).astype(np.uint16)
 
 
-def write_outputs(hdr, weight, crop, matches, infos, ref_index, moon_frame, sun, out_dir, name, wb=None) -> dict:
+def write_outputs(hdr, weight, crop, matches, infos, ref_index, moon_frame, sun, out_dir, name, wb=None,
+                  data_dirs: Optional[tuple] = None) -> dict:
+    """The stack's files: the .fit files and the .json in ``data_dirs`` (fits, json folders), else in
+    ``out_dir`` with the preview picture."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     X0, Y0 = crop[0], crop[1]
@@ -565,15 +569,18 @@ def write_outputs(hdr, weight, crop, matches, infos, ref_index, moon_frame, sun,
     if sun:
         header.update({"SUNX": sun["x"] - X0, "SUNY": sun["y"] - Y0, "SUNR": sun["radius_px"],
                        "PIXSCALE": sun["arcsec_per_px"], "NORTHANG": sun["rotation_deg"]})
-    hdr_path = out / f"{name}_hdr.fit"
+    fits_out, json_out = (Path(d) for d in data_dirs) if data_dirs else (out, out)
+    fits_out.mkdir(parents=True, exist_ok=True)
+    json_out.mkdir(parents=True, exist_ok=True)
+    hdr_path = fits_out / f"{name}_hdr.fit"
     write_fits(hdr_path, np.moveaxis(hdr, -1, 0), header)
-    w_path = out / f"{name}_weight.fit"
+    w_path = fits_out / f"{name}_weight.fit"
     write_fits(w_path, weight, {"COMMENT": "Sum of stacking weights per pixel"})
     from .imageout import write_image
 
     preview = stretch_preview(hdr, wb)
     prev_path = write_image(out / f"{name}_preview.tif", preview.astype(np.float32) / 65535.0)
-    meta_path = out / f"{name}_stack.json"
+    meta_path = json_out / f"{name}_stack.json"
     meta_path.write_text(json.dumps({"crop": crop, "matches": [asdict(m) for m in matches.values()],
                                      "reference": ref_index, "moon_frame": moon_frame, "sun": sun,
                                      "header": header}, indent=2), encoding="utf-8")
