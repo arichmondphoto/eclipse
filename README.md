@@ -911,11 +911,26 @@ from your own flats.
 
 ### Darks and bias
 
+Put the camera's RAW files in the folders as they are, any number of them;
+the toolkit averages them itself (pre-stacked masters are not read from
+these folders).
+
 * **Darks** are matched by exposure time and ISO and averaged into a master
   dark, which is subtracted (it includes the bias). Frames without a match
   use the bias, and hot pixels are found from the light frames.
 * **Bias** frames are matched by ISO and averaged into a master bias.
   Without them, each file's own black level is used.
+
+A dark only corrects light frames with its own exposure time and ISO, so
+for a bracket shoot darks at each shutter speed (10-20 each is plenty).
+
+**Masters are built once.** The first Stack (or earthshine stack) saves each
+master bias, dark and flat as a FITS file in a `masters` folder beside the
+project (they open in Siril), and later runs read them back instead of the
+frames. A master is built again when a file in its group is added, removed
+or replaced, and a master flat also when the bias taken off it changes; the
+old one is then deleted. The log says which masters were reused. Each is
+the size of one frame in 32-bit (about 180 MB for a 45-megapixel camera).
 
 ### What the log tells you
 

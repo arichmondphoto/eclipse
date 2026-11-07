@@ -136,8 +136,9 @@ def _calibrated_plan(project_path, project: EventProject, lights, lensfun_db, pr
         why = flat_mismatch(lights, calib)
         if why:
             say("warning: " + why)
+        # Masters are saved in masters/ beside the project and reused while their frames are unchanged.
         info = attach_masters(plan, calib, lambda p: rawio.read_mosaic(p), lights, flat_mode, crop, say,
-                              out_dir=out_dir, name=name)
+                              out_dir=out_dir, name=name, cache_dir=Path(project_path).resolve().parent / "masters")
     for w in plan.warnings:
         say("warning: " + w)
     for line in describe_frames(plan):

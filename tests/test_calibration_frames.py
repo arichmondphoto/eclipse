@@ -8,6 +8,7 @@ shadow, a dark-current glow and a bias pattern, and compare with the same scene 
 
 import json
 from datetime import timedelta
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -198,3 +199,47 @@ def test_an_uneven_light_source_is_not_copied_into_the_stack(tmp_path, monkeypat
     assert "brighter on the right" in log, log  # the slope is reported, not called dust
     share = float(log.split("% of pixels")[0].split(";")[-1].strip())
     assert share < 1.0, log
+
+
+def _counting(monkeypatch):
+    """Count the calibration frames read (bias, darks, flats) through rawio.read_mosaic."""
+    reads = []
+    orig = rawio.read_mosaic
+    monkeypatch.setattr(rawio, "read_mosaic", lambda p: (reads.append(Path(p).name), orig(p))[1])
+    return reads
+
+
+def _calib_reads(reads, kind=""):
+    return [r for r in reads if r.startswith(("bias_", "dark_", "flat_")) and r.startswith(kind)]
+
+
+def test_masters_are_built_once_and_reused_until_the_folder_changes(tmp_path, monkeypatch):
+    """Andy, Nov 2026: 300 darks were read again on every Stack and earthshine run (about 14 GB of
+    47 MB files). Each master is saved (FITS, in masters/ beside the project) with a fingerprint of
+    its files, and read back while the files stay the same."""
+    path = _project(tmp_path, monkeypatch)
+    reads = _counting(monkeypatch)
+    first, log1 = _stack(path, tmp_path, flat_mode="master")
+    assert _calib_reads(reads, "dark_") and _calib_reads(reads, "flat_") and _calib_reads(reads, "bias_")
+    saved = sorted(p.name for p in (tmp_path / "masters").glob("*.fit"))
+    assert any("dark" in n for n in saved) and any("flat" in n for n in saved) and any("bias" in n for n in saved)
+    assert "saved" in log1
+
+    reads.clear()
+    second, log2 = _stack(path, tmp_path, flat_mode="master")
+    assert _calib_reads(reads) == [], reads                      # nothing read again
+    assert np.array_equal(first, second)                        # the very same stack
+    assert "reused" in log2
+
+    # A dark frame replaced: the darks are built again, the flats and bias are not.
+    (tmp_path / "dark_0.NEF").write_bytes(b"changed")
+    reads.clear()
+    _stack(path, tmp_path, flat_mode="master")
+    assert _calib_reads(reads, "dark_") and not _calib_reads(reads, "flat_") and not _calib_reads(reads, "bias_")
+    assert len([p for p in (tmp_path / "masters").glob("*dark*.fit")]) == 1   # the old one removed
+
+    # A bias frame replaced: the bias, and the flats it is taken off, are built again.
+    (tmp_path / "bias_1.NEF").write_bytes(b"changed")
+    reads.clear()
+    _stack(path, tmp_path, flat_mode="master")
+    assert _calib_reads(reads, "bias_") and _calib_reads(reads, "flat_") and not _calib_reads(reads, "dark_")

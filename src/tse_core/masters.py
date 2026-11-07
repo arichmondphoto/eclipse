@@ -68,11 +68,14 @@ def _centre_norm(plane: np.ndarray) -> float:
     return float(np.median(vals))
 
 
-def _mean(paths: list[str], load, offset_of=None, normalise=False) -> tuple[np.ndarray, int]:
-    """Mean of the frames' raw data (minus each one's offset; scaled to 1 in the middle)."""
+def _mean(paths: list[str], load, offset_of=None, normalise=False, info: Optional[dict] = None) -> tuple[np.ndarray, int]:
+    """Mean of the frames' raw data (minus each one's offset; scaled to 1 in the middle). ``info``
+    receives the colour-filter pattern."""
     total, shape, n = None, None, 0
     for p in paths:
         mos = load(p)
+        if info is not None and "pattern" not in info:
+            info["pattern"] = mos.pattern
         data = mos.bayer.astype(np.float64)
         if shape is None:
             shape = data.shape
@@ -90,6 +93,88 @@ def _mean(paths: list[str], load, offset_of=None, normalise=False) -> tuple[np.n
         total = data if total is None else total + data
         n += 1
     return (total / max(n, 1)).astype(np.float32), n
+
+
+MASTER_FORMAT = 1  # raise when the way a master is made changes, so saved ones are built again
+
+
+class MasterCache:
+    """Masters saved in a folder (FITS, so they open in Siril) and read back while their frames stay
+    the same: each carries a fingerprint of its files (name, size and time modified, so a file
+    added, removed or replaced changes it) and of how it was made."""
+
+    def __init__(self, folder: str | Path):
+        self.folder = Path(folder)
+
+    @staticmethod
+    def fingerprint(paths: list[str], how: str = "") -> Optional[str]:
+        import hashlib
+        import json
+        import os
+
+        try:
+            files = sorted((str(Path(p).resolve()), os.stat(p).st_size, os.stat(p).st_mtime_ns) for p in paths)
+        except OSError:
+            return None
+        text = json.dumps([MASTER_FORMAT, how, files])
+        return hashlib.sha1(text.encode()).hexdigest()
+
+    def _stem(self, kind: str, key: str) -> str:
+        import re
+
+        return f"master_{kind}_{re.sub(r'[^A-Za-z0-9._-]', 'x', key)}_"
+
+    def get(self, kind: str, key: str, fp: Optional[str]):
+        if fp is None:
+            return None
+        p = self.folder / f"{self._stem(kind, key)}{fp[:12]}.fit"
+        if not p.exists():
+            return None
+        from .fits import read_fits
+
+        try:
+            data, header = read_fits(p)
+        except (OSError, ValueError):
+            return None
+        if header.get("TSEHASH") != fp:
+            return None
+        return (np.ascontiguousarray(data, dtype=np.float32), int(header.get("NFRAMES", 0)), p,
+                str(header.get("BAYERPAT", "")).strip())
+
+    def put(self, kind: str, key: str, fp: Optional[str], data: np.ndarray, n: int, pattern: str = "") -> Optional[Path]:
+        if fp is None:
+            return None
+        from .fits import write_fits
+
+        try:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            stem = self._stem(kind, key)
+            for old in self.folder.glob(f"{stem}*.fit"):  # the same group made from other files
+                old.unlink()
+            p = self.folder / f"{stem}{fp[:12]}.fit"
+            tmp = p.with_suffix(".tmp")
+            write_fits(tmp, data, {"IMAGETYP": f"Master {kind}", "NFRAMES": int(n), "TSEHASH": fp,
+                                   "BAYERPAT": pattern or "",
+                                   "COMMENT": "Made by Totality; built again when its frames change"})
+            tmp.replace(p)
+            return p
+        except OSError:
+            return None
+
+
+def _mean_cached(cache: Optional[MasterCache], kind: str, key: str, paths: list[str], load, how: str = "",
+                 info: Optional[dict] = None, **kw) -> tuple[np.ndarray, int, str]:
+    """``_mean`` of the frames, read back from ``cache`` while they are unchanged. Returns (master,
+    number of frames, what happened, for the log); ``info`` receives the colour-filter pattern."""
+    info = {} if info is None else info
+    fp = MasterCache.fingerprint(paths, how) if cache is not None else None
+    hit = cache.get(kind, key, fp) if cache is not None else None
+    if hit is not None and hit[3]:
+        data, n, p, info["pattern"] = hit
+        return data, n or len(paths), f"reused from {p.parent.name}/{p.name}"
+    data, n = _mean(paths, load, info=info, **kw)
+    p = cache.put(kind, key, fp, data, n, info.get("pattern", "")) if cache is not None else None
+    return data, n, (f"saved as {p.parent.name}/{p.name} for next time" if p is not None else "")
 
 
 def _black_array(mos) -> np.ndarray:
@@ -176,12 +261,18 @@ def attach_masters(
     say: Optional[Say] = None,
     out_dir: Optional[str | Path] = None,
     name: str = "stack",
+    cache_dir: Optional[str | Path] = None,
 ) -> dict:
     """Build the masters the plan calls for and attach them to its frames.
 
     Returns what was done, for the project file: ``{"flat_mode", "flat_vs_profile"?}``.
     """
     say = say or (lambda _m: None)
+    cache = MasterCache(cache_dir) if cache_dir is not None else None
+
+    def note(what: str) -> str:
+        return f"; {what}" if what else ""
+
     if flat_mode not in FLAT_MODES:
         raise ValueError(f"flat mode must be one of {', '.join(FLAT_MODES)}")
     from .calibration import _dark_key, _flat_key, _iso_key
@@ -197,14 +288,14 @@ def attach_masters(
     flat_isos = {_iso_key(f) for f in calib.flats}
     for key, paths in plan.bias_groups.items():
         if key in used_iso or key in flat_isos:
-            bias[key], n = _mean(paths, load)
-            say(f"master bias {key.replace('iso', 'ISO ')}: mean of {n} bias frame(s)")
+            bias[key], n, what = _mean_cached(cache, "bias", key, paths, load)
+            say(f"master bias {key.replace('iso', 'ISO ')}: mean of {n} bias frame(s){note(what)}")
 
     # Darks.
     darks: dict[str, np.ndarray] = {}
     for key in sorted({fc.dark_group for fc in plan.frames if fc.dark_group}):
-        darks[key], n = _mean(plan.dark_groups[key], load)
-        say(f"master dark {describe_dark_key(key)}: mean of {n} dark frame(s)")
+        darks[key], n, what = _mean_cached(cache, "dark", key, plan.dark_groups[key], load)
+        say(f"master dark {describe_dark_key(key)}: mean of {n} dark frame(s){note(what)}")
 
     # Flats: each one's own offset (its ISO's master bias, else its black level) removed.
     flat_meta = {f.path: f for f in calib.flats}
@@ -219,11 +310,15 @@ def attach_masters(
             b = bias[biased[0]]
             offset = lambda mos, b=b: b  # noqa: E731
             how = "master bias"
+            made = "bias " + str(MasterCache.fingerprint(plan.bias_groups[biased[0]]))
         else:
             offset = _black_array
             how = "black level"
-        flat, n = _mean(paths, load, offset_of=offset, normalise=True)
-        pattern = load(paths[0]).pattern
+            made = "black level"
+        info: dict = {}
+        flat, n, what = _mean_cached(cache, "flat", key, paths, load, how=made, info=info, offset_of=offset,
+                                     normalise=True)
+        pattern = info["pattern"]
         label = _flat_label(key)
         prof, _ = _profile_of(flat, pattern, image_crop, flat_meta.get(paths[0]), with_map=False)
         profiles[key] = prof
@@ -244,7 +339,8 @@ def attach_masters(
                     + "; taken out of the master flat (it is the light, not the lens)")
             np.maximum(flat, MIN_ILLUMINATION, out=flat)
             flats[key] = flat
-            say(f"flats {label}: master flat, mean of {n} flat(s) ({how} removed); corrects vignetting and dust")
+            say(f"flats {label}: master flat, mean of {n} flat(s) ({how} removed); corrects vignetting and dust"
+                + note(what))
         if flat_mode == "compare":
             from scipy import ndimage
 

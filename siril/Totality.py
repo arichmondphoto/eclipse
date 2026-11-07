@@ -278,7 +278,10 @@ class FramesTab(QWidget):
             b.clicked.connect(lambda _=False, e=edit: self._pick_folder(e))
             box.addWidget(b)
             form.addRow(label, box)
-            _tip(edit, calib_tips[label] + " Click Apply after changing it.", form)
+            _tip(edit, calib_tips[label] + " Put the camera's RAW files here as they are (any number): the "
+                 "first Stack averages them into a master, saves it in the 'masters' folder beside the project, "
+                 "and later runs reuse it until a file in the folder is added, removed or replaced. Click Apply "
+                 "after changing it.", form)
             _tip(b, "Choose the " + label.rstrip(":").lower() + ".")
             self.calib_browse.append(b)
         buttons = QHBoxLayout()
