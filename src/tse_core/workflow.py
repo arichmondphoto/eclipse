@@ -815,7 +815,8 @@ def enhance_params_from_project(path, project):
 
 def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1.0,
                     preview_side: Optional[int] = None, name: Optional[str] = None, say: Optional[Say] = None,
-                    cancel=None, output_file: Optional[str] = None, enhance_params=None, moon_only: bool = False):
+                    cancel=None, output_file: Optional[str] = None, enhance_params=None, moon_only: bool = False,
+                    box: Optional[tuple] = None, prominences: Optional[bool] = None, prominence_params=None):
     """The final picture with the Moon in it, drawn in one go with the corona.
 
     With ``moon_only`` returns (picture, Moon mask) without writing, for pasting the Moon as drawn
@@ -826,8 +827,10 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     limb is the stack's own: same curve, same colour, no seam. The seas and highlands (glare
     removed, from the earthshine step) are then added where the earthshine dominates, ``strength``
     times their brightness. ``base_layer``: blend or natural.
-    With ``preview_side`` returns a reduced image (no file); otherwise writes ``output_file``
-    (default ``<name>_final.tif``) and returns its path.
+    With ``preview_side`` returns a reduced image (no file); with ``box`` = (y0, y1, x0, x1) returns
+    that part at full size, exactly as the written image has it (no file); otherwise writes
+    ``output_file`` (default ``<name>_final.tif``) and returns its path. ``prominences``: use the
+    prominence stack (None: as the project says), with ``prominence_params`` (None: the project's).
     """
     from dataclasses import replace
 
@@ -856,7 +859,9 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         params = replace(params, layers=())
     say("reading the HDR stack")
     data = load_hdr(path)
-    swap_project_prominences(path, project, data, say)
+    if prominences is not None:
+        project.parameters.setdefault("prominence_stack", {})["use"] = bool(prominences)
+    swap_project_prominences(path, project, data, say, prominence_params)
     es_rgb, es_head = read_fits(rgb_path)
     es_w, _ = read_fits(wpath)
     moon_data, _ = read_fits(mpath)
@@ -893,6 +898,13 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         vis = ndimage.shift(vis, shift[::-1], order=1)
     moon.surface, moon.visibility = surface.astype(np.float32), vis.astype(np.float32)
     say("stretching Moon and corona together")
+    if box is not None:  # the whole-image measurements, then only this part drawn
+        from .enhance import prepare, render
+
+        frame = prepare(data.hdr, data.weight, data.header, params, moon=moon, progress=say)
+        y0, y1, x0, x1 = box
+        return render(frame, params, box=(max(0, y0), min(frame.shape[0], y1), max(0, x0), min(frame.shape[1], x1)),
+                      keep={base_layer}, progress=say)[base_layer]
     _, colour = enhance(data.hdr, data.weight, data.header, params, out_dir=None, progress=say, moon=moon,
                         keep={base_layer})
     out = colour[base_layer]
@@ -1194,7 +1206,7 @@ def swap_project_prominences(path: Path, project: EventProject, data, say: Say, 
                             ps.get("blur_px"), float(h.get("PIXSCALE") or 2.4), say)
 
 
-def save_prominence_settings(project_path, params, use: bool = True) -> None:
+def save_prominence_settings(project_path, params, use: Optional[bool] = None) -> None:
     """The Prominences tab's settings into the project, for Write final image (here and on the
     Earthshine tab) and the command line's ``final``."""
     from dataclasses import asdict
@@ -1204,38 +1216,50 @@ def save_prominence_settings(project_path, params, use: bool = True) -> None:
     entry = dict(project.parameters.get("prominences", {}))
     entry["params"] = asdict(params)
     project.parameters["prominences"] = entry
-    if "prominence_stack" in project.parameters:
+    if use is not None and "prominence_stack" in project.parameters:
         project.parameters["prominence_stack"]["use"] = bool(use)
     project.save(path)
 
 
-def prominence_preview(project_path, params=None, say: Optional[Say] = None, cancel=None):
-    """The HDR stack round the Sun before and after the prominence stack's prominences go in, with
-    one quick stretch (display images, 0..1), and what was done. Nothing is written."""
-    from .prominences import ProminenceParams
+def prominence_preview(project_path, params=None, say: Optional[Say] = None, cancel=None,
+                       base: Optional[str] = None, strength: Optional[float] = None):
+    """The final image round the Sun, full size, exactly as Write final image draws it (the
+    Earthshine tab's base and lunar surface strength, the Enhance settings) with the prominences
+    from the prominence stack and ``params``. Nothing is written. Returns (picture, Sun's centre
+    and radius in it)."""
+    from .fits import read_fits_header
 
     say = reporter(say, cancel)
     path = Path(project_path).resolve()
     project = EventProject.load(path)
     if not resolve(path, project.parameters.get("prominence_stack", {}).get("hdr")):
         raise WorkflowError("Stack the prominences first (Stack prominences).")
-    say("reading the HDR stack")
-    data = load_hdr(path)
-    h = data.header
+    h = read_fits_header(resolve(path, project.parameters["stack"]["hdr"]))
     sx, sy, sr = float(h["SUNX"]), float(h["SUNY"]), float(h["SUNR"])
-    half = int(sr * 1.35)
-    ys = slice(max(0, int(sy) - half), min(data.hdr.shape[0], int(sy) + half))
-    xs = slice(max(0, int(sx) - half), min(data.hdr.shape[1], int(sx) + half))
-    before = data.hdr[ys, xs].copy()
-    p = params or ProminenceParams()
-    project.parameters.setdefault("prominence_stack", {})["use"] = True
-    info = swap_project_prominences(path, project, data, say, p)
-    after = data.hdr[ys, xs]
-    wb = np.array([float(h.get(k, 1.0)) for k in ("WBR", "WBG", "WBB")], np.float32)
-    lum = (before * wb).mean(axis=2)
-    top = float(np.percentile(lum[np.isfinite(lum)], 99.5))
-    show = lambda a: np.clip(np.arcsinh(30 * np.clip(a * wb, 0, None) / top) / math.asinh(30), 0, 1).astype(np.float32)
-    return show(before), show(after), info
+    half = int(sr * 1.3)
+    box = (int(sy) - half, int(sy) + half, int(sx) - half, int(sx) + half)
+    fin = project.parameters.get("final", {})
+    if base not in ("blend", "natural"):
+        base = fin.get("base") if fin.get("base") in ("blend", "natural") else "blend"
+    k = float(fin.get("strength", 1.0)) if strength is None else float(strength)
+    es = project.parameters.get("earthshine", {})
+    if all(resolve(path, es.get(x)) for x in ("info", "rgb", "weight", "moon_surface")):
+        img = final_with_moon(path, base, k, say=say, box=box, prominences=True, prominence_params=params)
+    else:  # no earthshine yet: the corona and prominences, as Enhance draws them (no Moon)
+        from dataclasses import replace
+
+        from .enhance import prepare, render
+
+        say("no earthshine stack yet: the corona and prominences without the Moon")
+        data = load_hdr(path)
+        project.parameters.setdefault("prominence_stack", {})["use"] = True
+        swap_project_prominences(path, project, data, say, params)
+        ep = enhance_params_from_project(path, project)
+        ep = replace(ep, layers=("natural",), blend={}) if base == "natural" else replace(ep, layers=())
+        frame = prepare(data.hdr, data.weight, data.header, ep, progress=say)
+        b = (max(0, box[0]), min(frame.shape[0], box[1]), max(0, box[2]), min(frame.shape[1], box[3]))
+        img = render(frame, ep, box=b, keep={base}, progress=say)[base]
+    return img, (sx - max(0, box[2]), sy - max(0, box[0]), sr)
 
 
 def load_sun_region(project_path, say: Optional[Say] = None):

@@ -2013,6 +2013,13 @@ class EarthshineTab(StepTab):
         _tip(self.strength, "Brightness of the seas and highlands added inside the Moon: 1 (default) = as made by "
              "the earthshine step (its Brightness setting), 0 = none, above 1 brightens a faint Moon (and its "
              "noise).", ff)
+        self.use_prom = QCheckBox("Use the prominence stack")
+        self.use_prom.setEnabled(False)
+        self.use_prom.toggled.connect(self._use_prom_toggled)
+        _tip(self.use_prom, "On: the final image (and the Moon layer, and Paste) gets the sharper prominences from "
+             "the short exposures, with the settings on the Prominences tab. Off: the HDR stack's own, softer "
+             "prominences. Needs Stack prominences on the Prominences tab first.")
+        ff.addRow(self.use_prom)
         fb = QHBoxLayout()
         self.final_preview_btn = QPushButton("Preview")
         self.final_preview_btn.clicked.connect(self.preview_final)
@@ -2249,12 +2256,24 @@ class EarthshineTab(StepTab):
         if fin.get("strength") is not None:
             self.strength.setValue(float(fin["strength"]))
         self._final_shown = False
+        ps = project.parameters.get("prominence_stack", {})
+        self.use_prom.blockSignals(True)
+        self.use_prom.setEnabled(bool(ps.get("hdr")))
+        self.use_prom.setChecked(bool(ps.get("hdr")) and bool(ps.get("use", True)))
+        self.use_prom.blockSignals(False)
         e = project.parameters.get("earthshine", {})
         self.layer_path = W.resolve(path, e.get("earthshine"))
         self.open_btn.setEnabled(bool(self.layer_path))
         crop = W.resolve(path, e.get("crop"))
         if crop:
             self.view.show_file(crop)
+
+    def _use_prom_toggled(self, on: bool) -> None:
+        """Kept in the window's project, so every later step (and the saved project) has it."""
+        ps = self.main.frames_tab.project.parameters.get("prominence_stack")
+        if ps is not None:
+            ps["use"] = bool(on)
+        self._final_changed()
 
     def run(self) -> None:
         from tse_core.earthshine import EarthshineParams
@@ -2334,10 +2353,6 @@ class ProminencesTab(StepTab):
 
         box = QGroupBox("2  In the final image")
         f = QFormLayout(box)
-        self.use = QCheckBox("Use the prominence stack")
-        self.use.setChecked(True)
-        self.use.toggled.connect(self.changed)
-        f.addRow(self.use)
         self.sharpen = self._dspin(0.0, 1.0, 0.5, 0.1, "")
         f.addRow("Sharpening:", self.sharpen)
         self.structure = self._dspin(0.0, 1.0, 0.0, 0.1, "")
@@ -2350,8 +2365,13 @@ class ProminencesTab(StepTab):
         self.chromo.setChecked(True)
         self.chromo.toggled.connect(self.changed)
         f.addRow(self.chromo)
+        self.chromo.toggled.connect(self._chromo_enabled)
         self.chromo_h = self._dspin(2.0, 40.0, 12.0, 1.0, " arcsec")
         f.addRow("Rim height:", self.chromo_h)
+        self.cover_label = QLabel("")
+        self.cover_label.setWordWrap(True)
+        f.addRow(self.cover_label)
+        self._cover_hides = False
         row = QHBoxLayout()
         self.preview_btn = QPushButton("Preview")
         self.preview_btn.clicked.connect(self.preview)
@@ -2375,10 +2395,10 @@ class ProminencesTab(StepTab):
              "exposure alone.", sf)
         _tip(self.stack_btn, "Stacks the short frames round the Sun (a few minutes) and saves the result with the "
              "project. Write final image then uses it.")
-        _tip(box, "Write final image (here or on the Earthshine tab) swaps the HDR stack's soft prominences for "
-             "the prominence stack's sharper ones, before the stretch: the corona behind them and the Moon are "
-             "left as they are, and the Moon still hides their bases.")
-        _tip(self.use, "Untick to write the final image with the HDR stack's own prominences.")
+        _tip(box, "Write final image (here or on the Earthshine tab, where 'Use the prominence stack' turns it on "
+             "or off) swaps the HDR stack's soft prominences for the prominence stack's sharper ones, before the "
+             "stretch: the corona behind them and the Moon are left as they are, and the Moon still hides their "
+             "bases.")
         _tip(self.sharpen, "Undoes the blur measured on the Moon's edge. 0.5 (default) brings out strands; 1 "
              "sharper but starts to show noise specks; 0 off.", f)
         _tip(self.structure, "Brings out fine strands and loops inside the prominences. 0 (default) off; 0.3-0.6 "
@@ -2391,10 +2411,11 @@ class ProminencesTab(StepTab):
         _tip(self.chromo, "The chromosphere is the thin pink rim along the edge of the Sun, seen near second and "
              "third contact. Untick to leave it out: red light lower than 'Rim height' is removed, except the "
              "bases of taller prominences.")
-        _tip(self.chromo_h, "How high the rim reaches above the solar limb when it is left out, in arcseconds. "
-             "Default 12; raise it if bits of rim remain, lower it if small prominences disappear.", f)
-        _tip(self.preview_btn, "Shows the stack round the Sun before (left) and after (right) the prominences are "
-             "swapped in, with a quick stretch. Nothing is written.")
+        _tip(self.chromo_h, "Only when the chromosphere is left out: how high the rim reaches above the solar limb, "
+             "in arcseconds. Default 12; raise it if bits of rim remain, lower it if small prominences disappear.", f)
+        _tip(self.preview_btn, "Shows the final image round the Sun at full size, exactly as Write final image will "
+             "draw it (your Enhance settings, and the base and Lunar surface strength on the Earthshine tab), with "
+             "these prominences. Nothing is written. Takes about as long as reading the stack and stretching it.")
         _tip(self.final_btn, "Saves these settings and writes the final image as the Earthshine tab does (same "
              "base and lunar surface strength), with these prominences.")
 
@@ -2421,9 +2442,29 @@ class ProminencesTab(StepTab):
             self.stack_label.setText(f"Stacked: {len(ps.get('frames', []))} frame(s)"
                                      + (f", blur at the Moon's edge {blur:.2f} px." if blur else "."))
             self.stops.setValue(float(ps.get("longest_stops", 2.0)))
-            self.use.setChecked(bool(ps.get("use", True)))
         else:
             self.stack_label.setText("Not stacked yet.")
+        self._cover_hides, self.cover_label_text = False, ""
+        try:
+            from tse_core.enhance import geometry_from_header
+            from tse_core.fits import read_fits_header
+            from tse_core.prominences import moon_cover_px
+
+            hdr = W.resolve(path, project.parameters.get("stack", {}).get("hdr"))
+            if hdr:
+                head = read_fits_header(hdr)
+                cover = moon_cover_px(geometry_from_header(head))
+                scale = float(head.get("PIXSCALE") or 0)
+                if cover > 0 and scale:
+                    arcsec = cover * scale
+                    self._cover_hides = arcsec >= 15.0
+                    self.cover_label_text = (
+                        f"In the final image the Moon covers the Sun's edge by at least {arcsec:.0f}\u2033 "
+                        f"({cover:.0f} px) all round, so the chromosphere (a few arcseconds high) is hidden"
+                        + (" and these two settings have no effect." if self._cover_hides else "."))
+        except (OSError, KeyError, ValueError):
+            pass
+        self.cover_label.setText(self.cover_label_text)
         saved = project.parameters.get("prominences", {}).get("params", {}) or {}
         for key, widget in (("sharpen", self.sharpen), ("structure", self.structure),
                             ("brightness", self.brightness), ("min_redness", self.min_redness),
@@ -2432,7 +2473,12 @@ class ProminencesTab(StepTab):
                 widget.setValue(float(saved[key]))
         if "chromosphere" in saved:
             self.chromo.setChecked(bool(saved["chromosphere"]))
+        self._chromo_enabled()
         self._shown = False
+
+    def _chromo_enabled(self, *_a) -> None:
+        self.chromo.setEnabled(not self._cover_hides)
+        self.chromo_h.setEnabled(not self._cover_hides and not self.chromo.isChecked())
 
     def changed(self, *_a) -> None:
         if self._shown:
@@ -2453,21 +2499,18 @@ class ProminencesTab(StepTab):
         if self.worker is not None:
             return
         params = self.params()
+        es = self.main.earthshine_tab
+        base = es.base.currentData() if es.base.currentData() in ("blend", "natural") else "blend"
+        k = es.strength.value()
 
         def job(path, say, cancel):
-            import numpy as np
-
-            before, after, info = W.prominence_preview(path, params, say=say, cancel=cancel)
-            gap = np.ones((before.shape[0], 8, 3), np.float32)
-            return np.concatenate([before, gap, after], axis=1), info
+            img, _sun = W.prominence_preview(path, params, say=say, cancel=cancel, base=base, strength=k)
+            return img
 
         self.start("Prominences preview", job, self._preview_done, reload=False)
 
-    def _preview_done(self, out) -> None:
-        img, info = out
+    def _preview_done(self, img) -> None:
         self._shown = True
-        if info:
-            self.log.appendPlainText(f"Prominences from the short frames: {info['count']} ({info['pixels']} px)")
         self.view.show_array(img)
 
     def write_final(self) -> None:
@@ -2475,7 +2518,7 @@ class ProminencesTab(StepTab):
         if proj is None:
             return
         try:
-            W.save_prominence_settings(proj, self.params(), self.use.isChecked())
+            W.save_prominence_settings(proj, self.params())
         except W.WorkflowError as exc:
             QMessageBox.warning(self, "Prominences", str(exc))
             return

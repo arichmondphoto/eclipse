@@ -1281,3 +1281,18 @@ def test_linear_layers_leave_no_bright_ring_round_the_moon(tmp_path, layer, weig
         ring = (rr >= r + a) & (rr < r + a + 1)
         got, want = float(np.median(img[ring])), float(np.median(plain[ring]))
         assert abs(got - want) < 0.03, (a, round(got, 3), round(want, 3))
+
+
+def test_final_image_box_is_the_written_image(tmp_path):
+    """Andy, Nov 2026: the Prominences tab's preview did not look like the written image (it was the
+    linear stack with a quick stretch of its own). It now draws part of the final image, full size,
+    exactly as Write final image does."""
+    from tse_core import imageout as IO
+    from tse_core import workflow as W
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    out = W.final_with_moon(proj, "blend", 1.0, output_file=str(tmp_path / "f.tif"))
+    full = IO.read_image(out)
+    part = W.final_with_moon(proj, "blend", 1.0, box=(60, 260, 40, 200))
+    assert part.shape == (200, 160, 3)
+    assert np.abs(part - full[60:260, 40:200]).max() < 2 / 65535

@@ -426,8 +426,13 @@ def swap_prominences(hdr: np.ndarray, weight: np.ndarray, prom: np.ndarray, prom
     d_moon = np.hypot(xx - g.moon_x, yy - g.moon_y)
     outside = d_moon > g.moon_r
     both = outside & (weight > 0) & (prom_weight > 0) & np.isfinite(hdr).all(axis=2) & np.isfinite(prom).all(axis=2)
-    # The whole prominence stack (no height limit: a limit would cut a tall prominence's glow).
-    search = outside & (prom_weight > 0)
+    # The whole prominence stack's square (no height limit: a limit would cut a tall prominence's
+    # glow), including where its frames' Moons covered the limb.
+    pys, pxs = np.nonzero(prom_weight > 0)
+    square = np.zeros((h, w), bool)
+    if pys.size:
+        square[pys.min():pys.max() + 1, pxs.min():pxs.max() + 1] = True
+    search = outside & square
     plain = both & search & (d_moon > g.moon_r + 2)
     eh, nh, krh, kbh = _emission(np.nan_to_num(hdr), r, g.sun_r, search, plain, p.min_redness)
     ep, npn, krp, kbp = _emission(np.nan_to_num(prom), r, g.sun_r, search, plain, p.min_redness)
@@ -436,7 +441,9 @@ def swap_prominences(hdr: np.ndarray, weight: np.ndarray, prom: np.ndarray, prom
     cp = (krp + kbp) * np.nan_to_num(prom[..., 1])
     # One weight for both: where either stack shows a prominence, its light is the short frames'.
     # (Found by colour: redder than the corona there, see _significance.)
-    sw = np.maximum(_significance(eh, nh, ch, tol, both), _significance(ep, npn, cp, tol, both))
+    vh = outside & (weight > 0) & np.isfinite(hdr).all(axis=2)
+    vp = outside & (prom_weight > 0) & np.isfinite(prom).all(axis=2)
+    sw = np.maximum(_significance(eh, nh, ch, tol, vh) * vh, _significance(ep, npn, cp, tol, vp) * vp)
     sw[~search] = 0.0
     # Prominences stand on the limb: pieces that come no nearer than a tenth of the Sun's radius
     # (specks far out in the corona or the sky) are left alone.
@@ -460,10 +467,21 @@ def swap_prominences(hdr: np.ndarray, weight: np.ndarray, prom: np.ndarray, prom
     # can be set without changing their colour.
     zone = ndimage.binary_dilation(wh > 0, iterations=2) & search
     use_h = outside & (weight > 0) & np.isfinite(hdr).all(axis=2) & ~zone
-    use_p = outside & (prom_weight > 0) & np.isfinite(prom).all(axis=2) & ~zone
     eh_colour = eh  # the HDR stack's red and blue beyond the corona's colour (green 0)
-    eh = np.where(zone[..., None], np.nan_to_num(hdr) - corona_behind(hdr, zone, use_h, g), 0.0).astype(np.float32)
-    ep = np.where(zone[..., None], np.nan_to_num(prom) - corona_behind(prom, zone, use_p, g), 0.0).astype(np.float32)
+    # The corona behind them from the HDR stack (clean) for both stacks: they are in the same units
+    # with the same corona, so at brightness 1 a swapped pixel is simply the short frames' pixel.
+    # (From each stack separately, the short frames' estimate by their own Moon's edge came out
+    # too dark, and the swap overshot: stepped lines, on Andy's 2024 stack +0.16 at 1.1-1.3.)
+    bg = corona_behind(hdr, zone, use_h, g)
+    eh = np.where(zone[..., None], np.nan_to_num(hdr) - bg, 0.0).astype(np.float32)
+    ep = np.where(zone[..., None], np.nan_to_num(prom) - bg, 0.0).astype(np.float32)
+    # The short frames' pixels next to where they have no data (their own Moon's edge, blurred
+    # into them: on the 2024 stack 4-6 % darker for 3 px) are not used: within 3x the measured
+    # blur, the HDR stack's stay.
+    have_p = (prom_weight > 0) & np.isfinite(prom).all(axis=2)
+    clear = ndimage.distance_transform_edt(have_p) > 3.0 * float(blur_px or 1.0)
+    sw_all = sw.copy()  # where either stack shows a prominence
+    sw, wh = sw * clear, wh * clear  # (where the short frames have no data, the HDR stack's stays)
     if p.sharpen > 0 and blur_px:
         its = int(round(p.sharpen * 30))
         bias = 3.0 * float(np.median(npn[search]))
@@ -489,7 +507,10 @@ def swap_prominences(hdr: np.ndarray, weight: np.ndarray, prom: np.ndarray, prom
     # Where they are: the HDR stack's prominence light out, the short frames' in. In the glow round
     # them only its colour excess out (red and blue beyond the corona's colour), so the corona keeps
     # its own texture there.
-    change = (sw[..., None] * (ep - eh) - (wh - sw)[..., None] * eh_colour) * outside[..., None]
+    # Where the short frames have no data the HDR stack's prominence light stays, at the same
+    # brightness setting (else a seam where the short frames' data begins).
+    keep = (sw_all - sw)[..., None] * np.float32(p.brightness - 1.0) * eh
+    change = (sw[..., None] * (ep - eh) - (wh - sw)[..., None] * eh_colour + keep) * outside[..., None]
     hdr += change.astype(np.float32)
     holes = outside & ~(weight > 0) & (prom_weight > 0) & np.isfinite(prom).all(axis=2)
     hdr[holes] = prom[holes]
@@ -504,3 +525,16 @@ def swap_prominences(hdr: np.ndarray, weight: np.ndarray, prom: np.ndarray, prom
         + (f", sharpened with the blur measured on the Moon's edge ({blur_px:.2f} px)" if info["sharpened"] else "")
         + (f"; {info['filled_px']} px the HDR stack had no data for filled from them" if info["filled_px"] else ""))
     return info
+
+
+def moon_cover_px(g: Geometry, n: int = 720) -> float:
+    """How far the Moon's edge reaches above the Sun's edge where it reaches least, all round (px);
+    negative where the Sun's edge shows (near the contacts). In mid-totality the Moon is larger than
+    the Sun and covers the chromosphere everywhere (2024 stack: Moon 436 px, Sun 413 px)."""
+    dx, dy = g.moon_x - g.sun_x, g.moon_y - g.sun_y
+    a = np.arange(n) * 2 * math.pi / n
+    ud = np.cos(a) * dx + np.sin(a) * dy
+    disc = g.moon_r ** 2 - (dx * dx + dy * dy) + ud * ud
+    if (disc < 0).any():
+        return -float("inf")
+    return float(np.min(ud + np.sqrt(disc) - g.sun_r))

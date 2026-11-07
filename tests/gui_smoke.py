@@ -271,6 +271,10 @@ pp.parameters["prominence_stack"] = {"hdr": st["hdr"], "weight": st["weight"], "
 pp.save(path)
 win.reload_project()
 assert "3 frame(s)" in pt.stack_label.text() and "1.40 px" in pt.stack_label.text()
+assert es.use_prom.isEnabled() and es.use_prom.isChecked()     # on the Earthshine tab
+es.use_prom.setChecked(False)
+assert win.frames_tab.project.parameters["prominence_stack"]["use"] is False
+es.use_prom.setChecked(True)
 pt.brightness.setValue(0.3)
 pt.preview()
 assert pt._shown
