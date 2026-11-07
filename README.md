@@ -117,7 +117,7 @@ The window has one tab per step, and each step saves into the project file:
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
 | 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
-| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
+| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; for pasting only, limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, Keep glare (glow), blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
 Every setting has hover help explaining what it does and when to change it.
@@ -800,6 +800,26 @@ Enhance again.
 | --- | --- | --- |
 | **Corona image** (`--base`) | The blend or the natural layer, stretched with the Moon; or paste into a file (below). | blend |
 | **Lunar surface strength** (`--strength`) | How bright the seas and highlands are, 1 = as made in part 2. | 1 |
+| **Keep glare (glow)** (`--keep-glare`) | How much of the glare from the inner corona stays on the Moon, as a faint glow fading inward from the edge. A change needs only **Write final image**. | 0.1 |
+
+**The glare on the Moon.** Before Moon and corona are stretched together,
+the glare that the earthshine step measured (part 2) is taken off the
+Moon-aligned stack, while it is still linear: its even level across the
+disc always, and all but **Keep glare** of the rest. Over the last few
+pixels by the edge (the band the earthshine step fills, at least 0.7 % of
+the radius; its log gives the width) the glare is all kept again, so the
+edge is the stacks' own. The glare is the measured model, per colour (so
+glare by a prominence stays red), saved by the earthshine step as
+`fits/<name>_earthshine_glare.fit`; nothing is painted in. On the 2024 stack
+with the seas and highlands switched off, the ring of glare 5-15 px inside
+the limb went from 0.171 grey to 0.101 (the middle of the disc: 0.097), and
+nothing outside the limb changed. The final image's log names how much was
+kept and over how many pixels. An earthshine stack made before this has no
+glare file: the log says to stack the earthshine again.
+
+After **Stack earthshine**, the tab shows the Moon as the final image draws
+it (a preview with your Enhance settings), so what you set there is what
+Blend and Natural give. The pasted layer is shown only when pasting.
 
 Just outside the limb neither stack is good on its own: the earthshine
 stack's corona is smeared (it is aligned on the Moon) and the HDR stack
@@ -814,11 +834,11 @@ out over the 4 px outside the limb.
 
 **Another way: pasting.** The earthshine layer (`<name>_earthshine.tif`) can
 be pasted into any picture with a blend mode: **Paste into a file** on the
-tab, or `totality final --paste` / `--base-file`. The settings under
-**Earthshine layer for Photoshop / pasting only** apply to it: **Keep glare
-(glow)** (`--keep-glare`, default 0.1) keeps that much of the removed glare
-as a glow inside the limb, and **Soften the limb** (`--limb-soften`, default
-0) softens the edge. The final image above does not use them.
+tab, or `totality final --paste` / `--base-file`. It takes **Keep glare
+(glow)** and **Edge-preserving smoothing** as they were when you stacked the
+earthshine. **Soften the limb** (`--limb-soften`, default 0, under
+**Earthshine layer for Photoshop / pasting only**) softens its edge; the
+final image above does not use it.
 
 | File | Contents |
 | --- | --- |
@@ -829,6 +849,7 @@ as a glow inside the limb, and **Soften the limb** (`--limb-soften`, default
 | `<name>_earthshine_rgb.fit` | the same, per colour channel (used by the final image) |
 | `<name>_earthshine_weight.fit` | how much went into each pixel of that stack |
 | `<name>_moon_surface.fit` | the seas and highlands, glare removed, as added to the final image |
+| `<name>_earthshine_glare.fit` | the measured glare per colour, and its level across the disc, taken off the Moon by the final image (**Keep glare**) |
 | `<name>_earthshine.json` | where the crop sits, the Moon's centre and radius, and the settings used |
 
 The final image needs `_earthshine_rgb.fit` and `_moon_surface.fit`; if they
@@ -1199,7 +1220,7 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--glare-order` | smoothness of the glare removed from the disc: polynomial order, 1-6 (default 6, the most flexible; 2 = a gentle gradient) |
 | `--smooth` | smoothing of the layer in pixels (default 0 = none) |
 | `--brightness` | brightest lunar surface in the layer, 0-1 (default 1) |
-| `--keep-glare` | earthshine layer for pasting: how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1) |
+| `--keep-glare` | how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1): used by the earthshine layer for pasting, and by 'totality final' unless its own --keep-glare is given |
 | `--limb-soften` | earthshine layer for pasting: extra softening of the limb in px, on top of the real one (default 0 = none) |
 | `--no-colour` | make the earthshine layer grey (default: natural colour, so a prominence at the limb stays red on the Moon side too) |
 | `--edge-fill` | fill at least this % of the Moon's radius just inside the limb from further in (default 0: only where the noise is over 10x the middle's; 2.5 = 10.9 px on a 400 mm Moon) |
@@ -1226,6 +1247,7 @@ the finished image: Moon and corona stretched together from the stacks.
 | `--base-file` | use this image as the corona instead (the size of the HDR stack) |
 | `--strength` | brightness of the lunar surface, 1 = as made by the earthshine step (default 1) |
 | `--mode` | blend mode (default screen) |
+| `--keep-glare` | share of the glare from the inner corona kept on the Moon, 0-1, as a glow fading inward from the edge; the measured glare is taken off the Moon before the stretch, its even level across the disc always and all but this share of the rest (default: the earthshine step's, 0.1) |
 | `--name` | output file name prefix (default: the project name) |
 | `--output`, `-o` | output file (.tif, .png or .jpg); default <name>_final.tif |
 | `--quiet` | print only the result, not each step |

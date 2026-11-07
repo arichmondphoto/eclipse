@@ -174,7 +174,7 @@ def test_workflow_and_cli(tmp_path, monkeypatch, run, capsys):
     assert Path(saved["earthshine"]).exists() and sorted(saved["frames"]) == [0, 1, 2, 3]
     # Andy, Nov 2026: data files in their own folders inside the project folder, pictures beside it;
     # the align and stack files at the top (an existing project's layout) are still found.
-    for k in ("linear", "rgb", "weight", "moon_surface"):
+    for k in ("linear", "rgb", "weight", "moon_surface", "glare"):   # glare: for Keep glare in the final image
         assert Path(saved[k]).parent == tmp_path / "fits", (k, saved[k])
     assert Path(saved["info"]).parent == tmp_path / "json"
     assert Path(saved["earthshine"]).parent == tmp_path
@@ -1031,3 +1031,80 @@ def test_a_frame_with_ticks_by_the_limb_counts_less_there():
     assert out[3.0] < 0.75 * out[0.0], out
     assert any("count less" in n and "f4" in n for n in notes[3.0]), notes[3.0]
     assert not any("frame pixels far from" in n for n in notes[0.0])
+
+
+def _glare_planes(rr, r, crop, floor=5e-4):
+    """The glare the earthshine step measures, per colour (G units = R, B as the light): a level
+    across the disc plus the steep rise inside the limb, as in _moon_project."""
+    d = r - rr
+    g = np.where(d > 0, floor + 4e-3 * np.exp(-d / 4), 0.0)[crop]
+    f = np.where(d > 0, floor, 0.0)[crop]
+    return np.stack([g, g, 0.95 * g, f, f, 0.95 * f]).astype(np.float32)
+
+
+def test_keep_glare_takes_the_measured_glare_off_before_the_stretch(tmp_path):
+    """Andy, Nov 2026: he liked the glare of the pasted layer (only Keep glare of it inside the disc)
+    and the Moon stretched with the corona. Blend/Natural now take the measured glare off the linear
+    Moon-aligned stack first: its level across the disc entirely, and all but Keep glare of the rest,
+    easing to nothing over the filled band by the limb, so the limb itself is the data's."""
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams
+    from tse_core.fits import write_fits
+    from tse_core.project import EventProject
+
+    proj, rr, phi, r = _moon_project(tmp_path)
+    X0, Y0, m = 40, 30, 240
+    crop = (slice(Y0, Y0 + m), slice(X0, X0 + m))
+    write_fits(tmp_path / "e_earthshine_glare.fit", _glare_planes(rr, r, crop), {"KEEPFROM": 3.0})
+    p = EventProject.load(proj)
+    p.parameters["earthshine"]["glare"] = "e_earthshine_glare.fit"
+    p.save(proj)
+    params = EnhanceParams(layers=(), blend={"natural": 1.0})
+    kept = W.final_with_moon(proj, "natural", 1.0, enhance_params=params, preview_side=10000, keep_glare=0.1)
+    asis = W.final_with_moon(proj, "natural", 1.0, enhance_params=params, preview_side=10000, keep_glare=1.0)
+    lk, la = kept.mean(axis=2), asis.mean(axis=2)
+    inner = (rr > r - 16) & (rr < r - 5)          # the glare rise, inside the filled band
+    middle = rr < 0.5 * r
+    outside = (rr > r + 8) & (rr < r + 30)        # past the colour step's reach (colour is measured
+    near = (rr > r + 3) & (rr <= r + 8)          # over ~3 px, so it reaches a few px across the limb)
+    assert np.median(lk[inner]) < np.median(la[inner]) - 0.02     # most of the rise taken off
+    assert np.median(lk[middle]) <= np.median(la[middle]) + 1e-6  # the level across the disc too
+    assert np.abs(lk[outside] - la[outside]).max() < 1e-5          # the corona untouched
+    assert np.abs(lk[near] - la[near]).max() < 1e-3
+    limb = (rr > r - 1) & (rr < r + 1)
+    assert abs(np.median(lk[limb]) - np.median(la[limb])) < 0.02   # the limb is the data's
+
+
+def test_keep_glare_needs_the_glare_file_and_says_so(tmp_path):
+    """An earthshine stack made before the glare was saved: the final image is drawn as before and
+    the log says to stack the earthshine again."""
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams
+
+    proj, rr, phi, r = _moon_project(tmp_path)
+    msgs = []
+    W.final_with_moon(proj, "natural", 1.0, enhance_params=EnhanceParams(layers=(), blend={"natural": 1.0}),
+                      preview_side=10000, keep_glare=0.1, say=msgs.append)
+    assert any("Stack earthshine again" in m for m in msgs), msgs
+
+
+def test_glare_planes_follow_the_colour_of_the_light():
+    """The saved glare per colour: the measured glare (in the channel the earthshine was made from)
+    times each colour's share of the light round it, and the level across the middle of the disc."""
+    from tse_core.earthshine import glare_by_channel
+
+    n, r, c = 200, 70.0, 100.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - c, yy - c)
+    d = r - rr
+    glare = np.where(d > 0, 2e-4 + 3e-3 * np.exp(-d / 5), 0.0).astype(np.float32)
+    lum = glare + np.where(d > 0, 1e-4, 0.0)
+    rgb = np.stack([2.0 * lum, lum, 0.5 * lum]).astype(np.float32)   # reddish light
+    weight = (rr < r + 6).astype(np.float32)
+    planes = glare_by_channel(glare, lum, rgb, weight, c, c, r)
+    inside = (rr < r - 8) & (rr > 0.3 * r)
+    assert planes.shape == (6, n, n)
+    assert np.allclose(planes[0][inside] / glare[inside], 2.0, rtol=0.02)
+    assert np.allclose(planes[2][inside] / glare[inside], 0.5, rtol=0.02)
+    ring = (rr > 0.66 * r) & (rr < 0.74 * r)                     # the level across the disc (G): the
+    assert np.allclose(planes[4][inside], np.median(glare[ring]), rtol=0.02)  # glare at 0.7 R

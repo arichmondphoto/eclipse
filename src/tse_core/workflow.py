@@ -815,8 +815,14 @@ def enhance_params_from_project(path, project):
 
 def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1.0,
                     preview_side: Optional[int] = None, name: Optional[str] = None, say: Optional[Say] = None,
-                    cancel=None, output_file: Optional[str] = None, enhance_params=None):
+                    cancel=None, output_file: Optional[str] = None, enhance_params=None,
+                    keep_glare: Optional[float] = None):
     """The final picture with the Moon in it, drawn in one go with the corona.
+
+    First the glare the earthshine step measured is taken off the linear Moon-aligned stack, as
+    the pasted layer handles it: its level across the disc entirely and all but ``keep_glare``
+    (default: the earthshine step's Keep glare) of the rest, easing to nothing over the filled
+    band by the limb, so the limb is the data's (:func:`earthshine.glare_to_remove`).
 
     The Moon-aligned earthshine stack (linear, same units) replaces the inside of the lunar disc
     in the HDR stack, and the Enhance step's settings stretch Moon and corona together, so the
@@ -830,7 +836,7 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
 
     from scipy import ndimage
 
-    from .earthshine import merge_moon
+    from .earthshine import glare_to_remove, merge_moon
     from .enhance import enhance
     from .fits import read_fits
 
@@ -861,6 +867,19 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     ox, oy = X0 - cx0, Y0 - cy0
     centre = (float(es_head["MOONX"]), float(es_head["MOONY"]))
     es_w = np.asarray(es_w, np.float32)
+    es_rec = np.asarray(es_rgb, np.float32)  # as recorded, for registering the two stacks
+    kg = keep_glare if keep_glare is not None else float(info.get("params", {}).get("keep_glare", 0.1))
+    gpath = resolve(path, es.get("glare"))
+    if gpath:
+        planes, gh = read_fits(gpath)
+        keep_from = float(gh.get("KEEPFROM", 3.0))
+        es_rgb = np.asarray(es_rgb, np.float32) - glare_to_remove(np.asarray(planes, np.float32), centre[0], centre[1],
+                                                                  float(es_head["MOONR"]), keep_from, kg)
+        say(f"glare taken off the Moon before the stretch: its level across the disc, and all but "
+            f"{100 * kg:.0f}% (Keep glare) of the rest, all of it kept again over the last {keep_from:.1f} px "
+            "by the limb")
+    else:
+        say("Keep glare does not apply: this earthshine stack has no glare file; Stack earthshine again")
     b = 1
     if preview_side:
         data = reduce_for_preview(data, max_side=preview_side)
@@ -876,11 +895,11 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         sx0, sy0 = (-ox) % b, (-oy) % b
         es_rgb, es_w, moon_data = es_rgb[:, sy0:, sx0:], es_w[sy0:, sx0:], moon_data[:, sy0:, sx0:]
         es_w = np.where(binned(es_w > 0) > 0.5, binned(es_w), 0.0).astype(np.float32)
-        es_rgb, moon_data = binned(es_rgb), binned(moon_data)
+        es_rgb, moon_data, es_rec = binned(es_rgb), binned(moon_data), binned(es_rec[:, sy0:, sx0:])
         ox, oy = (ox + sx0) // b, (oy + sy0) // b
         centre = ((centre[0] - sx0 + 0.5) / b - 0.5, (centre[1] - sy0 + 0.5) / b - 0.5)
     moon, shift = merge_moon(data.hdr, data.weight, data.header, es_rgb, es_w, (ox, oy), centre,
-                             params.moon_margin_px, say)
+                             params.moon_margin_px, say, es_register=es_rec)
     surface = np.moveaxis(np.asarray(moon_data[:3], np.float32), 0, -1) * float(strength)
     vis = np.asarray(moon_data[3], np.float32)
     if abs(shift[0]) + abs(shift[1]) > 1e-3:

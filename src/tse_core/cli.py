@@ -262,8 +262,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--brightness", type=float, default=1.0,
                    help="brightest lunar surface in the layer, 0-1 (default 1)")
     p.add_argument("--keep-glare", type=float, default=0.1,
-                   help="earthshine layer for pasting: how much of the removed glare to keep as a glow inside the "
-                        "limb, 0-1 (default 0.1)")
+                   help="how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1): "
+                        "used by the earthshine layer for pasting, and by 'totality final' unless its own "
+                        "--keep-glare is given")
     p.add_argument("--limb-soften", type=float, default=0.0,
                    help="earthshine layer for pasting: extra softening of the limb in px, on top of the real one "
                         "(default 0 = none)")
@@ -299,6 +300,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--strength", type=float, default=1.0, help="brightness of the lunar surface, 1 = as made by the "
                    "earthshine step (default 1)")
     p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"], help="blend mode (default screen)")
+    p.add_argument("--keep-glare", type=float,
+                   help="share of the glare from the inner corona kept on the Moon, 0-1, as a glow fading inward from "
+                        "the edge; the measured glare is taken off the Moon before the stretch, its even level across "
+                        "the disc always and all but this share of the rest (default: the earthshine step's, 0.1)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <name>_final.tif")
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
@@ -365,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
                              base_file=args.base_file, output_file=args.output, quiet=args.quiet)
         else:
             out, code = _run(final_with_moon, args.project, args.base, args.strength, name=args.name,
-                             output_file=args.output, quiet=args.quiet)
+                             output_file=args.output, quiet=args.quiet, keep_glare=args.keep_glare)
         if not code:
             print(f"Final image written to {out}")
         return code
