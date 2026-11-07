@@ -222,6 +222,16 @@ applies the calibration plan, and then:
    * frames are aligned against a reference that grows from the middle
      exposure outwards, then every frame against all the others, and the
      whole set is re-anchored to the middle exposure at the end.
+
+   A frame counts as aligned when its correlation peak is confident (peak to
+   sidelobe ratio, PSR, of 8 or more) and it shares at least 2% of the Sun's
+   disc with the reference; a weaker peak (PSR 5 to 8) needs at least the
+   disc's whole area. The shortest exposures show only a thin ring of inner
+   corona (the 2024 1/6400 s frame: 5% of the disc, PSR 8-12) and still
+   align. A frame that fails, or whose result lies far from where its Moon
+   says the corona must be, is placed by its Moon only, left out of the
+   reference and noted ("little usable overlap with the reference", "weak
+   correlation peak").
 3. **Field rotation** is measured for every frame against the middle
    exposure. **drift** (the default, **Rotation** on the Align tab) fits one
    rotation rate through those measurements (rotation = rate x time since

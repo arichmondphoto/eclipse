@@ -600,6 +600,7 @@ def align_sequence(
     # against the Sun during totality (well under a quarter of its radius in any sequence).
     anchor_moon = frames[mid].moon
     tol = max(10.0, 0.25 * anchor_moon.radius)
+    sun_r_w = sun_radius_from_moon(anchor_moon.radius)
     in_acc: set[int] = {mid}
 
     def align_one(i: int, pass_label: str, refine: bool) -> None:
@@ -613,11 +614,19 @@ def align_sequence(
         expected = (anchor_moon.x - f.moon.x, anchor_moon.y - f.moon.y, tol)
         tf, pk, sig = align_pair(ref_p, ref_m, img_p, img_m, params, centre, corona_centre=corona_centre,
                                  angle_deg=rotation[i], refine=refine, expected=expected)
-        overlap = float(((ref_m > 0.5) & (warp(img_m, tf, order=1) > 0.5)).mean())
+        both = (ref_m > 0.5) & (warp(img_m, tf, order=1) > 0.5)
+        overlap = float(both.mean())
         notes = []
         near = math.hypot(tf.dx - expected[0], tf.dy - expected[1]) <= 1.5 * tol
-        ok = np.isfinite(pk.psr) and pk.psr >= 5 and overlap >= 0.02 and near
-        if not np.isfinite(pk.psr) or overlap < 0.02:
+        # How much the frame and the reference share, against the Sun's disc (not the window: a
+        # very short exposure shows only a thin ring of inner corona, a small part of any window).
+        # A confident peak (PSR 8 or more) needs only a little: 2 % of the disc, a ring about 1 %
+        # of the radius wide (the 2024 1/6400 s frame shared 5 % with PSR 12). A weak one (PSR 5-8)
+        # needs at least the disc's area, so a few noisy pixels cannot decide where it goes.
+        shared = float(both.sum()) / (math.pi * sun_r_w**2)
+        enough = shared >= 0.02 and (pk.psr >= 8 or shared >= 1.0)
+        ok = np.isfinite(pk.psr) and pk.psr >= 5 and enough and near
+        if not np.isfinite(pk.psr) or not enough:
             notes.append("little usable overlap with the reference")
         elif pk.psr < 8:
             notes.append("weak correlation peak; check this frame")

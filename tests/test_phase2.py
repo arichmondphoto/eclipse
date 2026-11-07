@@ -477,3 +477,33 @@ def test_off_track_limit_scales_with_the_moon():
         sc = solve_sun_centre(times, [tuple(p) for p in moons], sun_r * ecl.state_at(times[18]).ratio, ecl,
                               clock_error_s=117.0)
         assert sc.rejected == [21], (scale, sc.rejected)
+
+
+def test_short_frames_with_a_confident_match_are_not_failed_for_a_small_overlap():
+    """A very short exposure shows only a thin ring of bright inner corona, so it shares only a small
+    part of a large window with the reference. Align used to fail every frame sharing less than 2 %
+    of its window, however confident the match (on the 2024 D850 set in the 1680 px window: the
+    1/6400-1/2000 s frames 30-35 s after second contact, PSR 9-27 with 0.2-2 % overlap, all placed
+    by their Moon only and noted 'little usable overlap'). Here the three shortest of eight frames
+    share 0.7-2 % of a 900 px window with PSR 19-92; they must now be aligned to within 0.3 px.
+    A weak peak (PSR under 8) still needs an overlap of at least the Sun's disc to count."""
+    sc = SyntheticScene(size=900, sun_radius=55)
+    c = 449.5
+    rng = np.random.default_rng(5)
+    exps = [1e-3 * 2 ** (k / 1.25) for k in range(-6, 2)]
+    frames, truth = [], []
+    for i, e in enumerate(exps):
+        sx, sy = rng.uniform(-5, 5, 2)
+        img, _ = sc.frame(e, c + sx, c + sy, -12 + 4 * i, 0, seed=20 + i)
+        frames.append(AlignFrame(i, img.astype(np.float32), e, time_s=8.0 * i))
+        truth.append((sx, sy))
+    res = align_sequence(frames, AlignParams(), expected_moon_radius=58)
+    anchor = next(r for r in res if math.isinf(r.psr))
+    ax = anchor.transform.dx + truth[anchor.index][0]
+    ay = anchor.transform.dy + truth[anchor.index][1]
+    short = res[:3]
+    assert all(r.overlap < 0.02 and r.psr > 15 for r in short)  # the case in question
+    for r in res:
+        err = math.hypot(r.transform.dx + truth[r.index][0] - ax, r.transform.dy + truth[r.index][1] - ay)
+        assert err < 0.3, (r.index, err, r.notes)
+        assert not any("failed" in n for n in r.notes)
