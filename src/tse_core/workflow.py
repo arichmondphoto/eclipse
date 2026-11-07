@@ -914,6 +914,46 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     return str(final)
 
 
+def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, name: Optional[str] = None,
+               say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None, enhance_params=None):
+    """The Moon alone, as the final image draws it (``base_layer`` blend or natural, with the Enhance
+    settings and ``strength`` for the seas and highlands), transparent everywhere else.
+
+    Opaque where the corona layers are black (the disc, and pixels the HDR stack had no data for)
+    and, when that layer as last written is there, wherever the final image differs from it by more
+    than half an 8-bit level: the band just outside the limb, where the final image blends the Moon's
+    stack into the corona. Laid over that layer at 100 % in Normal mode it gives the final image (a
+    far-off difference under half a level, from the Moon changing the stack's statistics, is left).
+    Writes ``output_file`` (TIFF or PNG with transparency; default ``<name>_moon.tif``)."""
+    say = reporter(say, cancel)
+    path = Path(project_path).resolve()
+    img, mask = final_with_moon(path, base_layer, strength, say=say, enhance_params=enhance_params, moon_only=True)
+    project = EventProject.load(path)
+    written = resolve(path, project.parameters.get("enhance", {}).get(base_layer))
+    band = 0
+    if written and image_size(written) == (img.shape[1], img.shape[0]):
+        base = read_image(written)
+        differs = np.abs(img - base).max(axis=2) > 0.5 / 255   # half an 8-bit level
+        band = int((differs & ~mask).sum())
+        mask = mask | differs
+        say(f"the Moon layer also covers {band} px round the limb where the final image differs visibly from "
+            f"{Path(written).name}")
+    else:
+        say(f"no written {base_layer} layer the size of the stack: the Moon layer covers only the black disc, so "
+            "the first pixels outside the limb will not match the final image exactly (Write full-size layers "
+            "on the Enhance tab first)")
+    say("writing the Moon layer")
+    rgba = np.concatenate([img * mask[..., None], mask[..., None].astype(np.float32)], axis=2)
+    out = Path(output_file) if output_file else path.parent / f"{name or path.stem}_moon.tif"
+    out = write_image(out, rgba)
+    project.parameters["moon_layer"] = {"file": str(out), "base": base_layer, "strength": strength}
+    project.save(path)
+    say(f"Moon layer written: {out.name} (the Moon as {base_layer.capitalize()} draws it, lunar surface "
+        f"strength {strength:g}; over the {base_layer} layer at 100 % in Normal mode it gives the final "
+        "image)")
+    return str(out)
+
+
 def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, mode: str = "screen",
                 preview_side: Optional[int] = None, name: Optional[str] = None,
                 say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None,

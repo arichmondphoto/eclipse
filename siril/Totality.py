@@ -2019,13 +2019,24 @@ class EarthshineTab(StepTab):
         fb.addWidget(self.final_preview_btn)
         fb.addWidget(self.final_btn)
         ff.addRow(fb)
+        self.moon_btn = QPushButton("Write Moon layer (for Photoshop)")
+        self.moon_btn.clicked.connect(self.write_moon_layer)
+        _tip(self.moon_btn, "Writes only the Moon, exactly as Blend (or Natural, as chosen above) draws it, with "
+             "your Enhance settings and the Lunar surface strength above, transparent everywhere else; as TIFF or "
+             "PNG (16-bit, with transparency).\n\nIn Photoshop put it above the blend (or natural) layer you last "
+             "wrote with 'Write full-size layers', in Normal mode at 100 %: the result is the final image, limb "
+             "included. Besides the black disc it covers the band of a few pixels just outside the limb where the "
+             "final image blends the Moon's stack into the corona, so the limb matches. To change the lunar "
+             "surface, change Lunar surface strength and write it again rather than the layer's opacity (opacity "
+             "changes the limb too). Put any adjustments to the corona above both layers.")
+        ff.addRow(self.moon_btn)
         self.open_final_btn = QPushButton("Open final image in Siril")
         self.open_final_btn.clicked.connect(lambda: self.main.open_in_siril(self.final_path))
         _tip(self.open_final_btn, "Loads the final image just written into Siril's main window.")
         ff.addRow(self.open_final_btn)
         self.settings_layout.addWidget(final)
         self.settings_layout.addWidget(self.layer_box)
-        self.run_buttons += [self.final_preview_btn, self.final_btn]
+        self.run_buttons += [self.final_preview_btn, self.final_btn, self.moon_btn]
         self.final_path = ""
         self.final_timer = QTimer(self)
         self.final_timer.setSingleShot(True)
@@ -2180,6 +2191,31 @@ class EarthshineTab(StepTab):
         else:
             fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname)
         self.start("Writing the final image", fn, self._final_done)
+
+    def write_moon_layer(self) -> None:
+        base = self.base.currentData()
+        base = base if base in ("blend", "natural") else "blend"
+        k = self.strength.value()
+        proj = self.main.ensure_saved()
+        if proj is None:
+            return
+        default = str(Path(proj).with_name(Path(proj).stem + "_moon.tif"))
+        fname, filt = QFileDialog.getSaveFileName(self, "Save Moon layer as", default,
+                                                  "TIFF, 16-bit (*.tif *.tiff);;PNG, 16-bit (*.png)")
+        if not fname:
+            return
+        f = _with_ext(fname, filt)
+        if f.suffix.lower() not in (".tif", ".tiff", ".png"):  # JPG has no transparency
+            f = f.with_suffix(".tif")
+        fname = str(f)
+        self.start("Writing the Moon layer",
+                   lambda p, say, cancel: W.moon_layer(p, base, k, say=say, cancel=cancel, output_file=fname),
+                   self._moon_done)
+
+    def _moon_done(self, path) -> None:
+        self.log.appendPlainText(f"Moon layer written to {path}")
+        QMessageBox.information(self, "Moon layer", f"Wrote\n{path}\n\nIn Photoshop: above your blend layer, "
+                                "Normal mode, 100 %.")
 
     def _final_done(self, path) -> None:
         self.final_path = path

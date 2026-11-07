@@ -1098,3 +1098,41 @@ def test_pasting_without_enhance_layers_uses_the_earthshine_layer(tmp_path):
                         preview_side=10000, say=msgs.append)
     assert abs(float(out[rr < r - 5].mean()) - 30000 / 65535) < 0.01
     assert any("write the full-size layers on the Enhance tab" in m for m in msgs), msgs
+
+
+def test_moon_layer_over_the_blend_gives_the_blend_final_image(tmp_path):
+    """Andy, Nov 2026: to blend the Moon in Photoshop he needed the Moon as Blend draws it, with the
+    Lunar surface strength in it (opacity in Photoshop changed the limb too). Write Moon layer:
+    the Moon alone, transparent elsewhere, over exactly the pixels where the corona layers are
+    black, and over the band outside the limb where the final image blends the Moon's stack into the
+    corona (where it differs visibly from the written blend); over that blend at 100 % in Normal
+    mode it is the Blend final image."""
+    import tifffile
+
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams, enhance
+    from tse_core.imageout import read_image, write_image
+    from tse_core.project import EventProject
+
+    proj, rr, phi, r = _moon_project(tmp_path)
+    params = EnhanceParams(layers=(), blend={"natural": 1.0})
+    data = W.load_hdr(proj)
+    _, col = enhance(data.hdr.copy(), data.weight, data.header, params, out_dir=None, keep={"blend"})
+    blend = read_image(write_image(tmp_path / "e_blend.tif", col["blend"]))
+    p = EventProject.load(proj)
+    p.parameters["enhance"] = {"blend": "e_blend.tif"}   # the blend as last written
+    p.save(proj)
+    want = tifffile.imread(W.final_with_moon(proj, "blend", 0.4, enhance_params=params,
+                                             output_file=str(tmp_path / "a.tif"))).astype(np.float32) / 65535
+    msgs = []
+    out = W.moon_layer(proj, "blend", 0.4, enhance_params=params, output_file=str(tmp_path / "m.tif"),
+                       say=msgs.append)
+    lay = read_image(out, alpha=True)
+    rgb, a = lay[..., :3], lay[..., 3:4]
+    normal = blend * (1 - a) + rgb * a
+    assert np.abs(normal - want).max() < 0.5 / 255 + 2 / 65535     # no visible step anywhere
+    assert np.abs(normal - want)[a[..., 0] > 0].max() < 3 / 65535  # exact where the layer is
+    assert a[rr < r - 2].min() == 1 and a[rr > r + 1.6].sum() > 0    # the disc, and a band past its edge
+    assert a[rr > r + 30].max() == 0                                                     # only the Moon
+    assert EventProject.load(proj).parameters["moon_layer"]["strength"] == 0.4
+    assert any("Moon layer" in m for m in msgs), msgs

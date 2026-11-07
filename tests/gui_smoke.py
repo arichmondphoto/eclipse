@@ -233,6 +233,8 @@ pp.save(path)
 win.reload_project()
 es = win.earthshine_tab
 es.strength.setValue(1.5)
+# Write Moon layer: the Moon as Blend draws it, for Photoshop (Normal mode over the blend).
+assert es.moon_btn in es.run_buttons and "Normal mode at 100 %" in es.moon_btn.toolTip()
 assert es.edge_fill.value() == 0.0  # Filled edge, at least: % of the Moon's radius
 # Moon and corona together needs the new earthshine outputs: without them, a clear message.
 n = len(QMessageBox.log)

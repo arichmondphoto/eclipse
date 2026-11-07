@@ -300,6 +300,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--strength", type=float, default=1.0, help="brightness of the lunar surface, 1 = as made by the "
                    "earthshine step (default 1)")
     p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"], help="blend mode (default screen)")
+    p.add_argument("--moon-layer", action="store_true",
+                   help="write only the Moon as --base draws it (with --strength), transparent elsewhere, for "
+                        "Photoshop: above that layer in Normal mode at 100 %% it gives the final image (default "
+                        "<name>_moon.tif; TIFF or PNG)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <name>_final.tif")
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
@@ -361,6 +365,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "final":
         from .workflow import final_image, final_with_moon
 
+        if args.moon_layer:
+            from .workflow import moon_layer
+            out, code = _run(moon_layer, args.project, args.base, args.strength, name=args.name,
+                             output_file=args.output, quiet=args.quiet)
+            if not code:
+                print(f"Moon layer written to {out}")
+            return code
         if args.paste or args.base_file:
             out, code = _run(final_image, args.project, args.base, args.strength, args.mode, name=args.name,
                              base_file=args.base_file, output_file=args.output, quiet=args.quiet)
