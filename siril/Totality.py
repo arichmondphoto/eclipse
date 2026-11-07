@@ -1953,14 +1953,17 @@ class EarthshineTab(StepTab):
         f.addRow(self.colour)
 
         # Only for the separate earthshine layer (pasting it in, or Photoshop).
-        layer_box = QGroupBox("Earthshine layer file for Photoshop only")
+        layer_box = QGroupBox("Photoshop paste only (old way)")
         fl = QFormLayout(layer_box)
         self.keep_glare = spin(0.0, 1.0, 0.05, 0.1)
         fl.addRow("Keep glare (glow):", self.keep_glare)
         self.limb_soften = spin(0.0, 6.0, 0.5, 0.0, " px")
         fl.addRow("Soften the limb:", self.limb_soften)
-        fl.addRow(QLabel("Only for <name>_earthshine.tif, the layer file for Photoshop. The final image below "
-                         "(and pasting) draws the Moon with the corona instead."))
+        note = QLabel("Only for the earthshine layer file (…_earthshine.tif), the old way of pasting the Moon "
+                      "in Photoshop. The final image and Write Moon layer above do not use these settings.")
+        note.setWordWrap(True)  # wrap to the panel's width instead of running off to the side
+        note.setTextFormat(Qt.TextFormat.PlainText)
+        fl.addRow(note)
         self.layer_box = layer_box
 
         self.settings_layout.addWidget(stack_box)
