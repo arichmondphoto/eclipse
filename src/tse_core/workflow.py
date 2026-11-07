@@ -914,6 +914,11 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     return str(final)
 
 
+# Width of the Moon layer's soft edge outside its cover, as a fraction of the Moon's radius (5 px for a
+# 400 mm lens on a 45-megapixel full-frame camera)
+MOON_LAYER_FADE = 0.0115
+
+
 def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, name: Optional[str] = None,
                say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None, enhance_params=None):
     """The Moon alone, as the final image draws it (``base_layer`` blend or natural, with the Enhance
@@ -942,8 +947,8 @@ def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, n
         say(f"no written {base_layer} layer the size of the stack: the Moon layer covers only the black disc, so "
             "the first pixels outside the limb will not match the final image exactly (Write full-size layers "
             "on the Enhance tab first)")
-    # A soft edge grown outward over 0.57 % of the Moon's radius (2.5 px for a 400 mm lens on a
-    # 45-megapixel full-frame camera), at least 1.5 px, so the layer's edge and the corona layer's
+    # A soft edge grown outward over 1.15 % of the Moon's radius (5 px for a 400 mm lens on a
+    # 45-megapixel full-frame camera), at least 2 px, so the layer's edge and the corona layer's
     # meet without a line. There the layer holds the final image, within half an 8-bit level of the
     # corona layer, so the fade adds no edge of its own.
     from scipy import ndimage
@@ -951,7 +956,7 @@ def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, n
 
     hdr_path = resolve(path, project.parameters.get("stack", {}).get("hdr"))
     moon_r = float(read_fits_header(hdr_path).get("MOONR", 0.0)) if hdr_path else 0.0
-    width = max(1.5, 0.0057 * moon_r)
+    width = max(2.0, MOON_LAYER_FADE * moon_r)
     alpha = np.clip(1.0 - ndimage.distance_transform_edt(~mask) / width, 0.0, 1.0).astype(np.float32)
     say(f"Moon layer edge: soft over {width:.1f} px outside")
     say("writing the Moon layer")

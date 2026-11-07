@@ -1135,12 +1135,13 @@ def test_moon_layer_over_the_blend_gives_the_blend_final_image(tmp_path):
     assert np.abs(normal - want)[a[..., 0] == 1].max() < 3 / 65535  # exact where the layer is opaque
     assert a[rr < r - 2].min() == 1 and a[rr > r + 1.6].sum() > 0    # the disc, and a band past its edge
     assert a[rr > r + 30].max() == 0                                                     # only the Moon
-    # A soft edge grown outward over 0.57 % of the Moon's radius (2.5 px for a 400 mm lens on a
-    # 45-megapixel full-frame camera; Andy, Nov 2026): the edges then meet without a line.
+    # A soft edge grown outward over 1.15 % of the Moon's radius (5 px for a 400 mm lens on a
+    # 45-megapixel full-frame camera; Andy, Nov 2026: 2.5 px still left a faint line where the two
+    # edges meet in Photoshop): the edges then meet without a line.
     from scipy import ndimage
     core = a[..., 0] == 1
     d = ndimage.distance_transform_edt(~core)
-    w = max(1.5, 0.0057 * r)                                        # at least 1.5 px
+    w = max(2.0, 0.0115 * r)                                        # at least 2 px
     one = (d > 0.99) & (d < 1.01)                                   # the first pixels outside
     assert np.allclose(a[..., 0][one], 1 - 1 / w, atol=2 / 65535)   # partly opaque
     assert a[..., 0][d >= w].max() == 0
