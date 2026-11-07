@@ -942,8 +942,20 @@ def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, n
         say(f"no written {base_layer} layer the size of the stack: the Moon layer covers only the black disc, so "
             "the first pixels outside the limb will not match the final image exactly (Write full-size layers "
             "on the Enhance tab first)")
+    # A soft edge grown outward over 0.57 % of the Moon's radius (2.5 px for a 400 mm lens on a
+    # 45-megapixel full-frame camera), at least 1.5 px, so the layer's edge and the corona layer's
+    # meet without a line. There the layer holds the final image, within half an 8-bit level of the
+    # corona layer, so the fade adds no edge of its own.
+    from scipy import ndimage
+    from .fits import read_fits_header
+
+    hdr_path = resolve(path, project.parameters.get("stack", {}).get("hdr"))
+    moon_r = float(read_fits_header(hdr_path).get("MOONR", 0.0)) if hdr_path else 0.0
+    width = max(1.5, 0.0057 * moon_r)
+    alpha = np.clip(1.0 - ndimage.distance_transform_edt(~mask) / width, 0.0, 1.0).astype(np.float32)
+    say(f"Moon layer edge: soft over {width:.1f} px outside")
     say("writing the Moon layer")
-    rgba = np.concatenate([img * mask[..., None], mask[..., None].astype(np.float32)], axis=2)
+    rgba = np.concatenate([img * (alpha > 0)[..., None], alpha[..., None]], axis=2)
     out = Path(output_file) if output_file else path.parent / f"{name or path.stem}_moon.tif"
     out = write_image(out, rgba)
     project.parameters["moon_layer"] = {"file": str(out), "base": base_layer, "strength": strength}

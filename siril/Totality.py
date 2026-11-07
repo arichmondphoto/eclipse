@@ -2031,7 +2031,9 @@ class EarthshineTab(StepTab):
              "PNG (16-bit, with transparency).\n\nIn Photoshop put it above the blend (or natural) layer you last "
              "wrote with 'Write full-size layers', in Normal mode at 100 %: the result is the final image, limb "
              "included. Besides the black disc it covers the band of a few pixels just outside the limb where the "
-             "final image blends the Moon's stack into the corona, so the limb matches. To change the lunar "
+             "final image blends the Moon's stack into the corona, so the limb matches, and its edge fades out over "
+             "about 0.6 % of the Moon's radius (2.5 px with a 400 mm lens on a 45-megapixel camera), so the two "
+             "edges meet without a line. To change the lunar "
              "surface, change Lunar surface strength and write it again rather than the layer's opacity (opacity "
              "changes the limb too). Put any adjustments to the corona above both layers.")
         ff.addRow(self.moon_btn)

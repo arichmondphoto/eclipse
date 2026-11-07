@@ -840,7 +840,10 @@ blend (or natural) layer you last wrote with **Write full-size layers**, in
 Normal mode at 100 %: the result is the final image, limb included. Besides
 the black disc it covers the band just outside the limb where the final image
 blends the Moon's stack into the corona (wherever the final image differs
-from that layer by more than half an 8-bit level). To change the lunar
+from that layer by more than half an 8-bit level), and its edge fades out over
+0.57 % of the Moon's radius (2.5 px for a 400 mm lens on a 45-megapixel
+full-frame camera, at least 1.5 px), so the two edges meet without a line.
+To change the lunar
 surface, change **Lunar surface strength** and write the layer again: the
 layer's opacity would change the limb too. Put corona adjustments above both
 layers. On the 2024 crop (surface strength 0.35) the layer over the blend
