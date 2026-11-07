@@ -25,7 +25,7 @@ elements for any eclipse from 1600 to 2400.
 | 2 Align | Lunar limb, phase correlation alignment, field rotation, the Sun's centre | done |
 | 3 Stack | Moon-aware linear HDR stacking with measured brightness matching | done |
 | 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N, Adaptive (MGN) and Adaptive (ACHF) layers; Soft Light / Overlay / Linear / Weighted average blend (Linear as each method's own publication combines it); full-resolution detail box; settings files | done |
-| 5 Earthshine | Moon-aligned stack of the long exposures; glare removed; the Moon put into the HDR stack and stretched with the corona | done (checked on the 2024 data) |
+| 5 Earthshine | Moon-aligned stack of the long exposures; glare removed; the Moon put into the HDR stack and stretched with the corona | done |
 | 6 Prominences | Found by colour at the limb; transparent layer put on top | done (checked on a reduced copy of real data) |
 
 Each step works in the Siril window and on the command line. Tested on the
