@@ -1144,12 +1144,12 @@ class EnhanceTab(StepTab):
         for k, default in (("fnrgf_n", 0), ("adaptive", 0), ("achf", 0), ("fnrgf", 0), ("nrgf", 0)):
             sp = self._spin(0, 100, default, " %")
             mode = QComboBox()
-            choices = [("Soft Light", "soft light"), ("Overlay", "overlay"), ("Linear (paper)", "linear")]
+            choices = [("Soft Light", "soft light"), ("Overlay", "overlay"), ("Linear", "linear")]
             if k in ("adaptive", "achf"):  # a second linear form: as published, and the earlier 0..1 picture
                 choices.append(("Weighted average", "average"))
             for text, name in choices:
                 mode.addItem(text, name)
-            # Linear (paper): the strength is K2 against the natural layer's 1, up to 10 (1000 %) as in
+            # Linear: the strength is K2 against the natural layer's 1, up to 10 (1000 %) as in
             # Druckmüllerová's FNRGF software; ACHF's thesis form adds its g to the linear stack, where
             # K2 runs to about 100 before noise limits it; Soft Light and Overlay are opacities.
             def top(name, k=k):
@@ -1170,7 +1170,7 @@ class EnhanceTab(StepTab):
         tf = QFormLayout(tone)
         self.natural_stretch = QComboBox()
         self.natural_stretch.addItem("Log", "log")
-        self.natural_stretch.addItem("Gamma (MGN paper)", "gamma")
+        self.natural_stretch.addItem("Gamma", "gamma")
         self.natural_stretch.currentIndexChanged.connect(self.changed)
         tf.addRow("Stretch:", self.natural_stretch)
         self.gamma = self._dspin(1.0, 6.0, 3.2, 0.1, "Gamma of the Gamma stretch (3.2 in Morgan & Druckmüller 2014)")
@@ -1331,7 +1331,7 @@ class EnhanceTab(StepTab):
             "adaptive": "Adaptive (MGN), Multi-scale Gaussian Normalization (Morgan & Druckmüller 2014): fine detail "
                         "(loops, plumes, the edges of streamers) at every size and in every direction. It brings "
                         "structure out evenly everywhere, so it also flattens the overall brightness. The usual "
-                        "partner for FNRGF-N: 50-80 % on Soft Light, or 43 % on Linear (paper) for the published "
+                        "partner for FNRGF-N: 50-80 % on Soft Light, or 43 % on Linear for the published "
                         "look.",
             "achf": "Adaptive (ACHF), adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; "
                     "described in Druckmüllerová 2013): fine detail like Adaptive (MGN), but without evening out "
@@ -1352,7 +1352,7 @@ class EnhanceTab(StepTab):
         blend_tip = ("How strongly this layer is applied over the natural layer. 0 % leaves it out (the default "
                      "for every layer, so the blend starts as the natural layer).\n\nThe right amount depends on "
                      "the mode beside it:\n- Soft Light: 50-80 % is typical (up to 100 %).\n- Overlay: much "
-                     "stronger, 5-20 %.\n- Linear (paper): 30-100 % for NRGF, FNRGF and FNRGF-N; 43 % for "
+                     "stronger, 5-20 %.\n- Linear: 30-100 % for NRGF, FNRGF and FNRGF-N; 43 % for "
                      "Adaptive (MGN); 2000-5000 % for Adaptive (ACHF), about twice that with Stretch: Gamma.\n"
                      "- Weighted average: 40-60 %.\n\nA good start: FNRGF-N 60 % and Adaptive (MGN) 60 %, both on "
                      "Soft Light.")
@@ -1360,25 +1360,24 @@ class EnhanceTab(StepTab):
                        "structure, keeps the natural tones and leaves the dark sky dark. The safe choice for every "
                        "layer.\n\nOverlay: like Soft Light but much stronger, mostly in the middle tones. Use a "
                        "low strength (5-20 %).\n\n")
-        fig9 = ("Druckmüllerová, Morgan & Habbal (2011), Figure 9, is FNRGF on Linear (paper) at 40 % with "
+        fig9 = ("Druckmüllerová, Morgan & Habbal (2011), Figure 9, is FNRGF on Linear at 40 % with "
                 "Adaptive (ACHF) on Weighted average at 60 %.")
         mode_tips = {
-            "adaptive": "Linear (paper): mixed as Morgan & Druckmüller (2014) mix it. Much more detail than Soft "
+            "adaptive": "Linear: mixed as Morgan & Druckmüller (2014) mix it. Much more detail than Soft "
                         "Light, and the sky stays dark. Use 43 % (their mix). For their exact look also set "
                         "Stretch: Gamma, Gamma 3.2 and Gamma white point about 99.9 % under 'Natural layer and "
                         "colour' (at 100 % an eclipse comes out very dark). With Stretch: Log, 43 % gives the same "
-                        "structure on a brighter, more natural base.\n\nWeighted average: a gentler Linear (paper), "
-                        "about a third of the detail, with the sky a little grey. 43 % gives the look Totality had "
-                        "before 6 Nov 2026.",
-            "achf": "Linear (paper): mixed as Druckmüllerová's thesis (2013) mixes it. The detail is added to the "
+                        "structure on a brighter, more natural base.\n\nWeighted average: a gentler Linear, "
+                        "about a third of the detail, with the sky a little grey. 43 % is a good start.",
+            "achf": "Linear: mixed as Druckmüllerová's thesis (2013) mixes it. The detail is added to the "
                     "stack before it is stretched, so the corona keeps its brightness and the sky stays dark. It "
                     "needs a far higher strength than the other modes: 2000-5000 % with Stretch: Log, about twice "
                     "that with Gamma. Leave Contrast at 1. At high strength the darkest fine detail by the Moon's "
                     "edge shows as black specks (noise in the stack): lower the strength or the finest scale.\n\n"
-                    "Weighted average: the earlier, softer look (before 6 Nov 2026), with the sky a little grey. "
+                    "Weighted average: a softer look than Linear, with the sky a little grey. "
                     "40-60 %. " + fig9,
         }
-        nrgf_linear = ("Linear (paper): mixed as Druckmüllerová, Morgan & Habbal (2011) mix it, an average of the "
+        nrgf_linear = ("Linear: mixed as Druckmüllerová, Morgan & Habbal (2011) mix it, an average of the "
                        "natural layer and this layer. As in their published pictures the dark sky comes up towards "
                        "grey and the natural tones flatten. 30-100 %. " + fig9)
         for k, sp in self.blend.items():
@@ -1406,7 +1405,7 @@ class EnhanceTab(StepTab):
              "Overlay and Weighted average. 1 (default) suits most stacks. Raise it (1.5-3) if the layer looks "
              "flat, for example after lowering the finest scales against grain; lower it if it looks harsh. It is "
              "not adjusted to each picture, so a corona with little structure looks flatter, as it is, and the "
-             "detail box shows exactly what the full-size layer will.\n\nOn Linear (paper) it multiplies the "
+             "detail box shows exactly what the full-size layer will.\n\nOn Linear it multiplies the "
              "blend strength: leave it at 1 there and set the strength instead.", self._achf_form)
         _tip(self.views, "Whole picture: a reduced copy of the stack (about 1400 px wide), quick to update. "
              "Hold Shift and drag on it to choose a detail box.\n\nDetail box: that box at full resolution, "
@@ -1416,7 +1415,7 @@ class EnhanceTab(StepTab):
         af = self._adaptive_form
         _tip(self.mgn_k, "Adaptive (MGN) only: how hard the detail is brought out. 0.7 (default, the value of "
              "Morgan & Druckmüller 2014) suits most stacks. Higher (1-1.5) gives harder, more graphic strands; "
-             "lower (0.3-0.5) a gentler look.\n\nWith Adaptive (MGN) on Linear (paper) in the Blend box, keep "
+             "lower (0.3-0.5) a gentler look.\n\nWith Adaptive (MGN) on Linear in the Blend box, keep "
              "0.7: that mode already adds the detail at full strength.", af)
         for size, sp in zip(self.mgn_size, self.mgn_w):
             _tip(size, "Adaptive (MGN) only: the size of the structure this scale brings out, in pixels of your "
@@ -1438,9 +1437,8 @@ class EnhanceTab(StepTab):
              "heavily processed eclipse picture; the fine strands stay.")
         _tip(self.natural_stretch, "How the natural layer turns the stack into a picture.\n\nLog (default): a "
              "natural look with the faint outer corona visible; Flatten, Evenness and Highlight roll-off shape it. "
-             "The best base for the Soft Light layers and for Adaptive (ACHF) on Linear (paper).\n\nGamma (MGN "
-             "paper): the base Morgan & Druckmüller (2014) put under their MGN detail. For their look use it with "
-             "Gamma 3.2 and Adaptive (MGN) on Linear (paper) at 43 %. On an eclipse it is much darker than Log: "
+             "The best base for the Soft Light layers and for Adaptive (ACHF) on Linear.\n\nGamma: the base Morgan & Druckmüller (2014) put under their MGN detail. For their look use it with "
+             "Gamma 3.2 and Adaptive (MGN) on Linear at 43 %. On an eclipse it is much darker than Log: "
              "set Gamma white point to about 99.9 %, or Midtone to 0.4-0.6. Flatten, Evenness and Highlight "
              "roll-off do not apply to it; Midtone does.\n\nThe filter layers seen on their own do not change; "
              "the blend does.")
@@ -1474,8 +1472,7 @@ class EnhanceTab(StepTab):
         _tip(self.keep_sky, "Off (default): the sky (twilight glow, its gradient across the frame) is measured and "
              "removed before filtering; otherwise the filters turn it into arcs and colour casts. Tick it to keep "
              "the sky, for example its blue. The darkest sky then sets black, so corners darkened by vignetting "
-             "go towards black. Stacks made before Nov 2026 had too little red in the sky: re-stack before "
-             "judging it.")
+             "go towards black.")
         _tip(self.order, "FNRGF and FNRGF-N: how closely they follow brightness changes round the Sun.\n\nLower "
              "(3-6): bright streamers stay clearly brighter than dark coronal holes, closer to plain NRGF.\n\n"
              "Higher (14-20): faint regions are lifted to match bright ones; too high and the streamers look flat "
@@ -1499,8 +1496,7 @@ class EnhanceTab(StepTab):
              "box is not saved.")
         _tip(self.load_settings_btn, "Sets every setting on this tab from a file saved with 'Save settings…', or "
              "from the <name>_enhance.json written beside full-size layers (the exact settings they were made "
-             "with). Settings the file does not have stay as they are, and the log lists them. Files from before "
-             "Nov 2026 can give a different picture: the filter layers have changed since.")
+             "with). Settings the file does not have stay as they are, and the log lists them.")
         _tip(self.run_btn, "Makes the ticked layers at full resolution and writes them, plus the blend, under a name "
              "and in a folder you choose (each layer as <name>_<layer>), as TIFF (16-bit), PNG (16-bit) or JPG "
              "(8-bit), with <name>_enhance.json holding the settings used (Load settings… reads it; the Earthshine "

@@ -99,8 +99,8 @@ et.layer_checks["nrgf"].setChecked(False)
 et.blend["adaptive"].setValue(10)
 et.blend_mode["adaptive"].setCurrentIndex(1)  # Overlay
 assert et.params().blend_modes["adaptive"] == "overlay"
-et.blend_mode["adaptive"].setCurrentIndex(2)  # Linear (paper): the papers' weighted sum
-assert et.params().blend_modes["adaptive"] == "linear" and et.blend_mode["adaptive"].currentText() == "Linear (paper)"
+et.blend_mode["adaptive"].setCurrentIndex(2)  # Linear: as each method's publication combines
+assert et.params().blend_modes["adaptive"] == "linear" and et.blend_mode["adaptive"].currentText() == "Linear"
 et.blend["adaptive"].setValue(250)  # K2 = 2.5: above 100 % in Linear mode
 assert et.params().blend["adaptive"] == 2.5
 et.blend["adaptive"].setValue(10)

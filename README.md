@@ -24,7 +24,7 @@ elements for any eclipse from 1600 to 2400.
 | 1 Frames | RAW inventory, bracket detection, lensfun or own-flats vignetting, calibration planning, project folders | done |
 | 2 Align | Lunar limb, phase correlation alignment, field rotation, the Sun's centre | done |
 | 3 Stack | Moon-aware linear HDR stacking with measured brightness matching | done |
-| 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N, Adaptive (MGN) and Adaptive (ACHF) layers; Soft Light / Overlay / Linear (paper) / Weighted average blend (Linear as each method's own publication combines it); full-resolution detail box; settings files | done |
+| 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N, Adaptive (MGN) and Adaptive (ACHF) layers; Soft Light / Overlay / Linear / Weighted average blend (Linear as each method's own publication combines it); full-resolution detail box; settings files | done |
 | 5 Earthshine | Moon-aligned stack of the long exposures; glare removed; the Moon put into the HDR stack and stretched with the corona | done (checked on the 2024 data) |
 | 6 Prominences | Found by colour at the limb; transparent layer put on top | done (checked on a reduced copy of real data) |
 
@@ -114,7 +114,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper), and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
+| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -391,7 +391,7 @@ pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
 | `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the linear image, as in Morgan & Druckmüller 2014 ("the original image normalised by exposure time"; until 6 Nov 2026 the log image): fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
 | `achf` | **Adaptive (ACHF)**: Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; defined in Druckmüllerová 2013): the log image minus its local mean under a kernel that follows the circles round the Sun, at its own six scales (size and strength each), Moon left out. Written only on request (`--layers ...,achf`): a few minutes on a full frame |
-| `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light, Overlay or Linear (paper) at the given strengths; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay`, or `:linear` for the combination each method's own publication uses (below) (`--blend none` to skip); the same thing you would do with layers in Photoshop |
+| `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light, Overlay or Linear at the given strengths; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay`, or `:linear` for the combination each method's own publication uses (below) (`--blend none` to skip); the same thing you would do with layers in Photoshop |
 
 **Names used:** NRGF = Normalizing-Radial-Graded Filter; FNRGF = Fourier
 Normalizing-Radial-Graded Filter; FNRGF-N = FNRGF with Noise compensation;
@@ -410,7 +410,7 @@ is a stronger alternative at lower opacity. The filter layers are centred on
 mid-grey, which both modes treat as "no change"; desaturate them so the
 colour comes from the natural layer.
 
-**Linear (paper)** combines the images as each method's own publication
+**Linear** combines the images as each method's own publication
 does. For NRGF, FNRGF and FNRGF-N it is a weighted average on the display
 range: Z = (K1 X + K2 Y) / (K1 + K2). That is the Z = K1 X + K2 Y of
 Druckmüllerová, Morgan & Habbal (2011, section
@@ -496,7 +496,7 @@ Earthshine step fills it.
 
 Natural layer stretch. **Log** (default, `--natural-stretch log`): log
 brightness, black at the sky and white at the brightest 0.1%; Flatten,
-Evenness, Highlight roll-off and Midtone shape it. **Gamma (MGN paper)**
+Evenness, Highlight roll-off and Midtone shape it. **Gamma**
 (`--natural-stretch gamma`): Morgan & Druckmüller's (2014) global image,
 C'g = ((B - a0) / (a1 - a0))^(1/γ), with B the linear stack and a0, a1 its
 minimum and maximum by default; `--gamma` (**Gamma**) 3.2 as in that paper, which
@@ -937,7 +937,7 @@ you to stack the earthshine again. Enhance does not need running again.
   colour inside the limb was faded to grey as if it were noise.)
 * *Filter layers.* NRGF, FNRGF and both adaptive layers have no data on the
   Moon, so in the blend they fade out over the 4 px outside the limb (with
-  Linear (paper), their weights do).
+  Linear, their weights do).
 * *The lunar surface.* The seas and highlands (glare removed, from
   `<name>_moon_surface.fit`) are added inside with screen at `--strength`
   (1 = as made by the earthshine step), so near the limb, where the Moon's

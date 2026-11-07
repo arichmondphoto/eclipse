@@ -570,7 +570,7 @@ class NaturalStats:
     ring: Optional[np.ndarray] = None  # Evenness: the circles' mean of the large-scale map
     loc: Optional[tuple] = None  # Evenness: the large-scale map as (blurred lg, blurred base, blurred mask)
     mid: Optional[float] = None  # Midtone: the inner corona's median before the curve
-    stretch: str = "log"  # "log" or "gamma" (the MGN paper's global image)
+    stretch: str = "log"  # "log" or "gamma" (Morgan & Druckmueller 2014's global image)
     gamma: float = 3.2
     a0: float = 0.0  # gamma: the image's minimum and maximum
     a1: float = 1.0
@@ -725,7 +725,7 @@ def overlay(base: np.ndarray, top: np.ndarray) -> np.ndarray:
 
 
 BLEND_MODES = {"soft light": soft_light, "overlay": overlay}
-# Linear (paper) is not a layer mode applied in turn: see soft_light_blend.
+# Linear is not a layer mode applied in turn: see soft_light_blend.
 MODE_NAMES = ("soft light", "overlay", "linear", "average")
 
 
@@ -748,7 +748,7 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
     centred on mid-grey, which both modes treat as 'no change', so they add structure without
     lifting the dark sky. Layers are applied in the order natural, NRGF, FNRGF, FNRGF-N, adaptive.
 
-    Linear (paper) layers are then combined with that base as the papers combine the original and
+    Linear layers are then combined with that base as the papers combine the original and
     the filtered image, the base with the natural layer's weight (1, K1) and each layer with its own
     (K2, which may exceed 1), divided by the sum: FNRGF's Z = K1 X + K2 Y, only the ratio mattering,
     both images on 0..1 as in the thesis's software; MGN's I = h C'g + (1 - h) C', the detail
@@ -1085,7 +1085,7 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
     an amplification rising with spatial frequency; ``weights`` (one per scale, default all 1)
     change each scale's share, like the frequency sliders of Druckmüller's Corona program.
 
-    With ``linear`` (the thesis's form, used on Linear (paper)): g is f minus its local mean on the
+    With ``linear`` (the thesis's form, used on Linear): g is f minus its local mean on the
     linear image itself, as eq. 5.2 has it (f is the composed image, "ideally linear", section
     4.1.4), to be added to it as h = K1 f + K2 g before any stretch (see :func:`render`). Otherwise
     (our earlier form, kept for the other blend modes): on log brightness, ln(pixel / local mean),
@@ -1138,7 +1138,7 @@ def achf_share(g: np.ndarray, x: np.ndarray, floor: float) -> np.ndarray:
 
 
 def achf_form(p: "EnhanceParams") -> str:
-    """'linear' when Adaptive (ACHF) is blended on Linear (paper), the thesis's h = K1 f + K2 g;
+    """'linear' when Adaptive (ACHF) is blended on Linear, the thesis's h = K1 f + K2 g;
     otherwise 'log' (the filter on log brightness, our earlier form)."""
     return "linear" if blend_mode_name(p.blend_modes.get("achf", "soft light")) == "linear" else "log"
 
