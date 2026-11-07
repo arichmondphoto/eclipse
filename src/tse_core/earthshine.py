@@ -856,56 +856,6 @@ def _ring_floor(values: np.ndarray, mask: np.ndarray, phi: np.ndarray, nb: int =
     return ndimage.map_coordinates(prof, [(phi + math.pi) / (2 * math.pi) * nb - 0.5], order=1, mode="grid-wrap")
 
 
-def glare_by_channel(glare: np.ndarray, lum: np.ndarray, rgb: np.ndarray, weight: np.ndarray, cx: float, cy: float,
-                     moon_r: float) -> np.ndarray:
-    """The measured glare per colour, for taking it off the linear stack (see :func:`glare_to_remove`).
-
-    ``glare`` is in the units of ``lum`` (the channels the earthshine was made from); each colour
-    gets it times that colour's share of the light round each pixel (smoothed over about 1.7 % of
-    the radius), so red glare by a prominence stays red. Returns 6 planes: the glare in R, G, B,
-    and its level across the middle of the disc (as the pasted layer's glow measures it, round
-    the Moon at 0.66-0.74 of the radius) in R, G, B."""
-    h, w = glare.shape
-    yy, xx = np.mgrid[0:h, 0:w]
-    rr = np.hypot(xx - cx, yy - cy)
-    phi = np.arctan2(yy - cy, xx - cx)
-    good = weight > 0
-    floor = _ring_floor(glare, good & (rr > 0.66 * moon_r) & (rr < 0.74 * moon_r), phi)
-    floor = np.where(rr < moon_r, floor, 0.0)
-    sig = max(1.5, moon_r / 60.0)
-    gm = ndimage.gaussian_filter(good.astype(np.float32), sig)
-    den = ndimage.gaussian_filter(np.where(good, lum, 0.0).astype(np.float32), sig) / np.maximum(gm, 1e-6)
-    planes = []
-    for c in range(3):
-        num = ndimage.gaussian_filter(np.where(good, rgb[c], 0.0).astype(np.float32), sig) / np.maximum(gm, 1e-6)
-        ok = good & (np.abs(den) > 1e-30)
-        typical = float(np.median(num[ok] / den[ok])) if ok.any() else 1.0
-        ratio = np.where(np.abs(den) > 1e-30, num / np.where(np.abs(den) > 1e-30, den, 1.0), typical)
-        ratio = np.clip(ratio, 0.0, 10.0 * max(abs(typical), 1e-6))  # where there is hardly any light
-        planes.append(ratio)
-    out = [glare * q for q in planes] + [floor * q for q in planes]
-    return np.where(np.isfinite(out), out, 0.0).astype(np.float32)
-
-
-def glare_to_remove(planes: np.ndarray, cx: float, cy: float, moon_r: float, keep_from: float,
-                    keep: float) -> np.ndarray:
-    """The glare to take off the linear Moon-aligned stack (3, h, w) before the final stretch, as the
-    pasted layer handles it: the level across the disc entirely, and all but ``keep`` of the rest;
-    both easing to nothing over the filled band by the limb (``keep_from`` px, from the earthshine
-    step), so the limb itself is the data's. Nothing outside the limb."""
-    h, w = planes.shape[1:]
-    yy, xx = np.mgrid[0:h, 0:w]
-    rr = np.hypot(xx - cx, yy - cy)
-    band = max(float(keep_from), 1.0)
-    t = np.clip((rr - (moon_r - band)) / band, 0.0, 1.0)
-    t = t * t * (3 - 2 * t)
-    k = min(max(float(keep), 0.0), 1.0)
-    kk = k + (1.0 - k) * t
-    g, f = planes[:3], planes[3:6]
-    removed = (1.0 - t) * f + (1.0 - kk) * np.clip(g - f, 0.0, None)
-    return np.where(rr < moon_r, removed, 0.0).astype(np.float32)
-
-
 def soft_shoulder(x: np.ndarray, knee: float = 0.85) -> np.ndarray:
     """0..1 like a clip, but above ``knee`` it rolls off smoothly towards 1 instead of a hard cut."""
     x = np.clip(np.asarray(x, np.float32), 0.0, None)
@@ -1002,8 +952,6 @@ def compose_layer(shown: np.ndarray, good: np.ndarray, weight: np.ndarray, cx: f
     keep_from = p.margin(moon_r) if keep_from is None else keep_from
     r_in = moon_r - keep_from
     shown_good = good & (rr < r_in)
-    if p.surface_denoise > 0:  # as for the final image's lunar surface (moon_surface)
-        surf = edge_preserving(surf, shown_good, p.surface_denoise)
     real_limb = linear is not None and glare is not None and p.limb_reach > 0
     edge = moon_r + (p.limb_reach if real_limb else p.limb_px)
     surf = extend_to_limb(surf, shown_good, cx, cy, r_in, min(edge, moon_r + p.limb_px))
@@ -1101,11 +1049,6 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
         surface, vis = moon_surface(shown, good, glare, cx, cy, moon_r, p,
                                     p.margin(moon_r) if keep_from is None else keep_from, tint)
         moon_path = fout / f"{name}_moon_surface.fit"
-        if rgb is not None:  # the measured glare per colour, for the final image (Keep glare)
-            gpath = fout / f"{name}_earthshine_glare.fit"
-            write_fits(gpath, glare_by_channel(glare, lum, rgb, weight, cx, cy, moon_r),
-                       {**header, "KEEPFROM": float(p.margin(moon_r) if keep_from is None else keep_from),
-                        "COMMENT": "planes: glare R, G, B; its level across the disc R, G, B (linear)"})
         write_fits(moon_path, np.concatenate([np.moveaxis(surface, -1, 0), vis[None]], axis=0).astype(np.float32),
                    {**header, "COMMENT": "planes: surface R, G, B (display 0..1), visibility"})
     crop_tif = write_image(with_format(out / f"{name}_earthshine_crop.tif", fmt), img)
@@ -1130,8 +1073,6 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
         outputs["weight"] = str(fout / f"{name}_earthshine_weight.fit")
     if moon_path is not None:
         outputs["moon_surface"] = str(moon_path)
-        if rgb is not None:
-            outputs["glare"] = str(fout / f"{name}_earthshine_glare.fit")
     return outputs
 
 
@@ -1447,7 +1388,7 @@ def hdr_reliable_from(weight: np.ndarray, rr: np.ndarray, r: float, default: flo
 
 def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.ndarray, es_weight: np.ndarray,
                origin: tuple[int, int], es_centre: tuple[float, float], margin_px: float = 1.5,
-               say: Optional[Say] = None, es_register: Optional[np.ndarray] = None):
+               say: Optional[Say] = None):
     """Put the Moon-aligned stack (linear, same units) into the HDR stack inside the lunar disc.
 
     ``origin``: where the earthshine crop starts in the HDR's pixels; ``es_centre``: the Moon's
@@ -1467,9 +1408,7 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
     sy = slice(ys.start - oy, ys.stop - oy)
     sx = slice(xs.start - ox, xs.stop - ox)
     cx, cy = mx - ox, my - oy  # the HDR's Moon in crop pixels
-    # Registered on the stack as recorded (``es_register``, before any glare is taken off): where
-    # the two stacks sit is a measurement, not part of the picture.
-    es_lum = (es_rgb if es_register is None else es_register).mean(axis=0)
+    es_lum = es_rgb.mean(axis=0)
     es_good = es_weight > 0
     hdr_lum = np.zeros((hc, wc), np.float32)
     hdr_lum[sy, sx] = hdr[ys, xs].mean(axis=2)

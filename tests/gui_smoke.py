@@ -233,8 +233,6 @@ pp.save(path)
 win.reload_project()
 es = win.earthshine_tab
 es.strength.setValue(1.5)
-# Keep glare (glow) sits with the final image now: it is used by Blend and Natural as well as pasting.
-assert "Write final image" in es.keep_glare.toolTip() and "Blend" in es.keep_glare.toolTip()
 assert es.edge_fill.value() == 0.0  # Filled edge, at least: % of the Moon's radius
 # Moon and corona together needs the new earthshine outputs: without them, a clear message.
 n = len(QMessageBox.log)

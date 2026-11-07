@@ -1953,7 +1953,8 @@ class EarthshineTab(StepTab):
         # Only for the separate earthshine layer (pasting it in, or Photoshop).
         layer_box = QGroupBox("Earthshine layer for Photoshop / pasting only")
         fl = QFormLayout(layer_box)
-        self.keep_glare = spin(0.0, 1.0, 0.05, 0.1)  # shown in the Final image box below
+        self.keep_glare = spin(0.0, 1.0, 0.05, 0.1)
+        fl.addRow("Keep glare (glow):", self.keep_glare)
         self.limb_soften = spin(0.0, 6.0, 0.5, 0.0, " px")
         fl.addRow("Soften the limb:", self.limb_soften)
         fl.addRow(QLabel("Not used by the final image below: there the limb is the stack's own."))
@@ -1990,7 +1991,6 @@ class EarthshineTab(StepTab):
         self.strength.setSingleStep(0.1)
         self.strength.setValue(1.0)
         ff.addRow("Lunar surface strength:", self.strength)
-        ff.addRow("Keep glare (glow):", self.keep_glare)
         self.mode = QComboBox()
         self.mode.addItems(["screen", "lighten", "add"])
         ff.addRow("Blend mode (pasting only):", self.mode)
@@ -2029,7 +2029,7 @@ class EarthshineTab(StepTab):
         self.final_timer.setInterval(500)
         self.final_timer.timeout.connect(self.preview_final)
         self._final_shown = False
-        for w in (self.strength, self.keep_glare):
+        for w in (self.strength,):
             w.valueChanged.connect(self._final_changed)
         for w in (self.base, self.mode):
             w.currentIndexChanged.connect(self._final_changed)
@@ -2081,15 +2081,11 @@ class EarthshineTab(StepTab):
              "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
              "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
              "smaller pixels, raise them in proportion; with a shorter lens, lower them.", f)
-        _tip(self.keep_glare, "How much of the glare from the inner corona stays on the Moon, as a soft glow "
-             "just inside its edge, fading inward: the corona's light spilling over the dark Moon, as the eye sees "
-             "it at totality. The glare measured by Stack earthshine is taken off the Moon before Moon and corona are "
-             "stretched together: its even level across the disc always, and all but this share of the rest. Over the "
-             "last few pixels by the edge it is all kept, so the edge is your data's: the Moon's own outline, not a "
-             "drawn circle.\n\n0.1 (default) = a faint glow; 0 = none; 0.5 = a soft glow; 1 = all the glare near the "
-             "edge (the even level across the disc still goes). Works for Blend, Natural and pasting alike. "
-             "For Blend and Natural a change needs only Write final image; the pasted layer takes the value when "
-             "you Stack earthshine.", ff)
+        _tip(self.keep_glare, "How much of the glare that was taken away is put back as a soft glow just inside "
+             "the edge of the Moon, fading inward: the inner corona's light spilling over the dark Moon, as the eye "
+             "sees it at totality. 0 = none, 0.1 = a faint glow (default: blends best when pasting), 0.5 = a soft "
+             "glow, 1 = all of it (compressed so it cannot clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
+             "softness, not a drawn circle.", fl)
         _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "
              "has in your frames. Default 0 (none): the edge as your frames have it, which blends best when "
              "pasting."
@@ -2158,9 +2154,7 @@ class EarthshineTab(StepTab):
             fn = lambda p, say, cancel: W.final_image(p, base, k, mode, preview_side=1400, say=say, cancel=cancel,
                                                       base_file=bfile)
         else:  # Moon and corona stretched together from the stacks
-            kg = self.keep_glare.value()
-            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, preview_side=1400, say=say, cancel=cancel,
-                                                          keep_glare=kg)
+            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, preview_side=1400, say=say, cancel=cancel)
         self.start("Preview of the final image", fn, self._final_preview_done, reload=False)
 
     def _final_preview_done(self, img) -> None:
@@ -2181,9 +2175,7 @@ class EarthshineTab(StepTab):
             fn = lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname,
                                                       base_file=bfile)
         else:
-            kg = self.keep_glare.value()
-            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname,
-                                                          keep_glare=kg)
+            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname)
         self.start("Writing the final image", fn, self._final_done)
 
     def _final_done(self, path) -> None:
@@ -2249,15 +2241,6 @@ class EarthshineTab(StepTab):
         self.layer_path = result.outputs.get("earthshine", "")
         self.open_btn.setEnabled(bool(self.layer_path))
         self.view.show_file(result.outputs.get("crop", ""))
-        # Then the Moon as the final image draws it (with the Enhance settings), so what is tuned
-        # here is what Blend or Natural give; the pasted layer above shows only when pasting.
-        proj = self.main.frames_tab.project
-        if self.base.currentData() != "file" and proj.parameters.get("enhance", {}).get("info"):
-            self.log.appendPlainText("Showing the Moon as the final image draws it (Preview of the final image).")
-            QTimer.singleShot(0, self.preview_final)
-        elif self.base.currentData() != "file":
-            self.log.appendPlainText("This shows the pasted earthshine layer. To see the Moon as Blend or Natural "
-                                     "draw it, run 'Write full-size layers' on the Enhance tab once, then Preview.")
 
 
 # ---------------------------------------------------------------------------
