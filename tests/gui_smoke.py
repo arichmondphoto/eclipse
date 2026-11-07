@@ -82,7 +82,15 @@ assert et.params().natural_stretch == "gamma" and et.params().gamma == 2.5
 et.natural_stretch.setCurrentIndex(0)
 m = et.blend_mode["adaptive"]
 assert m.findData("average") >= 0                       # Weighted average: MGN only
-assert all(et.blend_mode[k].findData("average") < 0 for k in et.blend_mode if k != "adaptive")
+assert et.blend_mode["achf"].findData("average") >= 0      # and ACHF (its earlier look)
+assert all(et.blend_mode[k].findData("average") < 0 for k in et.blend_mode if k not in ("adaptive", "achf"))
+ma = et.blend_mode["achf"]
+ma.setCurrentIndex(ma.findData("linear"))                # the thesis's form: K2 up to 100
+et.blend["achf"].setValue(5000)
+assert et.blend["achf"].value() == 5000 and et.params().blend["achf"] == 50.0
+assert et.params().blend_modes["achf"] == "linear"
+ma.setCurrentIndex(ma.findData("soft light"))
+et.blend["achf"].setValue(0)
 et.blend["adaptive"].setValue(43)              # a mode is kept only for a layer in use
 m.setCurrentIndex(m.findData("average"))
 assert m.currentText() == "Weighted average" and et.params().blend_modes.get("adaptive") == "average"

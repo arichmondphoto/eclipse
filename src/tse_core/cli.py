@@ -155,9 +155,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--blend", default=",".join(f"{k}={v}" for k, v in DEFAULT_BLEND.items()),
                    help="suggested blend as layer=weight pairs, each optionally ':overlay', ':linear' (the papers' "
                         "weighted average (K1 X + K2 Y) / (K1 + K2), the natural layer's weight as K1 and the layer's "
-                        "as K2, which may exceed 1; MGN's detail added as its paper does) or, for adaptive "
-                        "(MGN) only, ':average' (the same average with MGN as its 0..1 picture, gentler); default "
-                        "soft light, "
+                        "as K2, which may exceed 1; MGN's detail added as its paper does; ACHF as its thesis does, "
+                        "h = K1 f + K2 g on the linear stack before the natural stretch, K2 = weight x "
+                        "--achf-contrast, typically 20-100) or, for adaptive and achf only, ':average' (the same "
+                        "average with the layer as its 0..1 picture: the earlier, gentler look); default soft "
+                        "light, "
                         "e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s)")
     p.add_argument("--order", type=int, default=10, help="FNRGF Fourier order (default 10)")
     p.add_argument("--segments", type=int, default=50, help="FNRGF angular segments (default 50)")
@@ -189,7 +191,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--achf-contrast", type=float, default=1.0,
                    help="Adaptive (ACHF): contrast of the layer (the thesis's K2): at 1, a pixel about 1.1%% brighter "
                         "than its local mean (averaged over the scales by their strengths) shows at 82%% grey, 1.1%% "
-                        "darker at 18%%; at 2, half that difference does; set by eye (default 1)")
+                        "darker at 18%%; at 2, half that difference does; set by eye. With achf on ':linear' it multiplies "
+                        "that blend weight instead (default 1)")
     p.add_argument("--noise-gate", type=float, default=0.0,
                    help="adaptive layer: each scale's detail counts only as far as it stands above the stack's "
                         "noise at that scale (e.g. 3); 0 = off")

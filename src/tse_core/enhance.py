@@ -1077,7 +1077,7 @@ def achf_parts(b: np.ndarray, valid: np.ndarray, cx: float, cy: float, limit: fl
 def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float,
          cx: float, cy: float, weights: Optional[Sequence[float]] = None, part_limit: float = 2.0,
          ref_sigma: Optional[float] = None, r_ref: Optional[float] = None, contrast: float = 1.0,
-         raw: bool = False) -> np.ndarray:
+         raw: bool = False, linear: bool = False) -> np.ndarray:
     """Adaptive (ACHF): Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin &
     Minarovjech 2006; defined in Druckmüllerová 2013, section 5.2). For each scale sigma the
     filtered image is the pixel minus its local mean under the circular kernel (:func:`achf_mean`),
@@ -1085,13 +1085,16 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
     an amplification rising with spatial frequency; ``weights`` (one per scale, default all 1)
     change each scale's share, like the frequency sliders of Druckmüller's Corona program.
 
-    Not published, so chosen here: it works on log brightness (so the same contrast counts the same
-    at every height; Adaptive (MGN) works on the linear image, as its paper does), and is
-    centred on mid-grey for the blend, whose natural-layer base plays the part of the original
-    image's share (K1 in the thesis). Druckmüller's later "nonlinearity in the use of filtered
-    images" (Corona 4.1) is not published and not reproduced.
+    With ``linear`` (the thesis's form, used on Linear (paper)): g is f minus its local mean on the
+    linear image itself, as eq. 5.2 has it (f is the composed image, "ideally linear", section
+    4.1.4), to be added to it as h = K1 f + K2 g before any stretch (see :func:`render`). Otherwise
+    (our earlier form, kept for the other blend modes): on log brightness, ln(pixel / local mean),
+    so the same contrast counts the same at every height, centred on mid-grey for the blend.
+    Either way the parts (requirement (d)) are judged on brightness ratios. Druckmüller's later
+    "nonlinearity in the use of filtered images" (Corona 4.1) is not published and not reproduced.
     """
     b = np.log(np.maximum(x, 0) + max(floor, 1e-9))
+    f = np.maximum(x, 0).astype(np.float64) if linear else b
     w = valid.astype(np.float64)
     ws = [1.0] * len(scales) if weights is None else [max(float(v), 0.0) for v in weights]
     if len(ws) != len(scales):
@@ -1108,8 +1111,8 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
             # for the others), so a prominence neither darkens the corona beside it nor the reverse.
             mean = np.zeros(b.shape, np.float64)
             for m in parts:
-                mean[m] = achf_mean(b, m.astype(np.float64), cx, cy, float(s), r_ref=r_ref)[m]
-            acc += ks * np.where(valid, b - mean, 0.0)
+                mean[m] = achf_mean(f, m.astype(np.float64), cx, cy, float(s), r_ref=r_ref)[m]
+            acc += ks * np.where(valid, f - mean, 0.0)
     if sum(ws) <= 0:
         if raw:
             return np.zeros(b.shape, np.float32)
@@ -1118,11 +1121,26 @@ def achf(x: np.ndarray, valid: np.ndarray, scales: Sequence[float], floor: float
     acc /= sum(ws)
     if raw:  # the filtered image before Contrast and the display scale (see achf_display)
         return np.where(valid, acc, 0.0).astype(np.float32)
+    if linear:
+        acc = achf_share(acc, x, floor)
     # A fixed output scale (the thesis's K2 is the Contrast setting): measured over the whole image
     # it would make a detail box differ from the full-size result.
     out = to_fixed((acc * contrast).astype(np.float32), ACHF_SPREAD)
     out[~valid] = 0.0
     return out
+
+
+def achf_share(g: np.ndarray, x: np.ndarray, floor: float) -> np.ndarray:
+    """The thesis-form g (linear) as a share of the local mean, g / (f - g): how the layer is shown
+    on its own, on the log form's display scale (the two agree for small details)."""
+    mean = np.maximum(np.maximum(x, 0) - g, max(floor, 1e-9))
+    return (g / mean).astype(np.float32)
+
+
+def achf_form(p: "EnhanceParams") -> str:
+    """'linear' when Adaptive (ACHF) is blended on Linear (paper), the thesis's h = K1 f + K2 g;
+    otherwise 'log' (the filter on log brightness, our earlier form)."""
+    return "linear" if blend_mode_name(p.blend_modes.get("achf", "soft light")) == "linear" else "log"
 
 
 def achf_display(acc: np.ndarray, valid: np.ndarray, contrast: float) -> np.ndarray:
@@ -1489,7 +1507,8 @@ def layer_key(name: str, p: EnhanceParams) -> tuple:
     def h(v):
         return tuple(h(x) for x in v) if isinstance(v, (list, tuple)) else v
 
-    return tuple(h(getattr(p, k)) for k in LAYER_SETTINGS[name])
+    key = tuple(h(getattr(p, k)) for k in LAYER_SETTINGS[name])
+    return key + (achf_form(p),) if name == "achf" else key
 
 
 def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[tuple] = None,
@@ -1564,7 +1583,7 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
             # Raw (before Contrast), so a Contrast change needs no filtering: see below.
             y = achf(lum, rvalid, [g.sun_r * f for f in p.achf_scales], frame.nlev, g.sun_x - origin[1],
                      g.sun_y - origin[0], list(p.achf_weights), p.achf_part_limit, ref_sigma=0.1 * g.sun_r,
-                     r_ref=g.moon_r, raw=True)
+                     r_ref=g.moon_r, raw=True, linear=achf_form(p) == "linear")
         else:
             scales = _mgn_scales(p, g)
             if p.noise_gate > 0:
@@ -1593,14 +1612,38 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
         layers[name_l] = compute(name_l)
         if store is not None:
             store[(name_l, inner_box)] = (key, layers[name_l])
+    achf_g = None  # the thesis form's g (linear), for the blend
     if "achf" in layers:
-        layers["achf"] = achf_display(layers["achf"], valid, p.achf_contrast)
+        if achf_form(p) == "linear":
+            achf_g = layers["achf"]
+            shown = achf_share(achf_g, frame.lum[box_reg], frame.nlev)
+        else:
+            shown = layers["achf"]
+        layers["achf"] = achf_display(shown, valid, p.achf_contrast)
     if store is not None:  # only the latest area is kept
         for k in [k for k in store if k[1] != inner_box]:
             del store[k]
     blend_w = {k: float(v) for k, v in p.blend.items() if v and k in layers}
     if blend_w:
-        layers["blend"] = soft_light_blend(layers, blend_w, valid, p.blend_modes, show=show, fade=fade,
+        base_layers = layers
+        if achf_g is not None and "achf" in blend_w:
+            # Druckmüllerová (2013), section 5.2: h = K1 f + K2 g, on the linear image, then drawn
+            # with the natural layer's own stretch (measured on f, so the corona keeps its levels
+            # and only the detail changes). K1 is the natural layer's strength, K2 ACHF's strength
+            # times its Contrast. Nothing is clipped before the stretch: a dark detail that takes h
+            # below 0 comes out black, as the data says.
+            k1 = blend_w.get("natural", 1.0) or 1.0
+            k2 = blend_w.pop("achf") * float(p.achf_contrast) / k1
+            gk = achf_g if fade is None else achf_g * fade
+            hlin = (frame.lum[box_reg] + np.float32(k2) * gk).astype(np.float32)
+            st = _natural_cache(frame, p)
+            r_box, _ = polar((y1 - y0, x1 - x0), g, (y0, x0))
+            loc = None if st.loc is None else tuple(a_[box_reg] for a_ in st.loc)
+            base_layers = dict(layers, natural=natural_apply(hlin, r_box, st, p.flatten, p.shoulder, p.even,
+                                                             g.sun_r, p.midtone, loc=loc, show=show))
+            blend_w.setdefault("natural", 1.0)
+            say(f"Adaptive (ACHF) in the thesis's form: h = f + {k2:g} g on the linear stack, then the natural stretch")
+        layers["blend"] = soft_light_blend(base_layers, blend_w, valid, p.blend_modes, show=show, fade=fade,
                                            shoulder=p.shoulder)
     ckey = ("chroma", inner_box)
     hit = store.get(ckey) if store is not None else None

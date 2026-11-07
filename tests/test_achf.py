@@ -9,11 +9,14 @@ image is the pixel minus that weighted local mean.
 """
 
 import math
+from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
 from scipy import ndimage
 
+from tse_core import enhance as E
 from tse_core.enhance import achf, achf_mean
 
 N = 400
@@ -170,3 +173,82 @@ def test_part_rule_leaves_ordinary_structure_alone():
     a = achf(loop, valid, [2.0, 4.0, 8.0], 1e-6, CX, CY, part_limit=0)
     b = achf(loop, valid, [2.0, 4.0, 8.0], 1e-6, CX, CY, part_limit=2.0)
     assert np.abs(a - b)[valid].max() < 1e-5
+
+
+# --- The thesis's own combination, h = K1 f + K2 g (Druckmuellerova 2013, section 5.2) -------------
+# f is the composed image, "monotone (ideally linear)" in the light (section 4.1.4), and g is f minus
+# its incomplete convolution with the circular kernel (eq. 5.2), on that same linear f. "The
+# processed image is then a linear combination of the original and the filtered image": nothing
+# is taken in log and no curve is put on g. Only afterwards is h drawn (here, with the natural
+# layer's own stretch); her chapter 7 lists a stretch of f before combining as future work.
+
+DATA = Path(__file__).parent / "data" / "eclipse2024_bin8.npz"
+
+
+def _real_frame(p):
+    z = np.load(DATA)
+    hdr = np.ascontiguousarray(np.moveaxis(z["hdr"].astype(np.float32) * float(z["scale"]), 0, -1))
+    geo = {k: float(z[k]) for k in ("SUNX", "SUNY", "SUNR", "MOONX", "MOONY", "MOONR")}
+    weight = (np.abs(hdr).sum(axis=2) > 0).astype(np.float32)
+    return E.prepare(hdr, weight, geo, p)
+
+
+def _thesis_g(frame, fracs, weights, part_limit=0.0):
+    g = frame.g
+    f = np.maximum(frame.lum, 0).astype(np.float64)
+    w = frame.valid.astype(np.float64)
+    acc = np.zeros(f.shape)
+    for s, k in zip(fracs, weights):
+        if k > 0:
+            acc += k * (f - achf_mean(f, w, g.sun_x, g.sun_y, s * g.sun_r, r_ref=g.moon_r))
+    return np.where(frame.valid, acc / sum(weights), 0.0)
+
+
+@pytest.mark.parametrize("stretch", ["log", "gamma"])
+def test_achf_on_linear_is_the_theses_h_k1_f_plus_k2_g(stretch):
+    fracs, ws = (0.005, 0.02), (1.0, 1.0)
+    p = E.EnhanceParams(layers=("natural", "achf"), saturation=0.0, natural_stretch=stretch,
+                        achf_scales=fracs + (0.1, 0.2, 0.3, 0.4), achf_weights=ws + (0, 0, 0, 0),
+                        achf_part_limit=0.0, achf_contrast=1.5,
+                        blend={"natural": 1.0, "achf": 4.0}, blend_modes={"achf": "linear"})
+    frame = _real_frame(p)
+    out = E.render(frame, p)["blend"][..., 0]
+    gl = _thesis_g(frame, fracs, ws)
+    h = frame.lum + 4.0 * 1.5 * gl                         # K1 = 1, K2 = strength x Contrast
+    st = E._natural_cache(frame, p)
+    r, _ = E.polar(frame.shape, frame.g)
+    expect = E.natural_apply(h.astype(np.float32), r, st, p.flatten, show=frame.show)
+    v = frame.valid
+    assert np.abs(out[v] - expect[v]).max() < 2e-3
+    # Not the old form (the ACHF layer's 0..1 picture averaged with the natural layer):
+    nat = E.render(frame, replace(p, blend={}))["natural"][..., 0]
+    assert np.abs(out[v] - nat[v]).max() > 0.02
+
+
+def test_achf_weighted_average_is_the_earlier_linear_form():
+    """Weighted average keeps how Linear (paper) treated ACHF until 6 Nov 2026: the layer's own
+    0..1 picture (log detail through its soft curve), (K1 B + K2 L) / (K1 + K2)."""
+    p = E.EnhanceParams(layers=("natural", "achf"), saturation=0.0, achf_scales=(0.005, 0.02, 0.1, 0.2, 0.3, 0.4),
+                        achf_weights=(1, 1, 0, 0, 0, 0), blend={"natural": 1.0, "achf": 0.6},
+                        blend_modes={"achf": "average"})
+    frame = _real_frame(p)
+    lay = E.render(frame, p)
+    v = frame.valid
+    expect = (lay["natural"][..., 0] + 0.6 * lay["achf"][..., 0]) / 1.6
+    assert np.abs(lay["blend"][..., 0][v] - expect[v]).max() < 1e-5
+
+
+def test_achf_layer_on_linear_shows_the_detail_as_a_share_of_the_local_mean():
+    """Seen on its own, the thesis-form layer is g / (f - g), the pixel's difference from its local
+    mean as a share of that mean, on ACHF's usual display scale (close to the log form's)."""
+    fracs, ws = (0.005, 0.02), (1.0, 1.0)
+    p = E.EnhanceParams(layers=("natural", "achf"), saturation=0.0, achf_scales=fracs + (0.1, 0.2, 0.3, 0.4),
+                        achf_weights=ws + (0, 0, 0, 0), achf_part_limit=0.0, blend={"natural": 1.0, "achf": 1.0},
+                        blend_modes={"achf": "linear"})
+    frame = _real_frame(p)
+    lay = E.render(frame, p)["achf"][..., 0]
+    gl = _thesis_g(frame, fracs, ws)
+    mean = np.maximum(np.maximum(frame.lum, 0) - gl, frame.nlev)
+    expect = E.to_fixed((gl / mean).astype(np.float32), E.ACHF_SPREAD)
+    v = frame.valid
+    assert np.abs(lay[v] - expect[v]).max() < 2e-3

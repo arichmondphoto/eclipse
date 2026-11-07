@@ -1145,14 +1145,18 @@ class EnhanceTab(StepTab):
             sp = self._spin(0, 100, default, " %")
             mode = QComboBox()
             choices = [("Soft Light", "soft light"), ("Overlay", "overlay"), ("Linear (paper)", "linear")]
-            if k == "adaptive":  # only MGN has a second linear form: its paper's, and the 0..1 picture
+            if k in ("adaptive", "achf"):  # a second linear form: the paper's, and the earlier 0..1 picture
                 choices.append(("Weighted average", "average"))
             for text, name in choices:
                 mode.addItem(text, name)
             # Linear (paper): the strength is K2 against the natural layer's 1, up to 10 (1000 %) as in
-            # Druckmüllerová's FNRGF software; Soft Light and Overlay are opacities, at most 100 %.
-            mode.currentIndexChanged.connect(
-                lambda _i, sp=sp, mode=mode: sp.setMaximum(1000 if mode.currentData() in ("linear", "average") else 100))
+            # Druckmüllerová's FNRGF software; ACHF's thesis form adds its g to the linear stack, where
+            # K2 runs to about 100 before noise limits it; Soft Light and Overlay are opacities.
+            def top(name, k=k):
+                if name == "linear" and k == "achf":
+                    return 10000
+                return 1000 if name in ("linear", "average") else 100
+            mode.currentIndexChanged.connect(lambda _i, sp=sp, mode=mode, top=top: sp.setMaximum(top(mode.currentData())))
             mode.currentIndexChanged.connect(self.changed)
             row = QHBoxLayout()
             row.addWidget(sp, 1)
@@ -1367,15 +1371,24 @@ class EnhanceTab(StepTab):
                  "paper's own image set Stretch: Gamma, Gamma 3.2 in 'Natural layer and colour'; on an eclipse its "
                  "base is very dark and much of the corona can clip to black, so lower Gamma white point (about "
                  "99.9 %) or raise Midtone. With the Log stretch as base, 43 % gives the paper's mix of structure on a "
-                 "brighter base.\n- FNRGF, FNRGF-N, NRGF, Adaptive (ACHF): the FNRGF paper's Z = K1 X + K2 Y on the "
-                 "display range (Druckmüllerová's software scales both images to 0-1 first). As in the published "
-                 "images, the dark sky comes up towards grey and the natural tones flatten by the filtered image's "
-                 "share. The 2011 paper's 0.4 FNRGF + 0.6 ACHF is both layers on Linear at 40 % and 60 %.\n\nWeighted "
-                 "average (Adaptive (MGN) only): the same weighted average with MGN as its own 0-1 picture, as "
-                 "Linear (paper) treated it before 6 Nov 2026. Gentler than Linear (paper), about a third of the "
-                 "detail, and it lifts the sky a little towards grey. Strength up to 1000 %, as K2; 43 % gives the "
-                 "earlier look at the paper's h = 0.7.\n\nIn Photoshop (Weighted average, or Linear for layers "
-                 "other than MGN): Normal mode at opacity K2 / (1 + K2) for one layer.")
+                 "brighter base.\n- Adaptive (ACHF): the thesis's h = K1 f + K2 g, before any stretch: the filtered "
+                 "image g (each pixel minus its local mean, on the linear stack) is added to the linear stack, and "
+                 "the natural layer's own stretch (Log or Gamma) then draws the result. K2 = this strength x "
+                 "Contrast (leave Contrast at 1 and set the strength), up to 10000 %. The corona keeps its levels "
+                 "and the sky stays dark; only the detail grows. It needs a much higher strength than the other "
+                 "modes: start about 2000-5000 % with the Log stretch, about twice that with Gamma. Noise grows with "
+                 "it: where the darkest fine detail goes below zero (by the limb, at high strength) it shows black, "
+                 "as the data says; lower the finest scale's strength or the strength here.\n- FNRGF, FNRGF-N, "
+                 "NRGF: the FNRGF paper's Z = K1 X + K2 Y on the display range (Druckmüllerová's software scales "
+                 "both images to 0-1 first). As in the published images, the dark sky comes up towards grey and "
+                 "the natural tones flatten by the filtered image's share.\n\nWeighted average (Adaptive (MGN) and "
+                 "Adaptive (ACHF) only): the same weighted average with the layer as its own 0-1 picture, as "
+                 "Linear (paper) treated these two before 6 Nov 2026. For MGN gentler than Linear (paper), about a "
+                 "third of the detail; for ACHF the earlier look (its detail on log brightness, through a soft "
+                 "curve). Both lift the sky a little towards grey. Strength up to 1000 %, as K2; MGN at 43 % gives "
+                 "its earlier look at the paper's h = 0.7. The 2011 paper's 0.4 FNRGF + 0.6 ACHF is FNRGF on Linear "
+                 "at 40 % and ACHF on Weighted average at 60 %.\n\nIn Photoshop (Weighted average, or Linear for "
+                 "FNRGF, FNRGF-N and NRGF): Normal mode at opacity K2 / (1 + K2) for one layer.")
         for size, sp in zip(self.achf_size, self.achf_w):
             _tip(size, "Adaptive (ACHF) only: the width (sigma) of this scale's kernel in pixels of your full-size "
                  "stack; the structure about this size and finer is brought out. The thesis uses 0.5-64 px. Kept as "
@@ -1409,7 +1422,8 @@ class EnhanceTab(StepTab):
              "flat (for example after lowering the finest scales against grain); lower it if it looks harsh (for "
              "example with the large scales on). The contrast is not measured on each picture, so the detail box "
              "shows exactly what the full-size layer will. Noise is raised as much as detail: judge it in the "
-             "detail box.",
+             "detail box.\n\nWith the blend mode Linear (paper), the thesis's form, Contrast multiplies the "
+             "strength (K2 = strength x Contrast): leave it at 1 and set the strength instead.",
              self._achf_form)
         _tip(self.views, "Whole picture: a reduced copy of the stack (about 1400 px wide), quick to update. "
              "Hold Shift and drag on it to choose a detail box.\n\nDetail box: that box at full resolution, "
@@ -1608,8 +1622,8 @@ class EnhanceTab(StepTab):
         for k, sp in self.blend.items():
             mode = self.blend_mode[k]
             want = p.blend_modes.get(k, "soft light")
-            if want == "average" and k != "adaptive":
-                want = "linear"  # the same thing for every layer but MGN
+            if want == "average" and k not in ("adaptive", "achf"):
+                want = "linear"  # the same thing for every layer but MGN and ACHF
             i = mode.findData(want)
             mode.setCurrentIndex(max(i, 0))  # first: it sets the strength's range
             sp.setValue(int(round(100 * p.blend.get(k, 0.0))))

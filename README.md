@@ -114,7 +114,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
-| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper), and for Adaptive (MGN) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the MGN paper's base) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k), Noise gate (off) and the size and strength of each of its six scales (the paper's 1.25, 2.5, 5, 10, 20, 40 px at strength 1); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
+| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear (paper), and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the MGN paper's base) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, the paper's k), Noise gate (off) and the size and strength of each of its six scales (the paper's 1.25, 2.5, 5, 10, 20, 40 px at strength 1); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; for pasting only, kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting | The Moon close up, then a preview of the final picture; **Write final image** |
 | 6 Prominences | Height, sensitivity, redness, chromosphere on or off, brightness, saturation; then the image to put them on, strength and mode | The prominences over a dim view of the inner corona, then a preview of the picture; **Write final image** |
 
@@ -431,18 +431,39 @@ paper's own image. On the binned 2024 stack, Log base with MGN on Linear at
 paper's own image (Gamma 3.2 base) is far darker on an eclipse: 32 % of the
 corona at 1.2-3 solar radii clipped to black (7 % with Gamma white point
 99.9 %); the paper says nothing about clipping or display. The 2011 paper's
-Figure 9, 0.4 FNRGF + 0.6 ACHF, is both on Linear at 40 % and 60 %, with the
-natural layer's own share left in. Nothing is measured, so a detail box
-still matches; the result is clipped to 0..1. With FNRGF or ACHF on Linear,
-as in the published images, the dark sky comes up towards grey and the
-natural tones flatten by the filtered images' share.
+Figure 9, 0.4 FNRGF + 0.6 ACHF, is FNRGF on Linear at 40 % and ACHF on
+Weighted average at 60 %, with the natural layer's own share left in.
+Nothing is measured, so a detail box still matches; the result is clipped
+to 0..1. With FNRGF on Linear, as in the published images, the dark sky
+comes up towards grey and the natural tones flatten by the filtered
+image's share.
 
-**Weighted average** (`:average`, offered for Adaptive (MGN) only) is the
-same weighted average with MGN as its own 0..1 picture: how Linear treated
-MGN before 6 Nov 2026, kept because its gentler look can be preferred (a
-third of the paper form's detail, the sky lifted a little). For the other
-layers Linear already works that way, so it is not offered there (a
-settings file or command line that gives it is read as Linear). (A plain sum without the
+Adaptive (ACHF) on Linear goes in as the thesis combines it (section 5.2):
+"the processed image is then a linear combination of the original and the
+filtered image", h = K1 f + K2 g, with f the composed image, "monotone
+(ideally linear)" in the light (section 4.1.4), and g = f minus its local
+mean under the circular kernel, on that same linear f. So g is computed on
+the linear stack and added to it, h = f + K2 g (K1 the natural layer's 1;
+K2 the blend strength times **Contrast**), and the natural layer's own
+stretch, measured on f, then draws h (her chapter 7 lists a stretch of f
+before combining as future work). The corona keeps its levels and the sky
+stays dark; only the detail grows. K2 must be far higher than in the other
+modes, as the thesis says the amplification "is limited by the amount of
+noise": on Andy's full-size 2024 crop, fine-detail contrast at 1.1-1.5
+solar radii matched the Weighted average form at 60 % with K2 about 40-50
+on the Log stretch and about 100 on Gamma, so the strength runs to
+10000 % for this layer. At such K2 the darkest fine details by the limb go
+below zero and show black (about 0.35 % more of the crop black at K2 = 50,
+Log): that is the noise of the data, shown as it is, not clipped away.
+
+**Weighted average** (`:average`, offered for Adaptive (MGN) and Adaptive
+(ACHF) only) is the same weighted average with the layer as its own 0..1
+picture: how Linear treated these two before 6 Nov 2026, kept because the
+earlier looks can be preferred (for MGN a third of the paper form's
+detail; for ACHF its detail on log brightness through its soft curve; the
+sky lifted a little either way). For the other layers Linear already works
+that way, so it is not offered there (a settings file or command line that
+gives it is read as Linear). (A plain sum without the
 division, tried first, turned 42% of the 2024 crop flat black: the
 natural layer puts the sky at black and the filter layers carry its noise
 as detail of both signs.) In Photoshop, one layer: Normal mode at opacity
@@ -556,7 +577,8 @@ circle is straight to within 0.1 px over the kernel. Tests check the
 circular geometry (a corona that only varies with radius gives exactly the
 1-D blur of its profile; a straight kernel does not), that the Moon has no
 influence, and the small-scale limit. Not published, so chosen here and
-open to change: the filter works on log brightness, sums its scales with
+open to change: except on the blend mode Linear (the thesis's own form,
+below), the filter works on log brightness; it sums its scales with
 the strengths set (an amplification rising with spatial frequency), and is
 centred on mid-grey for the blend on a fixed scale: **Contrast** (`--achf-contrast`,
 default 1) plays the thesis's K2 and is set by eye, as in Druckmüller's own
@@ -678,7 +700,7 @@ about mid-grey with nothing added:
 | FNRGF | the same with the local (Fourier) mean and deviation | 0.5 + y / 13.6: white at +6.8 local deviations |
 | FNRGF-N | the same, the deviation less **Noise compensation** x the noise | 0.5 + y / 40: white at +20 of those |
 | Adaptive (MGN) | mean over the scales of arctan(k C), range -pi/2 to pi/2 | 0.5 + y / pi (the paper's, no constant of ours; also with the noise gate) |
-| Adaptive (ACHF) | **Contrast** x the strength-weighted mean over the scales of ln(pixel / local mean) | 0.5 + arctan(1.6 y / 0.0106) / pi: 82% grey at about 1.1% brighter than the local mean, at Contrast 1 |
+| Adaptive (ACHF) | **Contrast** x the strength-weighted mean over the scales of ln(pixel / local mean); on Linear (the thesis's form) of (pixel - local mean) / local mean on the linear stack | 0.5 + arctan(1.6 y / 0.0106) / pi: 82% grey at about 1.1% brighter than the local mean, at Contrast 1 (the layer seen on its own; on Linear the blend adds g to the linear stack instead, see above) |
 
 The papers combine the filtered image Y with the original X linearly, Z =
 K1 X + K2 Y (FNRGF: "if we want to process two original images X1 and X2
@@ -693,8 +715,10 @@ went through an extra arctan S-curve of ours (1.6x the contrast near
 mid-grey, compressed towards black and white); NRGF and FNRGF keep the
 same contrast near mid-grey without it, while Adaptive (MGN) is now 0.63x
 as strong there (0.38x with the noise gate, which had its own scale): raise
-its blend strength or **Strength** (k) for the earlier look. ACHF keeps a
-soft curve: the thesis gives no mapping for its unnormalized output.
+its blend strength or **Strength** (k) for the earlier look. ACHF's layer
+keeps a soft curve for being seen on its own and for Soft Light, Overlay
+and Weighted average; on Linear its g goes into the linear stack as the
+thesis has it, with no curve.
 
 These are display units, not fitted to any one eclipse: a corona with
 little structure looks flatter than one with much, as it is, where a
@@ -1202,7 +1226,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--output`, `-o` | output folder (default: next to the project) |
 | `--name` | output file name prefix (default: the project name) |
 | `--layers` | comma-separated layers to write, from natural, nrgf, fnrgf, fnrgf_n, adaptive, achf (default: all but achf, which takes minutes on a full frame) |
-| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay', ':linear' (the papers' weighted average (K1 X + K2 Y) / (K1 + K2), the natural layer's weight as K1 and the layer's as K2, which may exceed 1; MGN's detail added as its paper does) or, for adaptive (MGN) only, ':average' (the same average with MGN as its 0..1 picture, gentler); default soft light, e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
+| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay', ':linear' (the papers' weighted average (K1 X + K2 Y) / (K1 + K2), the natural layer's weight as K1 and the layer's as K2, which may exceed 1; MGN's detail added as its paper does; ACHF as its thesis does, h = K1 f + K2 g on the linear stack before the natural stretch, K2 = weight x --achf-contrast, typically 20-100) or, for adaptive and achf only, ':average' (the same average with the layer as its 0..1 picture: the earlier, gentler look); default soft light, e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
 | `--order` | FNRGF Fourier order (default 10) |
 | `--segments` | FNRGF angular segments (default 50) |
 | `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
@@ -1214,7 +1238,7 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--mgn-weights` | Adaptive (MGN): the weight g_i of each scale, 0-1, finest first (default 1,1,1,1,1,1: the plain mean); the layer is 1/6 of the weighted sum, as in the paper, so lowering one weakens it; 0 leaves the scale out |
 | `--achf-weights` | Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out (default 1,1,1,1,0,0) |
 | `--achf-part-limit` | Adaptive (ACHF): a pixel this many times brighter or darker than the corona at its height (a prominence) is a separate part, left out of the corona's kernels and filtered with its own pixels only, so no dark fringe forms round it; 0 = off (default 2) |
-| `--achf-contrast` | Adaptive (ACHF): contrast of the layer (the thesis's K2): at 1, a pixel about 1.1% brighter than its local mean (averaged over the scales by their strengths) shows at 82% grey, 1.1% darker at 18%; at 2, half that difference does; set by eye (default 1) |
+| `--achf-contrast` | Adaptive (ACHF): contrast of the layer (the thesis's K2): at 1, a pixel about 1.1% brighter than its local mean (averaged over the scales by their strengths) shows at 82% grey, 1.1% darker at 18%; at 2, half that difference does; set by eye. With achf on ':linear' it multiplies that blend weight instead (default 1) |
 | `--noise-gate` | adaptive layer: each scale's detail counts only as far as it stands above the stack's noise at that scale (e.g. 3); 0 = off |
 | `--even` | take out this fraction of the large brightness differences round the Sun (streamers against coronal holes); 0 = off, e.g. 0.7 |
 | `--midtone` | put the inner corona's median brightness at this level with a midtones transfer curve; 0 = off, e.g. 0.6 |
