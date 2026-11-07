@@ -32,7 +32,8 @@ Each step works in the Siril window and on the command line. Tested on the
 2024 eclipse (Nikon D850, 400 mm); the 2017 set is kept back as a blind test.
 Still to come: the blind test, and help for other cameras and operating
 systems before sharing the tool more widely. Ideas kept for later, if needed
-or requested (such as files from astronomy cameras like ZWO's), are in
+or requested (such as files from astronomy cameras like ZWO's, and sharper
+prominences from the short exposures), are in
 [docs/FUTURE.md](docs/FUTURE.md).
 
 ## Workflow
