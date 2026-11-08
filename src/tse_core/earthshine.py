@@ -73,6 +73,10 @@ class EarthshineParams:
     # 0 (default since Nov 2026): only where the noise says so.
     edge_fill: float = 0.0
     colour: bool = True  # natural colour: the glow and limb (prominences red) and the earthshine's own tint
+    # Colour of the glare just inside the limb (see limb_colour): "recorded" as the camera saw it
+    # (red from the chromosphere), "no red" (each ring near the limb given the colour of the
+    # Moon's middle), "neutral" (no red, and the whole Moon given the corona's white).
+    limb_colour: str = "recorded"
     saturation: float = 1.0  # colour saturation, as for the corona layers (0 = grey)
     saturation_level: float = 0.95
     saturation_taper: float = 0.15  # only with mask_fade 0: weight falls from 80% to 95% of full scale
@@ -845,6 +849,10 @@ def stack_earthshine(
         raise ValueError(f"unknown channel {p.channel!r}; choose from auto, {', '.join(CHANNELS)}")
     notes.append(f"made from the {chan} channel{'s' if chan in ('all', 'green+blue') else ''}")
     img = lum if chan == "all" else channel_image(rgb, chan)
+    # Colour only (red and blue), after the channel for the surface is chosen and taken.
+    rgb, note = limb_colour(rgb, good, cx, cy, moon_r, p.limb_colour, white)
+    if note:
+        notes.append(note)
     extras: dict = {}
     detail, shown, snr, keep_from, more = process_disc(img, weight, good, cx, cy, moon_r, p, extras=extras)
     notes += more
@@ -915,6 +923,67 @@ def surface_tint(rgb: np.ndarray, detail: np.ndarray, chan: str, good: np.ndarra
     if notes is not None:
         notes.append("earthshine colour (R, G, B): " + ", ".join(f"{x:.2f}" for x in t))
     return t.astype(np.float32)
+
+
+LIMB_COLOURS = ("recorded", "no red", "neutral")
+
+
+def limb_colour(rgb: np.ndarray, good: np.ndarray, cx: float, cy: float, r: float, mode: str,
+                white: Optional[Sequence[float]] = None, reach: float = 0.25) -> tuple[np.ndarray, str]:
+    """The colour of the Moon-aligned stack inside the limb, by ``mode`` (linear: each pixel's red and
+    blue are scaled, green, the brightness, is not).
+
+    Just inside the limb the long exposures hold the lens's glare of the chromosphere, whose light
+    is red hydrogen: on the 2024 stack R/G rose from 0.47 in the Moon's middle to 0.64 at 2-4 px
+    inside the limb (the corona just outside: 0.49). ``"no red"`` gives each ring near the limb
+    (0.5 px deep, 10-degree sectors, smoothed over three) the colour of the Moon's middle, fading
+    to no change by ``reach`` x radius inside. ``"neutral"`` also gives the whole Moon the corona's
+    white (``white``: the corona's white-balance multipliers); earthshine is in fact a little blue
+    (2024: 4 % less red and 5 % more blue than the corona), so this is a choice, not a correction.
+    Returns the new stack and a note for the log ("" when nothing changed)."""
+    if mode not in LIMB_COLOURS:
+        raise ValueError(f"unknown limb colour {mode!r}; choose from {', '.join(LIMB_COLOURS)}")
+    if mode == "recorded" or rgb.ndim != 3 or rgb.shape[0] != 3:
+        return rgb, ""
+    h, w = rgb.shape[1:]
+    yy, xx = np.mgrid[0:h, 0:w]
+    rr = np.hypot(xx - cx, yy - cy)
+    G = rgb[1]
+    ok = good & (G > 0) & np.isfinite(rgb).all(axis=0)
+    body = ok & (rr < 0.5 * r)
+    if body.sum() < 100:
+        return rgb, ""
+    bc = [float(np.median(rgb[c][body] / G[body])) for c in range(3)]
+    d = r - rr
+    reach_px = max(reach * r, 4.0)
+    nd = int(reach_px * 2) + 1
+    dep = np.clip((d * 2).astype(int), 0, nd - 1)
+    sec = ((np.degrees(np.arctan2(yy - cy, xx - cx)) % 360) // 10).astype(int) % 36
+    sel = ok & (d >= 0) & (d < reach_px)
+    lab = np.where(sel, dep * 36 + sec + 1, 0)
+    fade = np.clip((reach_px - d) / (0.5 * reach_px), 0.0, 1.0)
+    out = rgb.astype(np.float32, copy=True)
+    before = after = 0.0
+    band = sel & (d >= 2) & (d < 12)
+    for c in (0, 2):
+        ratio = np.where(ok, rgb[c] / np.maximum(G, 1e-30), 0.0)
+        med = np.asarray(ndimage.median(ratio, lab, index=np.arange(1, nd * 36 + 1)), float)
+        med = np.where(np.isfinite(med) & (med > 0), med, bc[c]).reshape(nd, 36)
+        med = ndimage.uniform_filter1d(med, 3, axis=1, mode="wrap")
+        f = np.ones((h, w), np.float32)
+        f[sel] = 1.0 + (bc[c] / med[dep[sel], sec[sel]] - 1.0) * fade[sel]
+        if mode == "neutral" and white is not None:
+            f = f * np.float32((1.0 / float(white[c])) / bc[c])
+        out[c] = np.where(ok, rgb[c] * f, rgb[c])
+        if c == 0 and band.any():
+            before = float(np.median(ratio[band]))
+            after = float(np.median(out[0][band] / G[band]))
+    note = (f"limb colour: the red glare just inside the limb taken off (R/G at 2-12 px inside {before:.3f} -> "
+            f"{after:.3f}, the Moon's middle {bc[0]:.3f})")
+    if mode == "neutral":
+        note += (", and the whole Moon given the corona's white" if white is not None
+                 else "; no corona white balance known, so the Moon keeps its own colour")
+    return out, note
 
 
 def _limb_colour(rgb: np.ndarray, weight: np.ndarray, white: Optional[Sequence[float]], saturation: float,

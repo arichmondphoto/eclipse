@@ -271,6 +271,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-colour", action="store_true",
                    help="make the earthshine layer grey (default: natural colour, so a prominence at the limb "
                         "stays red on the Moon side too)")
+    p.add_argument("--limb-colour", default="recorded", choices=["recorded", "no-red", "neutral"],
+                   help="colour of the glare just inside the limb: recorded (red from the chromosphere, as the "
+                        "camera saw it), no-red (the colour of the Moon's middle), neutral (no red, and the whole "
+                        "Moon in the corona's white instead of earthshine's own slightly blue colour)")
     p.add_argument("--edge-fill", type=float, default=0.0,
                    help="fill at least this %% of the Moon's radius just inside the limb from further in (default "
                         "0: only where the noise is over 10x the middle's; 2.5 = 10.9 px on a 400 mm Moon)")
@@ -876,7 +880,7 @@ def cmd_earthshine(args) -> int:
                               source_glare=args.prominence_glare and not args.no_prominence_glare,
                               keep_glare=args.keep_glare, limb_soften=args.limb_soften,
                               edge_grain=not args.no_edge_grain, edge_fill=args.edge_fill,
-                              colour=not args.no_colour,
+                              colour=not args.no_colour, limb_colour=args.limb_colour.replace("-", " "),
                               edge_smooth=args.edge_smooth, surface_denoise=args.surface_denoise,
                               limb_shape=args.limb_shape and not args.no_limb_shape, channel=args.channel)
     result, code = _run(earthshine, args.project, params, include_rejected=args.include_rejected,

@@ -1296,3 +1296,42 @@ def test_final_image_box_is_the_written_image(tmp_path):
     part = W.final_with_moon(proj, "blend", 1.0, box=(60, 260, 40, 200))
     assert part.shape == (200, 160, 3)
     assert np.abs(part - full[60:260, 40:200]).max() < 2 / 65535
+
+
+def test_limb_colour_takes_the_red_glare_off_and_can_make_the_moon_neutral():
+    """As on the 2024 frame-9 earthshine stack: the Moon's middle R/G 0.47, B/G 0.79; the
+    chromosphere's glare reddens the last pixels inside the limb to R/G 0.64, B/G 0.69 at 2-4 px
+    and fades by about 40 px. The corona's white balance: R x 2.03, B x 1.34."""
+    from tse_core.earthshine import limb_colour
+
+    n, cx, cy, r = 400, 199.5, 199.5, 150.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(xx - cx, yy - cy)
+    good = rr < r
+    d = r - rr
+    rng = np.random.default_rng(3)
+    G = (0.002 * (1 + 0.05 * rng.standard_normal((n, n))) + 0.03 * np.exp(-np.clip(d, 0, None) / 4.0)).astype(np.float32)
+    red = np.exp(-np.clip(d, 0, None) / 12.0)  # glare's share of the colour excess
+    rgb = np.stack([G * (0.47 + 0.17 * red), G, G * (0.79 - 0.10 * red)]).astype(np.float32)
+    rgb = np.where(good, rgb, 0.0)
+    band = good & (d >= 2) & (d < 4)
+    mid = good & (rr < 0.5 * r)
+
+    same, note = limb_colour(rgb, good, cx, cy, r, "recorded")
+    assert same is rgb and note == ""
+
+    out, note = limb_colour(rgb, good, cx, cy, r, "no red")
+    assert abs(np.median(out[0][band] / out[1][band]) - 0.47) < 0.01   # was 0.63
+    assert abs(np.median(out[2][band] / out[1][band]) - 0.79) < 0.01
+    assert np.array_equal(out[1], rgb[1])                               # brightness untouched
+    assert abs(np.median(out[0][mid] / out[1][mid]) - 0.47) < 0.005     # the middle as it was
+    assert "R/G" in note
+
+    white = (2.03, 1.0, 1.34)
+    neu, note = limb_colour(rgb, good, cx, cy, r, "neutral", white)
+    for c in (0, 2):  # the Moon (middle and edge) in the corona's white: R/G 1/2.03, B/G 1/1.34
+        for zone in (mid, band):
+            assert abs(np.median(neu[c][zone] / neu[1][zone]) * white[c] - 1.0) < 0.02
+    assert "white" in note
+    with pytest.raises(ValueError):
+        limb_colour(rgb, good, cx, cy, r, "pink")

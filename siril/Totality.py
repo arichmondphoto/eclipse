@@ -1914,6 +1914,11 @@ class EarthshineTab(StepTab):
                            ("All (average)", "all"), ("Blue", "blue")):
             self.channel.addItem(label, key)
         fs.addRow("Colour channels:", self.channel)
+        self.limb_colour = QComboBox()
+        for label, key in (("As recorded (red from the chromosphere)", "recorded"), ("No red", "no red"),
+                           ("No red, neutral Moon", "neutral")):
+            self.limb_colour.addItem(label, key)
+        fs.addRow("Colour by the limb:", self.limb_colour)
         self.include_rejected = QCheckBox("Include frames flagged as off the Moon's track")
         fs.addRow(self.include_rejected)
 
@@ -2095,6 +2100,12 @@ class EarthshineTab(StepTab):
              "fades inward is taken away around the edge, so seas near the limb such as Crisium survive.\n\nOff "
              "(default): the limb glare is taken away without that condition. Turn it on if seas by the edge "
              "come out flattened.")
+        _tip(self.limb_colour, "The long exposures catch the lens's glare of the chromosphere just inside the "
+             "limb, and that light is red: a reddish band runs round the inside of the Moon's edge. As recorded "
+             "keeps it. No red gives the band the colour of the Moon's middle; the brightness stays as it is. "
+             "No red, neutral Moon also makes the whole Moon the corona's white: earthshine is really a little "
+             "blue-green (it is light from the blue Earth), so this is a choice of look, not a correction. "
+             "Needs Stack earthshine again; the log gives the colour before and after.", fs)
         _tip(self.channel, "Which colour channels the earthshine is made from. Much of the glare that changes "
              "quickly around the edge is deep red light from the pink chromosphere and prominences, and a colour "
              "camera has twice as many green pixels, so green usually gives a cleaner Moon than the average of all "
@@ -2284,7 +2295,7 @@ class EarthshineTab(StepTab):
                                   source_glare=self.source_glare.isChecked(),
                                   keep_glare=self.keep_glare.value(), limb_soften=self.limb_soften.value(),
                                   edge_grain=self.edge_grain.isChecked(), edge_fill=self.edge_fill.value(),
-                                  colour=self.colour.isChecked(),
+                                  colour=self.colour.isChecked(), limb_colour=self.limb_colour.currentData(),
                                   edge_smooth=self.edge_smooth.value(),
                                   surface_denoise=self.surface_denoise.value(),
                                   limb_shape=self.limb_shape.isChecked(), channel=self.channel.currentData())
