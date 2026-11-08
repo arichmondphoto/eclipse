@@ -1565,9 +1565,50 @@ def limb_darkening_gain(lum: np.ndarray, weight: np.ndarray, rr: np.ndarray, phi
     return g, slopes
 
 
+JOINS = ("corona first", "rebuilt")
+
+
+def _join_corona_first(hdr, weight, es_rgb, es_weight, shift, ys, xs, sy, sx, rr, mr, margin_px, origin, say):
+    """Where the Moon meets the corona, one rule per pixel, nothing rebuilt or blended (Andy, Nov 2026):
+
+    1. the HDR stack wherever the corona layers have it (outside their black disc, ``margin_px``
+       past the limb, with stack data): exactly as in the Blend without the Moon;
+    2. otherwise the earthshine stack, where it has data (``es_rgb`` and ``es_weight`` already moved
+       onto the stack; ``es_weight`` 0 where under 10 % of its usual frames went in: by a bright
+       prominence those few are near full well and their colours are off);
+    3. otherwise nothing: left black and counted in the log.
+    """
+    from .enhance import MoonInput, noise_constant
+
+    h, w = hdr.shape[:2]
+    sub = hdr[ys, xs]
+    wsub = weight[ys, xs]
+    rs = rr[sy, sx]
+    ew = np.where(es_weight > 1e-12, np.asarray(es_weight, np.float32), 0.0)[sy, sx]
+    es_c = np.moveaxis(es_rgb, 0, -1)[sy, sx]
+    corona = (rs > mr + margin_px) & (wsub > 0) & np.isfinite(sub).all(axis=2)
+    use_es = ~corona & (ew > 0)
+    near = rs < mr + max(margin_px, 0.05 * mr)
+    hole = ~corona & ~use_es & near
+    # The earthshine weights in the stack's units (noise = c / sqrt(weight), each c measured).
+    c_hdr = noise_constant(sub.mean(axis=2), wsub, corona & (rs < 1.5 * mr))
+    c_es = noise_constant(es_c.mean(axis=2), ew, use_es & (rs < mr - 5.0))
+    k = (c_hdr / c_es) ** 2 if c_hdr and c_es else 1.0
+    sub[use_es] = es_c[use_es]
+    wsub[use_es] = np.maximum(ew[use_es] * k, 1e-12)
+    sub[hole] = 0.0
+    wsub[hole] = 0.0
+    say(f"Moon: the HDR stack's corona kept wherever the Blend has it (from {margin_px:g} px outside the limb); "
+        f"the earthshine stack on {int(use_es.sum())} px ({int((use_es & (rs > mr)).sum())} of them outside the "
+        f"limb, where the HDR stack has no data); {int(hole.sum())} px by the limb with neither, left black")
+    mask = np.zeros((h, w), bool)
+    mask[ys, xs] = use_es
+    return MoonInput(mask=mask, x0=origin[0], y0=origin[1], corona_gain=None), shift
+
+
 def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.ndarray, es_weight: np.ndarray,
                origin: tuple[int, int], es_centre: tuple[float, float], margin_px: float = 1.5,
-               say: Optional[Say] = None):
+               say: Optional[Say] = None, join: str = "corona first"):
     """Put the Moon-aligned stack (linear, same units) into the HDR stack inside the lunar disc.
 
     ``origin``: where the earthshine crop starts in the HDR's pixels; ``es_centre``: the Moon's
@@ -1600,6 +1641,8 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
         es_good = ndimage.shift(es_good.astype(np.float32), (dy, dx), order=1, mode="constant") > 0.99
     yy, xx = np.mgrid[0:hc, 0:wc]
     rr = np.hypot(xx - cx, yy - cy)
+    if join not in JOINS:
+        raise ValueError(f"unknown join {join!r}; choose from {', '.join(JOINS)}")
     # Trust the earthshine stack only where enough of its frames went in: by a bright prominence
     # the long frames are saturated, and the few that are left are near full well (colours off).
     ew = np.where(es_good, np.asarray(es_weight, np.float32), 0.0)
@@ -1610,6 +1653,9 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
     med = np.nan_to_num(np.asarray(med, np.float32))
     frac = ew / np.maximum(med[ri], 1e-30)
     es_ok = es_good & (frac >= 0.1)
+    if join == "corona first":
+        return _join_corona_first(hdr, weight, es_rgb, np.where(es_ok, ew, 0.0), (dx, dy), ys, xs, sy, sx, rr, mr,
+                                  margin_px, (ox, oy), say)
     # Between 10 and 40 % of the usual frames the stack is only partly trusted (see the radial
     # fill below): a hard cut there gave a ragged edge round a bright prominence.
     tq = np.clip((frac - 0.1) / 0.3, 0.0, 1.0)

@@ -305,6 +305,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--strength", type=float, default=1.0, help="brightness of the lunar surface, 1 = as made by the "
                    "earthshine step (default 1)")
     p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"], help="blend mode (default screen)")
+    p.add_argument("--join", default="corona-first", choices=["corona-first", "rebuilt"],
+                   help="how Moon and corona meet: corona-first (the HDR stack wherever the Blend has it, the "
+                        "earthshine stack elsewhere in the disc, black where neither has data) or rebuilt (the older "
+                        "way: the band just outside the limb rebuilt from both stacks) (default corona-first)")
     p.add_argument("--moon-layer", action="store_true",
                    help="write only the Moon as --base draws it (with --strength), transparent elsewhere, for "
                         "Photoshop: above that layer in Normal mode at 100 %% it gives the final image (default "
@@ -406,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
                              base_file=args.base_file, output_file=args.output, quiet=args.quiet)
         else:
             out, code = _run(final_with_moon, args.project, args.base, args.strength, name=args.name,
-                             output_file=args.output, quiet=args.quiet)
+                             output_file=args.output, quiet=args.quiet, join=args.join.replace("-", " "))
         if not code:
             print(f"Final image written to {out}")
         return code

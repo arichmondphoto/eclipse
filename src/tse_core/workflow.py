@@ -816,8 +816,13 @@ def enhance_params_from_project(path, project):
 def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1.0,
                     preview_side: Optional[int] = None, name: Optional[str] = None, say: Optional[Say] = None,
                     cancel=None, output_file: Optional[str] = None, enhance_params=None, moon_only: bool = False,
-                    box: Optional[tuple] = None, prominences: Optional[bool] = None, prominence_params=None):
+                    box: Optional[tuple] = None, prominences: Optional[bool] = None, prominence_params=None,
+                    join: Optional[str] = None):
     """The final picture with the Moon in it, drawn in one go with the corona.
+
+    ``join``: how Moon and corona meet (see :func:`earthshine.merge_moon`): "corona first" (the
+    HDR stack wherever the Blend has it, then the earthshine stack, else black) or "rebuilt" (the
+    band by the limb rebuilt from both); None: as last saved in the project (default corona first).
 
     With ``moon_only`` returns (picture, Moon mask) without writing, for pasting the Moon as drawn
     here into another picture (see :func:`final_image`).
@@ -889,8 +894,10 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         ox, oy = (ox + sx0) // b, (oy + sy0) // b
         centre = ((centre[0] - sx0 + 0.5) / b - 0.5, (centre[1] - sy0 + 0.5) / b - 0.5)
     no_data = ~(np.asarray(data.weight) > 0) if moon_only else None  # black in the corona layers
+    if join is None:
+        join = str(project.parameters.get("final", {}).get("join", "corona first"))
     moon, shift = merge_moon(data.hdr, data.weight, data.header, es_rgb, es_w, (ox, oy), centre,
-                             params.moon_margin_px, say)
+                             params.moon_margin_px, say, join=join)
     surface = np.moveaxis(np.asarray(moon_data[:3], np.float32), 0, -1) * float(strength)
     vis = np.asarray(moon_data[3], np.float32)
     if abs(shift[0]) + abs(shift[1]) > 1e-3:
@@ -922,7 +929,7 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     final = Path(output_file) if output_file else path.parent / f"{name or path.stem}_final.tif"
     final = write_image(final, out)
     project.parameters["final"] = {"file": str(final), "base": base_layer, "strength": strength,
-                                   "mode": "moon in the stack"}
+                                   "mode": "moon in the stack", "join": join}
     project.save(path)
     return str(final)
 

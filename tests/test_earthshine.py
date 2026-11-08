@@ -664,7 +664,7 @@ def test_saturated_prominence_core_is_not_white(tmp_path):
     write_fits(tmp_path / "e_earthshine_rgb.fit", es, eh)
     write_fits(tmp_path / "e_earthshine_weight.fit", ew)
     img = W.final_with_moon(proj, "blend", 1.0, enhance_params=EnhanceParams(layers=(), blend={"natural": 1.0}),
-                            preview_side=10_000)
+                            preview_side=10_000, join="rebuilt")
     m = core & (rr < r)
     red = np.median(img[m][:, 0] / np.maximum(img[m][:, 1], 1e-3))
     assert red > 1.1, red
@@ -733,7 +733,7 @@ def test_light_by_a_bright_prominence_is_smooth_round_the_limb(tmp_path):
     es[:, bad] = es[:, bad].mean(axis=0) * rng.uniform(0.3, 1.5, bad.sum())
     H = np.moveaxis(hdr, 0, -1).astype(np.float32).copy()
     merge_moon(H, wt.astype(np.float32).copy(), head, es.astype(np.float32), ew.astype(np.float32), (40, 30),
-               (float(eh["MOONX"]), float(eh["MOONY"])))
+               (float(eh["MOONX"]), float(eh["MOONY"])), join="rebuilt")
     ref = np.zeros_like(H)
     ref[crop] = np.moveaxis(truth, 0, -1)
 
@@ -765,7 +765,7 @@ def test_no_step_where_the_stacks_hand_over_outside_the_limb(tmp_path):
     es[:, rr[crop] > r] *= 0.75  # the earthshine stack's corona: darker than the HDR's
     H = np.moveaxis(hdr, 0, -1).astype(np.float32).copy()
     merge_moon(H, wt.astype(np.float32).copy(), head, es.astype(np.float32), ew.astype(np.float32), (40, 30),
-               (float(eh["MOONX"]), float(eh["MOONY"])))
+               (float(eh["MOONX"]), float(eh["MOONY"])), join="rebuilt")
     away = np.abs(phi) > 0.3
 
     def ratio(a):
@@ -800,7 +800,7 @@ def test_corona_darkened_by_the_moons_edge_is_not_used(tmp_path):
     dark = np.where(side & (d > 0), 0.3 * np.exp(-np.clip(d - 3.0, 0, None) / 4.0), 0.0)
     H = (truth * (1 - dark)[..., None]).astype(np.float32)   # as the 2024 stack at 6-8 o'clock
     merge_moon(H, wt.astype(np.float32).copy(), head, es.astype(np.float32), ew.astype(np.float32), (40, 30),
-               (float(eh["MOONX"]), float(eh["MOONY"])))
+               (float(eh["MOONX"]), float(eh["MOONY"])), join="rebuilt")
 
     def ratio(a, where):
         m = (rr > r + a) & (rr < r + a + 0.5) & where
@@ -1335,3 +1335,35 @@ def test_limb_colour_takes_the_red_glare_off_and_can_make_the_moon_neutral():
     assert "white" in note
     with pytest.raises(ValueError):
         limb_colour(rgb, good, cx, cy, r, "pink")
+
+
+def test_corona_first_keeps_the_blend_and_uses_the_earthshine_only_where_the_blend_is_black(tmp_path):
+    """Andy, Nov 2026: the Blend without the Moon looked right up to its black disc; with the Moon
+    put in, the corona in the 4-6 px outside the limb was rebuilt (a red ring, a bigger pink
+    prominence, a small prominence lost). The rule: the HDR stack wherever the Blend has it, the
+    earthshine stack elsewhere in the disc, and black where neither has data."""
+    from tse_core.earthshine import merge_moon
+    from tse_core.fits import read_fits
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    hdr, head = read_fits(tmp_path / "e_hdr.fit")
+    wt, _ = read_fits(tmp_path / "e_weight.fit")
+    ew, _ = read_fits(tmp_path / "e_earthshine_weight.fit")
+    es, eh = read_fits(tmp_path / "e_earthshine_rgb.fit")
+    H = np.moveaxis(hdr, 0, -1).astype(np.float32).copy()
+    W = wt.astype(np.float32).copy()
+    ew = ew.astype(np.float32).copy()
+    crop = (slice(30, 270), slice(40, 280))
+    # A few pixels by the limb that neither stack has: the HDR's covered, the earthshine's saturated.
+    gap = (np.abs(phi) < 0.03) & (rr > r - 3) & (rr < r + 1.4)
+    ew[gap[crop]] = 0.0
+    before = H.copy()
+    moon, _ = merge_moon(H, W, head, es.astype(np.float32), ew, (40, 30), (float(eh["MOONX"]), float(eh["MOONY"])))
+    blend_has = (rr > r + 1.5) & (wt > 0)
+    assert np.array_equal(H[blend_has], before[blend_has])            # the corona exactly as in the Blend
+    inside = np.zeros(W.shape, bool); inside[crop] = (rr[crop] < r - 2) & (ew > 0) & ~gap[crop]
+    es_c = np.moveaxis(es, 0, -1)
+    assert np.allclose(H[crop][inside[crop]], es_c[inside[crop]], rtol=1e-4, atol=1e-7)  # the earthshine
+    g = np.zeros(W.shape, bool); g[crop] = gap[crop] & ~blend_has[crop]
+    assert g.any() and (W[g] == 0).all() and (H[g] == 0).all()        # neither: black
+    assert moon.mask[inside].all() and not moon.mask[blend_has].any()

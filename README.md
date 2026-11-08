@@ -815,8 +815,27 @@ Enhance again.
 | --- | --- | --- |
 | **Corona image** (`--base`) | The blend or the natural layer, stretched with the Moon; or paste into a file (below). | blend |
 | **Lunar surface strength** (`--strength`) | How bright the seas and highlands are, 1 = as made in part 2. | 1 |
+| **Moon meets corona** (`--join`) | How Moon and corona meet, pixel by pixel, before the stretch: **Corona wherever the stack has it** or **Band by the limb rebuilt** (both below). | Corona wherever the stack has it |
 
-Just outside the limb neither stack is good on its own: the earthshine
+**Corona wherever the stack has it** (`corona-first`) follows one rule for
+each pixel:
+
+1. Where the Blend without the Moon has the corona (outside its black disc,
+   1.5 px past the limb, and the HDR stack has data there), the HDR stack is
+   used, exactly as in that Blend.
+2. Otherwise, where the earthshine stack has data (at least 10 % of its usual
+   frames: by a bright prominence the last few are near full well and their
+   colours are off), the earthshine stack is used.
+3. Otherwise the pixel has no data and stays black.
+
+Nothing is rebuilt or blended. The log gives the counts ("the earthshine
+stack on N px (M of them outside the limb, where the HDR stack has no
+data); K px by the limb with neither, left black"). On the 2024 stack with
+the Moon from frame 9, 1119 px had neither, mostly at the base of the 6 o'clock
+prominence, at 3 o'clock and at 10 o'clock.
+
+**Band by the limb rebuilt** (`rebuilt`), the older way:
+just outside the limb neither stack is good on its own: the earthshine
 stack's corona is smeared (it is aligned on the Moon) and the HDR stack
 holds few frames there (the Moon covered it part of the time). So the
 earthshine stack's limb hands over to the HDR corona from where the HDR
@@ -1342,6 +1361,7 @@ the finished image: Moon and corona stretched together from the stacks.
 | `--base-file` | use this image as the corona instead (the size of the HDR stack) |
 | `--strength` | brightness of the lunar surface, 1 = as made by the earthshine step (default 1) |
 | `--mode` | blend mode (default screen) |
+| `--join` | how Moon and corona meet: corona-first (the HDR stack wherever the Blend has it, the earthshine stack elsewhere in the disc, black where neither has data) or rebuilt (the older way: the band just outside the limb rebuilt from both stacks) (default corona-first) |
 | `--moon-layer` | write only the Moon as --base draws it (with --strength), transparent elsewhere, for Photoshop: above that layer in Normal mode at 100 % it gives the final image (default <name>_moon.tif; TIFF or PNG) |
 | `--name` | output file name prefix (default: the project name) |
 | `--output`, `-o` | output file (.tif, .png or .jpg); default <name>_final.tif |

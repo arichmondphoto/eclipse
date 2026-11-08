@@ -2002,6 +2002,10 @@ class EarthshineTab(StepTab):
         self.strength.setSingleStep(0.1)
         self.strength.setValue(1.0)
         ff.addRow("Lunar surface strength:", self.strength)
+        self.join = QComboBox()
+        self.join.addItem("Corona wherever the stack has it", "corona first")
+        self.join.addItem("Band by the limb rebuilt (older)", "rebuilt")
+        ff.addRow("Moon meets corona:", self.join)
         self.mode = QComboBox()
         self.mode.addItems(["screen", "lighten", "add"])
         ff.addRow("Blend mode (pasting only):", self.mode)
@@ -2015,6 +2019,11 @@ class EarthshineTab(StepTab):
              "mode below; the rest of that image is left as it is. Use it for a corona finished elsewhere. The "
              "image must be the full size of the HDR stack (not cropped or resized), so the Moon lines up. Before "
              "any 'Write full-size layers' run, the earthshine layer itself is pasted instead.", ff)
+        _tip(self.join, "How the Moon and the corona meet, pixel by pixel, before the stretch. Corona wherever the "
+             "stack has it (recommended): the HDR stack is kept everywhere the Blend without the Moon shows it, "
+             "the earthshine stack fills the rest of the disc, and pixels neither stack recorded stay black (the "
+             "log counts them). Band by the limb rebuilt: the older way, which rebuilds the corona in the few "
+             "pixels just outside the limb from both stacks; try it if black pixels show at the limb.", ff)
         _tip(self.strength, "Brightness of the seas and highlands added inside the Moon: 1 (default) = as made by "
              "the earthshine step (its Brightness setting), 0 = none, above 1 brightens a faint Moon (and its "
              "noise).", ff)
@@ -2196,7 +2205,8 @@ class EarthshineTab(StepTab):
             fn = lambda p, say, cancel: W.final_image(p, base, k, mode, preview_side=1400, say=say, cancel=cancel,
                                                       base_file=bfile)
         else:  # Moon and corona stretched together from the stacks
-            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, preview_side=1400, say=say, cancel=cancel)
+            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, preview_side=1400, say=say, cancel=cancel,
+                                                          join=self.join.currentData())
         self.start("Preview of the final image", fn, self._final_preview_done, reload=False)
 
     def _final_preview_done(self, img) -> None:
@@ -2217,7 +2227,8 @@ class EarthshineTab(StepTab):
             fn = lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname,
                                                       base_file=bfile)
         else:
-            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname)
+            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname,
+                                                          join=self.join.currentData())
         self.start("Writing the final image", fn, self._final_done)
 
     def write_moon_layer(self) -> None:
