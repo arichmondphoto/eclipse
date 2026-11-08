@@ -95,6 +95,14 @@ carefully against the PyQt6 API. Say so when handing it over.
   2024 stack with his earthshine files and settings, is on his computer in
   `~/Desktop/Eclipse 2024/limb_test_case` (README.txt, `limb_check.py`). Stage it from there when
   he asks to continue; never add it to the repository.
+- **Limb artifacts with an earlier Moon frame** (raised 7 Nov 2026 after 2a9af8f): with frames 0-4
+  included and **Moon from frame** #9, Andy sees new artifacts round the limb once the earthshine
+  Moon is added. His proposal, to try first: one explicit if/then/else rule, per pixel near the
+  limb, for which data stays in the linear image before the stretch (earthshine Moon, HDR stack, or
+  neither), instead of more corrections layered on top. Write the rule down in README terms before
+  coding, show it to him, and check it on his stack with frame 9 (ask him to stage a crop, the log
+  and his settings, as in `limb_test_case`). He is short of usage: keep sessions lean, look at
+  the pixels first, and do not re-derive what is written here.
 - `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
   FITS and SER frames, gain, mono; prominences from the frames left out near the contacts). Not to be
   started unless the user asks; read it when they do.
