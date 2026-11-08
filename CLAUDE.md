@@ -95,14 +95,29 @@ carefully against the PyQt6 API. Say so when handing it over.
   2024 stack with his earthshine files and settings, is on his computer in
   `~/Desktop/Eclipse 2024/limb_test_case` (README.txt, `limb_check.py`). Stage it from there when
   he asks to continue; never add it to the repository.
-- **Limb artifacts with an earlier Moon frame** (raised 7 Nov 2026 after 2a9af8f): with frames 0-4
-  included and **Moon from frame** #9, Andy sees new artifacts round the limb once the earthshine
-  Moon is added. His proposal, to try first: one explicit if/then/else rule, per pixel near the
-  limb, for which data stays in the linear image before the stretch (earthshine Moon, HDR stack, or
-  neither), instead of more corrections layered on top. Write the rule down in README terms before
-  coding, show it to him, and check it on his stack with frame 9 (ask him to stage a crop, the log
-  and his settings, as in `limb_test_case`). He is short of usage: keep sessions lean, look at
-  the pixels first, and do not re-derive what is written here.
+- **Andy's list for the next session (8 Nov 2026, at c527ce0).** Done before it: Align no longer fails
+  short frames for a small overlap (2a9af8f); **Colour by the limb** (a9a7300); **Moon meets corona**,
+  the per-pixel rule "corona first" (c527ce0). His frame-9 files were staged as a 3000 px crop in
+  `~/Desktop/Eclipse 2024/_claude_trial` (hdr.fit, weight.fit; origin 2466, 1292); the earthshine
+  files are in `fits/`. He is short of usage: keep sessions lean and do not re-derive this.
+  1. The rule must apply to every **Corona image** choice (blend, natural, paste). Then the black
+     pixels by the limb (1119 px on frame 9: base of the 6 o'clock prominence, 3 and 10 o'clock).
+     Andy sees data there in the earthshine stack itself. First suspect: step 2 uses the earthshine
+     stack only where >= 10 % of its usual frames went in (`es_ok` in `merge_moon`); check those
+     pixels' weights and values before changing anything.
+  2. **Write Moon layer (for Photoshop)** seems to write the same file as Stack earthshine. It must
+     write only the Moon as it appears in the merged blend/natural image, for layering by hand.
+  3. Earthshine tab preview: a full-resolution crop of the merged result, not the whole frame small.
+  4. Bug: Enhance **Write full-size layers** writes every layer except ACHF even when unticked
+     under **Layers to write**.
+  5. Every step that writes an image suggests a unique name with the chosen extension (.tif, .png,
+     .jpg), e.g. `<project>_earthshine_stack.<ext>` for Stack earthshine and
+     `<project>_earthshine_blend|natural|photoshop.<ext>` for Write final image by **Corona image**.
+  6. Right-side settings panels: default width so no horizontal scrolling is needed.
+  7. WOW (plain and edge-aware) in Enhance: see `docs/FUTURE.md`.
+  8. Decide whether to keep refining the Prominences tab or remove it; give Andy a recommendation.
+  9. Investigate GPU and multi-core speed-ups for registration, stacking, enhancement (ACHF most)
+     and previews, aiming at real-time work at high resolution.
 - `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
   FITS and SER frames, gain, mono; prominences from the frames left out near the contacts). Not to be
   started unless the user asks; read it when they do.
