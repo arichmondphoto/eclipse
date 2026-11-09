@@ -115,7 +115,7 @@ The window has one tab per step, and each step saves into the project file:
 | --- | --- | --- |
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile, the focal length and f-number for frames that do not record them (a telescope; optional), and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
-| 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, or master flat + compare) | The stacked preview and each frame's measured brightness |
+| 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, master flat + compare, or not at all), and whether the light on the flats was uneven | The stacked preview and each frame's measured brightness |
 | 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Photoshop paste only (old way)**: kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting, use the prominence stack | The Moon close up, then a preview of the final picture; **Write final image**, **Write Moon layer (for Photoshop)** |
 | 6 Prominences | 1 Prominence stack: longest exposure (stops above the shortest), **Stack prominences**. 2 In the final image: sharpening, structure, prominence brightness, redness needed, chromosphere on or off, rim height (greyed out when the Moon hides the chromosphere) | The final image round the Sun at full size, exactly as it will be written; **Write final image** (as on the Earthshine tab) |
@@ -1026,22 +1026,35 @@ fits:
 4. the lensfun profile for your lens;
 5. none, with a warning.
 
-Flats are used in one of three ways (**Flat frames** on the Stack tab,
+Flats are used in one of four ways (**Flat frames** on the Stack tab,
 `totality stack --flat-mode`):
 
 * **Master flat** (default): the flats are averaged and every frame is
   divided by that, pixel by pixel. This corrects vignetting *and* dust
   shadows, provided nothing was changed or cleaned between the eclipse and
-  the flats. If the light source was brighter on one side, that slope is
-  measured, taken out and named in the log ("brighter on the right (3.2 % at
-  the edge)").
-* **Smooth profile from the flats**: a smooth profile is fitted to the flats
-  and used instead. Vignetting only, so dust that moved cannot add dark
-  rings.
+  the flats.
+* **Smooth profile from the flats**: a smooth surface is fitted to the
+  flats (a polynomial in x and y, each colour on its own, dust left out of
+  the fit) and used instead. It follows a lens whose darkening is
+  off-centre. Vignetting only, so dust that moved cannot add dark rings.
 * **Master flat + compare**: the master flat, and the log reports how far it
-  differs from the smooth profile, with a warning when the difference is
+  differs from that smooth surface, with a warning when the difference is
   large. The difference is saved as `<name>_flat_vs_profile_<settings>.fit`
   (dark spots are dust).
+* **Don't use the flats**: the flats are ignored; darks and bias still
+  count, and the Frames tab's lens profile (if any) corrects vignetting.
+
+A straight slope across the flats is measured and named in the log
+("brighter on the right (3.2 % at the edge)"). It is kept: from flats alone,
+a light source brighter on one side and a lens whose darkening is a little
+off-centre give the same slope, and taking out the lens's leaves the sky
+too dark on one side and too bright on the other. If you know the light was
+uneven, tick **The light on the flats was uneven** on the Stack tab
+(`--flats-uneven-light`) and the slope is taken out.
+
+**None** as the lens profile on the Frames tab switches off lensfun and the
+saved own-flats profiles; the flats chosen for Stack are set separately, as
+above.
 
 Flats that match no light frame are named in the log and not used.
 
@@ -1271,7 +1284,8 @@ merge the aligned frames into one linear HDR image.
 | `--moon-frame` | frame number whose Moon (and earthshine) is kept (default: the alignment reference) |
 | `--include-rejected` | also stack frames the Sun-centre fit flagged as off the Moon's track |
 | `--no-hot-pixels` | skip the hot-pixel correction |
-| `--flat-mode` | how the project's flat frames are used: master = divide by the master flat (vignetting and dust; default), profile = a smooth profile fitted to them (vignetting only), compare = master flat and report how it differs from the profile |
+| `--flat-mode` | how the project's flat frames are used: master = divide by the master flat (vignetting and dust; default), profile = a smooth surface fitted to them (vignetting only, off-centre too), compare = master flat and report how it differs from that surface, none = do not use them |
+| `--flats-uneven-light` | the light on the flats was brighter on one side: take a straight slope across them out (off by default: an off-centre lens gives the same slope) |
 | `--profile-dir` | folder of saved own-flats profiles |
 | `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
 | `--quiet` | print only the result, not each step |

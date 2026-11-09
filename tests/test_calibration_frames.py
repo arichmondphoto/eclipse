@@ -26,10 +26,11 @@ SIZE = 320
 DUST = (215, 120, 5.0)  # x, y, sigma (px): in the corona, clear of the Moon
 
 
-def _field():
-    """What the optics and sensor do to a flat light: vignetting times a dust shadow."""
+def _field(shift=0.0):
+    """What the optics and sensor do to a flat light: vignetting (its centre ``shift`` px right of
+    the frame's) times a dust shadow."""
     yy, xx = np.mgrid[0:SIZE, 0:SIZE].astype(np.float32)
-    r2 = ((xx - SIZE / 2) ** 2 + (yy - SIZE / 2) ** 2) / (SIZE / 2) ** 2 / 2
+    r2 = ((xx - SIZE / 2 - shift) ** 2 + (yy - SIZE / 2) ** 2) / (SIZE / 2) ** 2 / 2
     vign = 1 - 0.45 * r2
     dust = 1 - 0.2 * np.exp(-((xx - DUST[0]) ** 2 + (yy - DUST[1]) ** 2) / (2 * DUST[2] ** 2))
     return (vign * dust).astype(np.float32)
@@ -52,17 +53,19 @@ def _mosaic(raw):
                      WHITE, (2.0, 1.0, 1.5))
 
 
-def _project(tmp_path, monkeypatch, sensor=True, flats=True, darks=True, bias=True, panel_tilt=0.0):
+def _project(tmp_path, monkeypatch, sensor=True, flats=True, darks=True, bias=True, panel_tilt=0.0, shift=0.0):
     """A project of three light frames (and calibration frames); returns its path."""
     scene = SyntheticScene(size=SIZE, sun_radius=30.0, seed=2)
     lights = make_frames(["1/250", "1/60", "1/15"], aperture=8.0, iso=200)
     rng = np.random.default_rng(1)
-    field, glow, pattern = (_field(), _glow(), _bias_pattern()) if sensor else (1.0, 0.0, 0.0)
+    field, glow, pattern = (_field(shift), _glow(), _bias_pattern()) if sensor else (1.0, 0.0, 0.0)
     mosaics, metas, align_frames = {}, {}, []
     for f in lights:
         f.path = str(tmp_path / f.file_name)
         (tmp_path / f.file_name).write_bytes(b"")
-        img, moon = scene.frame(f.exposure_s * 2.0, 160, 160, 0, 0, noise=False, full_scale=1.0)
+        # Clipped at the sensor (in _mosaic), after the lens and dust, as in a camera; clipping the
+        # scene before the vignetting left "saturated" pixels below the saturation mark.
+        img, moon = scene.frame(f.exposure_s * 2.0, 160, 160, 0, 0, noise=False, full_scale=1e9)
         # Darks exist only for the 1/15 s frame; the others need the bias.
         dark = glow if f.exposure_text == "1/15" else 0.0
         mosaics[f.path] = _mosaic(BLACK + pattern + dark + img * field * (WHITE - BLACK))
@@ -154,7 +157,7 @@ def test_smooth_profile_from_the_flats_leaves_dust(tmp_path, monkeypatch, truth)
     assert small.shape == (SIZE // 8, SIZE // 8) and abs(float(small[0, 0]) - 0.55) < 0.06
     assert _err(got, truth, corona) < 0.015, log  # vignetting corrected by the fitted profile
     assert float(np.median(got[dust] / truth[dust])) < 0.88, log  # the dust shadow stays (it is 20% deep)
-    assert "smooth profile" in log
+    assert "smooth surface" in log  # since Nov 2026 a smooth surface (it can sit off-centre)
 
 
 def test_compare_uses_the_master_and_reports_the_dust(tmp_path, monkeypatch, truth):
@@ -191,7 +194,9 @@ def test_an_uneven_light_source_is_not_copied_into_the_stack(tmp_path, monkeypat
     band = (np.abs(yy - 160) < 40) & ((xx < 30) | (xx > SIZE - 30))
     left, right = band & (xx < 30), band & (xx > SIZE - 30)
     path = _project(tmp_path, monkeypatch, panel_tilt=0.03)
-    got, log = _stack(path, tmp_path, flat_mode="compare")
+    # Since Nov 2026 the slope is taken out only when the user says the light was uneven: from the
+    # flats alone it cannot be told from a lens whose darkening is off-centre (see the next test).
+    got, log = _stack(path, tmp_path, flat_mode="compare", flats_uneven_light=True)
     ratio = got / truth
     assert abs(float(np.median(ratio[left])) - float(np.median(ratio[right]))) < 0.006, log
     assert _err(got, truth, corona) < 0.01, log
@@ -259,3 +264,56 @@ def test_data_files_go_in_fits_and_json_folders(tmp_path, monkeypatch):
     assert Path(st["preview"]).parent == tmp_path
     assert sorted(p.name for p in tmp_path.glob("*.fit")) == []
     assert sorted(p.name for p in tmp_path.glob("*.json")) == ["ecl.json", "ecl_align.json"]
+
+
+def _rings():
+    yy, xx = np.mgrid[0:SIZE, 0:SIZE]
+    r = np.hypot(xx - 160, yy - 160)
+    return (r >= 120) & (r < 160), r >= 160  # the outer corona and the corners: the sky
+
+
+@pytest.mark.parametrize("mode", ["master", "profile"])
+def test_an_off_centre_lens_is_corrected_out_to_the_corners(tmp_path, monkeypatch, truth, mode):
+    """A lens whose darkening is centred 25 px (8 % of the half-width) right of the frame's centre,
+    as real lenses often are. Before Nov 2026 the master flat took the asymmetry for an uneven light
+    and removed it, and the smooth profile (round, centred) could not follow it: the corners came
+    out 5 % too dark on average, 15 % in places (Andy: "the stack does not look right if I keep the
+    sky"). Now the sky is right to 1 % (median) and 3 % (5-95 %); the slope is reported, not taken
+    out."""
+    outer, corners = _rings()
+    got, log = _stack(_project(tmp_path, monkeypatch, shift=25.0), tmp_path, flat_mode=mode)
+    for zone in (outer, corners):
+        q = got[zone] / truth[zone]
+        assert abs(float(np.median(q)) - 1) < 0.01, log
+        assert float(np.percentile(q, 5)) > 0.97 and float(np.percentile(q, 95)) < 1.03, log
+    assert "brighter on the right" in log and "kept" in log, log
+
+
+def test_stack_can_leave_the_flats_out(tmp_path, monkeypatch):
+    """Andy, Nov 2026: there was no way to stack without the flats chosen on the Frames tab."""
+    path = _project(tmp_path, monkeypatch)
+    got, log = _stack(path, tmp_path, flat_mode="none")
+    assert "master flat" not in log and "smooth profile" not in log, log
+    assert "flat frames not used" in log, log
+    assert "master dark" in log, log  # darks and bias are still used
+
+
+def test_none_on_the_frames_tab_ignores_saved_profiles(tmp_path, monkeypatch):
+    """Andy, Nov 2026: with Lens profile 'None' on the Frames tab, Stack still used a profile
+    fitted from his flats earlier (the saved library is matched by lens and settings)."""
+    from tse_core import workflow
+    from tse_core.vignetting_profile import VignettingProfile
+
+    path = _project(tmp_path, monkeypatch, flats=False, darks=False, bias=False)
+    project = EventProject.load(path)
+    lights = project.inventory.lights()
+    f = lights[0]
+    saved = VignettingProfile(lens_model=f.lens_model or "", focal_length_mm=float(f.focal_length_mm or 0),
+                              aperture_f=float(f.aperture_f or 0), terms=(-0.3, 0.0, 0.0), camera_model=f.camera_model or "")
+    monkeypatch.setattr(workflow, "load_profile_library", lambda d=None: [saved])
+    project.use_lensfun = True
+    plan, _ = workflow._plan(project, lights, str(tmp_path / "none"), None)
+    assert any(fc.vignetting == "profile" for fc in plan.frames)  # Automatic: the saved profile is used
+    project.use_lensfun = False
+    plan, _ = workflow._plan(project, lights, str(tmp_path / "none"), None)
+    assert all(fc.vignetting == "none" for fc in plan.frames)

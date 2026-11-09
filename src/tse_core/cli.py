@@ -139,10 +139,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--include-rejected", action="store_true",
                    help="also stack frames the Sun-centre fit flagged as off the Moon's track")
     p.add_argument("--no-hot-pixels", action="store_true", help="skip the hot-pixel correction")
-    p.add_argument("--flat-mode", choices=["master", "profile", "compare"], default="master",
+    p.add_argument("--flat-mode", choices=["master", "profile", "compare", "none"], default="master",
                    help="how the project's flat frames are used: master = divide by the master flat (vignetting "
-                        "and dust; default), profile = a smooth profile fitted to them (vignetting only), "
-                        "compare = master flat and report how it differs from the profile")
+                        "and dust; default), profile = a smooth surface fitted to them (vignetting only, off-centre "
+                        "too), compare = master flat and report how it differs from that surface, none = do not "
+                        "use them")
+    p.add_argument("--flats-uneven-light", action="store_true",
+                   help="the light on the flats was brighter on one side: take a straight slope across them out "
+                        "(off by default: an off-centre lens gives the same slope)")
     p.add_argument("--profile-dir", help="folder of saved own-flats profiles")
     p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
@@ -767,7 +771,7 @@ def cmd_stack(args) -> int:
     opts = StackOptions(align=args.align, output=args.output, name=args.name, radii=radii,
                         moon_frame=args.moon_frame, include_rejected=args.include_rejected,
                         hot_pixels=not args.no_hot_pixels, profile_dir=args.profile_dir, lensfun_db=args.lensfun_db,
-                        flat_mode=args.flat_mode)
+                        flat_mode=args.flat_mode, flats_uneven_light=args.flats_uneven_light)
     out, code = _run(stack, args.project, opts, quiet=args.quiet)
     if code:
         return code

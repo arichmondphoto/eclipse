@@ -35,10 +35,11 @@ from .calibration import CalibrationFrames, CalibrationPlan, describe_dark_key
 from .frames import FrameMeta
 from .lensfun import MIN_ILLUMINATION
 
-FLAT_MODES = ("master", "profile", "compare")
+FLAT_MODES = ("master", "profile", "compare", "none")
 FLAT_MODE_HELP = {
     "master": "divide by the master flat (vignetting, dust and pixel response)",
-    "profile": "divide by a smooth profile fitted to the flats (vignetting only; dust ignored)",
+    "profile": "divide by a smooth surface fitted to the flats (vignetting only, off-centre too; dust ignored)",
+    "none": "do not use the flat frames (the Frames tab's lens profile, if any, corrects vignetting)",
     "compare": "master flat, and report how it differs from the smooth profile",
 }
 
@@ -214,6 +215,45 @@ def _profile_of(flat: np.ndarray, pattern: str, image_crop: float, meta: Optiona
     return prof, (profile_map(prof, w, h, image_crop, pattern) if with_map else None)
 
 
+def _smooth_flat(flat: np.ndarray, degree: int = 6, block: int = 8) -> np.ndarray:
+    """A smooth surface fitted to a master flat, each colour-filter position on its own: a 2-D
+    polynomial (all powers of x and y up to ``degree``) fitted to block means, dust and hot spots
+    left out of the fit. Unlike the lens profile (round about the frame's centre) it follows a lens
+    whose darkening is off-centre or not quite round; it leaves dust out."""
+    out = np.empty_like(flat, dtype=np.float32)
+    powers = [(i, j) for i in range(degree + 1) for j in range(degree + 1 - i)]
+    for dy, dx in _cfa_positions():
+        plane = flat[dy::2, dx::2].astype(np.float64)
+        ph, pw = plane.shape
+        bh, bw = ph // block, pw // block
+        small = plane[:bh * block, :bw * block].reshape(bh, block, bw, block).mean(axis=(1, 3))
+        yc = (np.arange(bh) + 0.5) * block - 0.5
+        xc = (np.arange(bw) + 0.5) * block - 0.5
+        xn = (xc - (pw - 1) / 2) / ((pw - 1) / 2)
+        yn = (yc - (ph - 1) / 2) / ((ph - 1) / 2)
+        X, Y = np.meshgrid(xn, yn)
+        design = np.column_stack([(X ** i * Y ** j).ravel() for i, j in powers])
+        v = small.ravel()
+        keep = np.isfinite(v) & (v > MIN_ILLUMINATION)
+        coef = np.zeros(len(powers))
+        for _ in range(8):
+            coef, *_ = np.linalg.lstsq(design[keep], v[keep], rcond=None)
+            res = (v - design @ coef) / np.maximum(design @ coef, MIN_ILLUMINATION)
+            sigma = 1.4826 * float(np.median(np.abs(res[keep]))) + 1e-6
+            new = np.isfinite(v) & (v > MIN_ILLUMINATION) & (np.abs(res) < 3 * sigma)
+            if np.array_equal(new, keep):
+                break
+            keep = new
+        xf = ((np.arange(pw) - (pw - 1) / 2) / ((pw - 1) / 2))
+        yf = ((np.arange(ph) - (ph - 1) / 2) / ((ph - 1) / 2))
+        surf = np.zeros((ph, pw))
+        for i in range(degree + 1):  # sum over i of x^i times (sum over j of c_ij y^j)
+            col = sum(coef[k] * yf ** j for k, (ii, j) in enumerate(powers) if ii == i)
+            surf += np.outer(col, xf ** i)
+        out[dy::2, dx::2] = surf
+    return np.maximum(out, MIN_ILLUMINATION)
+
+
 def _light_slope(flat: np.ndarray, prof, image_crop: float, step: int = 16) -> tuple[float, float]:
     """The straight slope of the light across a master flat, beyond the lens's smooth profile:
     (bx, by) = relative change from the middle to the right and the bottom edge."""
@@ -262,8 +302,14 @@ def attach_masters(
     out_dir: Optional[str | Path] = None,
     name: str = "stack",
     cache_dir: Optional[str | Path] = None,
+    uneven_light: bool = False,
 ) -> dict:
     """Build the masters the plan calls for and attach them to its frames.
+
+    ``uneven_light``: the light on the flats was brighter on one side, so a straight slope across
+    them is taken out. Off by default: from flats alone a slope from the light and one from a lens
+    whose darkening is off-centre look the same, and taking out the lens's would leave the sky
+    wrong towards the edges.
 
     Returns what was done, for the project file: ``{"flat_mode", "flat_vs_profile"?}``.
     """
@@ -281,7 +327,7 @@ def attach_masters(
     meta_by_index = {f.index: f for f in lights}
     used_iso = {_iso_key(meta_by_index[fc.frame_index]) for fc in plan.frames
                 if fc.bias == "frames" and not fc.dark_group and fc.frame_index in meta_by_index}
-    out: dict = {"flat_mode": flat_mode}
+    out: dict = {"flat_mode": flat_mode, "flats_uneven_light": bool(uneven_light)}
 
     # Bias: needed for lights without darks, and for the flats.
     bias: dict[str, np.ndarray] = {}
@@ -322,22 +368,28 @@ def attach_masters(
         label = _flat_label(key)
         prof, _ = _profile_of(flat, pattern, image_crop, flat_meta.get(paths[0]), with_map=False)
         profiles[key] = prof
-        if flat_mode == "profile":
-            corner = prof.corner(image_crop)[0]
-            say(f"flats {label}: smooth profile fitted to {n} flat(s) (corners at {corner:.0%} of the middle); "
-                "dust in the flats is ignored")
-        else:
-            # A brightness slope straight across the frame comes from the light source (a panel or the
-            # sky brighter on one side), not the lens: take it out, keeping vignetting and dust.
-            bx, by = _light_slope(flat, prof, image_crop)
-            if max(abs(bx), abs(by)) > 0.002:
+        bx, by = _light_slope(flat, prof, image_crop)
+        if max(abs(bx), abs(by)) > 0.002:
+            words = _slope_words(bx, by)
+            if uneven_light:
                 h, w = flat.shape
                 xn = ((np.arange(w, dtype=np.float32) - (w - 1) / 2) / ((w - 1) / 2))[None, :]
                 yn = ((np.arange(h, dtype=np.float32) - (h - 1) / 2) / ((h - 1) / 2))[:, None]
                 flat /= 1 + bx * xn + by * yn
-                say(f"flats {label}: the light on the flats was uneven: " + _slope_words(bx, by)
-                    + "; taken out of the master flat (it is the light, not the lens)")
-            np.maximum(flat, MIN_ILLUMINATION, out=flat)
+                say(f"flats {label}: " + words + "; taken out (the light on the flats was uneven, as set on the "
+                    "Stack tab)")
+            else:
+                say(f"flats {label}: " + words + "; kept: an off-centre lens does this too. If the light on the "
+                    "flats was uneven, tick 'The light on the flats was uneven' on the Stack tab")
+        np.maximum(flat, MIN_ILLUMINATION, out=flat)
+        if flat_mode == "profile":
+            smooth = _smooth_flat(flat)
+            flats[key] = smooth
+            corner = float(np.median(np.concatenate([smooth[:16, :16].ravel(), smooth[-16:, -16:].ravel(),
+                                                     smooth[:16, -16:].ravel(), smooth[-16:, :16].ravel()])))
+            say(f"flats {label}: smooth surface fitted to {n} flat(s) (corners at {corner:.0%} of the middle; "
+                "follows an off-centre lens); dust in the flats is ignored" + note(what))
+        else:
             flats[key] = flat
             say(f"flats {label}: master flat, mean of {n} flat(s) ({how} removed); corrects vignetting and dust"
                 + note(what))
@@ -347,7 +399,7 @@ def attach_masters(
             from .vignetting_profile import profile_map
 
             h, w = flat.shape
-            ratio = flat / np.maximum(profile_map(prof, w, h, image_crop, pattern), MIN_ILLUMINATION)
+            ratio = flat / _smooth_flat(flat)
             rms = float(np.sqrt(np.mean((ratio - 1.0) ** 2))) * 100
             # Dust: small dark spots, judged against the ratio's own large-scale level (so a broad
             # difference from the profile is not counted as dust).
@@ -384,7 +436,8 @@ def attach_masters(
         if fc.flat_group:
             if fc.flat_group in flats:
                 fc.flat_map = flats[fc.flat_group]
-                fc.lens_label = f"master flat ({_flat_label(fc.flat_group)})"
+                kind = "smooth surface from flats" if flat_mode == "profile" else "master flat"
+                fc.lens_label = f"{kind} ({_flat_label(fc.flat_group)})"
             else:
                 prof = profiles[fc.flat_group]
                 fc.vignetting = "profile"

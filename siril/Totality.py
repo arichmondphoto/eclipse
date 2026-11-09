@@ -356,8 +356,10 @@ class FramesTab(QWidget):
         _tip(self.lens_combo, "Where the vignetting (darkening towards the corners) correction comes from when you "
              "have no flats. Automatic: the lensfun profile matching the lens in the files, or a profile you "
              "fitted from your own flats earlier. Choose a lens by name if Automatic picks none or the wrong one, "
-             "or 'None' to switch the correction off. Flats in the Flats folder are used instead whenever they "
-             "match the frames' aperture and focal length.", form)
+             "or 'None' to switch it off (no lensfun profile and no profile saved from earlier flats). Flats in the "
+             "Flats folder are a separate choice, made on the Stack tab (Flat frames, which can be Don't use the "
+             "flats); when used, they replace this correction for frames with the same aperture and focal "
+             "length.", form)
         ef = self._event_form
         _tip(self.eclipse_combo, "Which eclipse the frames are of. Automatic uses the eclipse on the date the frames "
              "were taken. The list holds the total and hybrid eclipses on this computer; the first time an "
@@ -602,7 +604,7 @@ class FramesTab(QWidget):
             calib,
             lens_name=None if choice in (AUTOMATIC, NO_PROFILE) else choice,
             use_lensfun=choice != NO_PROFILE,
-            profiles=load_profile_library(),
+            profiles=load_profile_library() if choice != NO_PROFILE else [],
         )
         self.project.lens_profile = "" if choice == AUTOMATIC else choice
         self.project.use_lensfun = choice != NO_PROFILE
@@ -1028,7 +1030,10 @@ class StackTab(StepTab):
         self.flat_mode.addItem("Master flat", "master")
         self.flat_mode.addItem("Smooth profile from the flats", "profile")
         self.flat_mode.addItem("Master flat + compare with profile", "compare")
+        self.flat_mode.addItem("Don't use the flats", "none")
         f.addRow("Flat frames:", self.flat_mode)
+        self.uneven_light = QCheckBox("The light on the flats was uneven")
+        f.addRow("", self.uneven_light)
         self.settings_layout.addWidget(opts)
 
         _tip(self.full, "The output is the same size as the RAW files, so it lines up with your originals in "
@@ -1040,11 +1045,15 @@ class StackTab(StepTab):
              "in one place. Default: the alignment reference. A longer exposure shows more earthshine.", f)
         _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken or "
              "doubled and are left out. Tick to stack them anyway.")
+        _tip(self.uneven_light, "Tick only if the light on your flats was brighter on one side (a panel or "
+             "the sky lit unevenly). A straight slope across the flats is then taken out. Leave it off "
+             "otherwise: a lens whose darkening is a little off-centre gives the same slope, and taking it out "
+             "leaves the sky too dark or too bright towards the edges. The log reports any slope it finds.")
         _tip(self.flat_mode, "How the flat frames chosen on the Frames tab are used (only flats taken at the same "
              "aperture and focal length as the light frames are used; the log says which correction each frame "
              "got). Master flat: divide by the average of your flats, pixel by pixel, which corrects vignetting "
              "AND dust shadows; best when the flats were taken the same day without changing or cleaning "
-             "anything. Smooth profile: fit only the lens's smooth vignetting to the flats and ignore dust; use it "
+             "anything. Smooth profile: fit only the lens's smooth vignetting to the flats (off-centre too) and ignore dust; use it "
              "if the dust may have moved since (a master flat would then add dark rings where the dust was). Master flat "
              "+ compare: the master flat, and the log reports how much it differs from the smooth profile; "
              "a FITS image of the difference is saved next to the stack (dark spots in it are dust). Darks and "
@@ -1090,6 +1099,7 @@ class StackTab(StepTab):
         i = self.flat_mode.findData(st.get("flat_mode", "master"))
         if i >= 0:
             self.flat_mode.setCurrentIndex(i)
+        self.uneven_light.setChecked(bool(st.get("flats_uneven_light", False)))
         if st.get("moon_frame") is not None:
             i = self.moon_frame.findData(st["moon_frame"])
             if i >= 0:
@@ -1107,7 +1117,8 @@ class StackTab(StepTab):
         opts = W.StackOptions(radii=self.radii.value() if self.square.isChecked() else None,
                               moon_frame=self.moon_frame.currentData(),
                               include_rejected=self.include_rejected.isChecked(), hot_pixels=self.hot.isChecked(),
-                              flat_mode=self.flat_mode.currentData())
+                              flat_mode=self.flat_mode.currentData(),
+                              flats_uneven_light=self.uneven_light.isChecked())
         self.start("Stacking frames", lambda p, say, cancel: W.stack(p, opts, say, cancel), self._done)
 
     def _done(self, out) -> None:

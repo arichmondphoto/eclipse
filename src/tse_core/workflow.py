@@ -99,8 +99,11 @@ def _plan(project: EventProject, lights, lensfun_db, profile_dir, calib=None):
     from .calibration import plan_calibration
 
     db = _db(lensfun_db)
+    # 'None' on the Frames tab switches the lens correction off: no lensfun, and no profile saved
+    # from earlier flats either (flats chosen for Stack are a separate choice, on the Stack tab).
+    profiles = load_profile_library(profile_dir) if project.use_lensfun else []
     plan = plan_calibration(lights, db, calib, lens_name=project.lens_profile or None,
-                            use_lensfun=project.use_lensfun, profiles=load_profile_library(profile_dir))
+                            use_lensfun=project.use_lensfun, profiles=profiles)
     cam = db.find_camera(lights[0].camera_make, lights[0].camera_model) if lights and not db.empty else None
     return plan, (cam.crop_factor if cam else 1.0)
 
@@ -126,7 +129,7 @@ def _calibration_frames(project_path, project: EventProject, say):
 
 
 def _calibrated_plan(project_path, project: EventProject, lights, lensfun_db, profile_dir, flat_mode, say,
-                     out_dir=None, name="stack"):
+                     out_dir=None, name="stack", uneven_light: bool = False):
     """The calibration plan for Stack and the earthshine stack, with the master frames attached.
 
     ``flat_mode`` None means the calibration frames are not used (a stack made before they were),
@@ -140,6 +143,11 @@ def _calibrated_plan(project_path, project: EventProject, lights, lensfun_db, pr
         info = {}
     else:
         calib = _calibration_frames(project_path, project, say)
+        if flat_mode == "none":
+            if calib.flats:
+                say(f"flat frames not used ({len(calib.flats)} chosen on the Frames tab; Stack tab: "
+                    "Flat frames: Don't use)")
+            calib.flats = []
         plan, crop = _plan(project, lights, lensfun_db, profile_dir, calib)
         why = flat_mismatch(lights, calib)
         if why:
@@ -147,7 +155,7 @@ def _calibrated_plan(project_path, project: EventProject, lights, lensfun_db, pr
         # Masters are saved in fits/masters in the project folder and reused while their frames are unchanged.
         info = attach_masters(plan, calib, lambda p: rawio.read_mosaic(p), lights, flat_mode, crop, say,
                               out_dir=data_dirs(project_path)[0], name=name,
-                              cache_dir=data_dirs(project_path)[0] / "masters")
+                              cache_dir=data_dirs(project_path)[0] / "masters", uneven_light=uneven_light)
     for w in plan.warnings:
         say("warning: " + w)
     for line in describe_frames(plan):
@@ -250,7 +258,8 @@ class StackOptions:
     hot_pixels: bool = True
     profile_dir: Optional[str] = None
     lensfun_db: Optional[str] = None
-    flat_mode: str = "master"  # how flat frames are used: master | profile | compare (see masters.FLAT_MODES)
+    flat_mode: str = "master"  # how flat frames are used: master | profile | compare | none (masters.FLAT_MODES)
+    flats_uneven_light: bool = False  # the light on the flats was brighter on one side: take that slope out
 
 
 def _frame_infos(project: EventProject, alignment: dict, include_rejected: bool):
@@ -315,7 +324,8 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
     name = opts.name or path.stem
     try:
         plan, crop_factor, calib_info = _calibrated_plan(path, project, lights, opts.lensfun_db, opts.profile_dir,
-                                                         opts.flat_mode, say, out_dir=out_dir, name=name)
+                                                         opts.flat_mode, say, out_dir=out_dir, name=name,
+                                                         uneven_light=opts.flats_uneven_light)
     except ValueError as exc:
         raise WorkflowError(str(exc)) from exc
     calibs = {fc.frame_index: fc for fc in plan.frames}
@@ -771,7 +781,8 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
         say("note: the HDR stack was made without your calibration frames; run Stack again to use them "
             "(the earthshine stack follows the HDR stack)")
     try:
-        plan, crop_factor, _ = _calibrated_plan(path, project, lights, lensfun_db, profile_dir, flat_mode, say)
+        plan, crop_factor, _ = _calibrated_plan(path, project, lights, lensfun_db, profile_dir, flat_mode, say,
+                                                uneven_light=bool(st.get("flats_uneven_light", False)))
     except ValueError as exc:
         raise WorkflowError(str(exc)) from exc
     calibs = {fc.frame_index: fc for fc in plan.frames}
@@ -1135,7 +1146,8 @@ def prominence_stack(project_path, opts: Optional[ProminenceStackOptions] = None
     _locate_frames(path, lights)
     try:
         plan, crop_factor, _ = _calibrated_plan(path, project, lights, None, None, st.get("flat_mode", "master"),
-                                                say, out_dir=path.parent, name=path.stem)
+                                                say, out_dir=path.parent, name=path.stem,
+                                                uneven_light=bool(st.get("flats_uneven_light", False)))
     except ValueError as exc:
         raise WorkflowError(str(exc)) from exc
     calibs = {fc.frame_index: fc for fc in plan.frames}
