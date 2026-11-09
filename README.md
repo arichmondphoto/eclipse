@@ -1107,9 +1107,12 @@ for the reference frame as `<name>_vignetting.fit` at 1/8 size (open it in
 Siril to see what was divided out; 1.0 = the middle). When nothing matched
 it says "NONE applied". The folders chosen on the Frames tab are saved with
 the project as soon as a step runs. The earthshine stack is calibrated
-exactly as the HDR stack was, so the two stay in the same units. Align uses
-the lensfun profile only (none if the last Stack used None): vignetting and
-dust do not affect the alignment.
+exactly as the HDR stack was, so the two stay in the same units. Align uses no
+vignetting correction at all: the darkening is the same in every frame and
+smooth, and phase correlation compares the corona's fine structure. On the
+2024 frames a typical correction moved the alignments by up to 1 px and put
+the Moons further off their straight track (rms 1.34 px with it, 0.76 px
+without).
 
 ## Own-flats profiles
 

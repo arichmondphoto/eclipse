@@ -159,6 +159,12 @@ def _plan(project: EventProject, lights, lensfun_db, profile_dir, calib=None, vi
     return plan, (cam.crop_factor if cam else 1.0)
 
 
+def _crop_factor(lights, lensfun_db) -> float:
+    db = _db(lensfun_db)
+    cam = db.find_camera(lights[0].camera_make, lights[0].camera_model) if lights and not db.empty else None
+    return cam.crop_factor if cam else 1.0
+
+
 def _calibration_frames(project_path, project: EventProject, say):
     """The bias, dark and flat frames chosen on the Frames tab (or with --flats etc.), read."""
     from . import metadata
@@ -278,11 +284,10 @@ def align(project_path, opts: AlignOptions, say: Optional[Say] = None, cancel=No
     if len(lights) < 2:
         raise WorkflowError("Need at least two light frames: read the RAW folder on the Frames tab first.")
     _locate_frames(path, lights)
-    # Alignment does not need the flats; it follows the last Stack's lens choice (lensfun by default).
-    cal = calibration_of(project.parameters.get("stack", {}), project)
-    plan, crop = _plan(project, lights, opts.lensfun_db, opts.profile_dir,
-                       vignetting="none" if cal is not None and cal.vignetting == "none" else "lensfun",
-                       lens=cal.lens if cal is not None else project.lens_profile)
+    # No vignetting correction: the lens's darkening is fixed to the sensor, the same in every frame,
+    # smooth, and smallest round the Sun, and phase correlation compares the corona's fine structure
+    # with the smooth part filtered out. Only the camera's crop factor is needed.
+    plan, crop = None, _crop_factor(lights, opts.lensfun_db)
     site = None
     if project.latitude is not None and project.longitude is not None:
         site = Site(project.latitude, project.longitude, project.elevation_m)

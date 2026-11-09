@@ -341,3 +341,37 @@ def test_none_ignores_saved_profiles_and_lensfun_uses_them(tmp_path, monkeypatch
     assert any(fc.vignetting == "profile" for fc in plan.frames)
     plan, _ = workflow._plan(project, lights, str(tmp_path / "none"), None, vignetting="none")
     assert all(fc.vignetting == "none" for fc in plan.frames)
+
+
+def test_align_loads_the_frames_without_a_lens_correction(tmp_path, monkeypatch):
+    """Andy, Nov 2026: Align used the lens profile (and the last Stack's lens choice). It does not need
+    one: the darkening is the same in every frame and smooth, and phase correlation compares the
+    corona's fine structure. On 12 of his 2024 frames a typical correction (corners at 59 %) moved the
+    alignments by 0.4-1.2 px and put the Moons further off their straight track: rms 1.34 px with it,
+    0.76 px without."""
+    from tse_core import workflow
+
+    path = _project(tmp_path, monkeypatch)
+    project = EventProject.load(path)
+    project.parameters["stack"] = {"calibration": {"vignetting": "lensfun", "lens": "", "uneven_light": False,
+                                                   "darks": "use", "bias": "use"}}
+    project.save(path)
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def loader(plan, crop):
+        seen["plan"] = plan
+        return lambda *a: None
+
+    def run(*a, **k):
+        raise Stop
+
+    from tse_core import pipeline
+
+    monkeypatch.setattr(pipeline, "default_loader", loader)
+    monkeypatch.setattr(pipeline, "run_alignment", run)
+    with pytest.raises(Stop):
+        workflow.align(path, workflow.AlignOptions(lensfun_db=str(tmp_path / "none")))
+    assert seen["plan"] is None
