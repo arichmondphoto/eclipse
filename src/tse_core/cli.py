@@ -139,14 +139,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--include-rejected", action="store_true",
                    help="also stack frames the Sun-centre fit flagged as off the Moon's track")
     p.add_argument("--no-hot-pixels", action="store_true", help="skip the hot-pixel correction")
-    p.add_argument("--flat-mode", choices=["master", "profile", "compare", "none"], default="master",
-                   help="how the project's flat frames are used: master = divide by the master flat (vignetting "
-                        "and dust; default), profile = a smooth surface fitted to them (vignetting only, off-centre "
-                        "too), compare = master flat and report how it differs from that surface, none = do not "
-                        "use them")
+    p.add_argument("--vignetting", choices=["auto", "master", "profile", "compare", "lensfun", "none"],
+                   default="auto",
+                   help="vignetting correction: auto = master flat if flats are chosen, else the lensfun profile "
+                        "(default); master = master flat (flats from the same session: vignetting and dust); "
+                        "profile = a smooth surface fitted to the flats (flats from another time: vignetting only); "
+                        "compare = master flat and report how it differs from that surface; lensfun = the lens's "
+                        "lensfun profile; none = no correction")
+    p.add_argument("--lens", default="", help="lensfun lens for --vignetting lensfun/auto (default: matched from the files)")
     p.add_argument("--flats-uneven-light", action="store_true",
                    help="the light on the flats was brighter on one side: take a straight slope across them out "
                         "(off by default: an off-centre lens gives the same slope)")
+    p.add_argument("--darks", choices=["use", "none"], default="none",
+                   help="use the project's dark frames (hot pixels, thermal signal, amp glow; the separate hot-pixel "
+                        "fix is then off), or not (default)")
+    p.add_argument("--bias", choices=["use", "none"], default="use",
+                   help="use the project's bias frames for the offset (default), or the black level in each file")
     p.add_argument("--profile-dir", help="folder of saved own-flats profiles")
     p.add_argument("--lensfun-db", help="folder holding lensfun XML files (default: the installed database)")
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
@@ -771,7 +779,8 @@ def cmd_stack(args) -> int:
     opts = StackOptions(align=args.align, output=args.output, name=args.name, radii=radii,
                         moon_frame=args.moon_frame, include_rejected=args.include_rejected,
                         hot_pixels=not args.no_hot_pixels, profile_dir=args.profile_dir, lensfun_db=args.lensfun_db,
-                        flat_mode=args.flat_mode, flats_uneven_light=args.flats_uneven_light)
+                        vignetting=args.vignetting, lens=args.lens, flats_uneven_light=args.flats_uneven_light,
+                        darks=args.darks, bias=args.bias)
     out, code = _run(stack, args.project, opts, quiet=args.quiet)
     if code:
         return code

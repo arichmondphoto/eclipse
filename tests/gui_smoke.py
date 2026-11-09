@@ -44,6 +44,20 @@ print("align table rows:", win.align_tab.table.rowCount(), "| summary:", win.ali
 assert win.align_tab.table.rowCount() == 3
 print("stack moon-frame choices:", win.stack_tab.moon_frame.count(), "current", win.stack_tab.moon_frame.currentData())
 assert win.stack_tab.moon_frame.currentData() == 1
+# Calibration on the Stack tab (Andy, Nov 2026): darks off and hot pixels on by default; using darks
+# unticks and greys out the hot-pixel box; not using them gives it back.
+stt = win.stack_tab
+assert stt.darks.currentData() == "none" and stt.hot.isChecked() and stt.hot.isEnabled()
+assert stt.vignetting.currentData() == "auto" and stt.bias.currentData() == "use"
+stt.darks.setCurrentIndex(stt.darks.findData("use"))
+assert not stt.hot.isChecked() and not stt.hot.isEnabled()
+stt.darks.setCurrentIndex(stt.darks.findData("none"))
+assert stt.hot.isChecked() and stt.hot.isEnabled()
+stt.vignetting.setCurrentIndex(stt.vignetting.findData("none"))
+assert not stt.lens.isEnabled() and not stt.uneven_light.isEnabled()
+stt.vignetting.setCurrentIndex(stt.vignetting.findData("auto"))
+for w in (stt.vignetting, stt.lens, stt.uneven_light, stt.darks, stt.hot, stt.bias):
+    assert w.toolTip(), w
 
 # Enhance: preview (runs synchronously in the stub), then change a setting, then the full run.
 et = win.enhance_tab
@@ -316,7 +330,7 @@ os.environ.pop("STUB_DIR")
 # Every control on the Frames tab has hover help (CLAUDE.md: settings shown in the GUI need it).
 ft = win4.frames_tab
 controls = {"RAW folder": ft.folder, "Browse": ft.browse_btn, "exiftool": ft.use_exiftool, "Read frames": ft.scan_btn,
-            "frame table": ft.table, "Lens profile": ft.lens_combo, "Eclipse": ft.eclipse_combo,
+            "frame table": ft.table, "Eclipse": ft.eclipse_combo,
             "Latitude": ft.lat, "Longitude": ft.lon, "Elevation": ft.elev, "Camera time zone": ft.tz,
             "Clock error": ft.clock_error, "Compute contacts": ft.compute_btn,
             "Second contact": ft.c2, "Third contact": ft.c3, "Bias": ft.bias_dir, "Darks": ft.dark_dir,

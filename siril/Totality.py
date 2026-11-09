@@ -107,8 +107,6 @@ from tse_core.project import EventProject  # noqa: E402
 from tse_core.vignetting_profile import load_profile_library  # noqa: E402
 
 COLUMNS = ["#", "File", "Time", "Exposure", "f/", "ISO", "Focal", "Black", "White", "Bracket", "Role", "Notes"]
-AUTOMATIC = "Automatic (from EXIF)"
-NO_PROFILE = "None (no vignetting correction)"
 
 
 class SirilLink:
@@ -225,12 +223,8 @@ class FramesTab(QWidget):
         ef.addRow(self.compute_btn)
         left.addWidget(event)
 
-        options = QGroupBox("Calibration")
+        options = QGroupBox("Lens (for matching the flats)")
         form = QFormLayout(options)
-        self.lens_combo = QComboBox()
-        self.lens_combo.addItems([AUTOMATIC, NO_PROFILE])
-        self.lens_combo.currentIndexChanged.connect(lambda _: self.replan())
-        form.addRow("Lens profile:", self.lens_combo)
         self.focal = QLineEdit()
         self.focal.setPlaceholderText("mm; only if the files do not say")
         self.fnum = QLineEdit()
@@ -353,13 +347,6 @@ class FramesTab(QWidget):
              "Right-click selected rows to mark them light, partial or excluded, for example a shaken frame or "
              "one with a cloud. Black and White are the sensor levels from the file; Bracket groups the frames "
              "of one exposure sweep.")
-        _tip(self.lens_combo, "Where the vignetting (darkening towards the corners) correction comes from when you "
-             "have no flats. Automatic: the lensfun profile matching the lens in the files, or a profile you "
-             "fitted from your own flats earlier. Choose a lens by name if Automatic picks none or the wrong one, "
-             "or 'None' to switch it off (no lensfun profile and no profile saved from earlier flats). Flats in the "
-             "Flats folder are a separate choice, made on the Stack tab (Flat frames, which can be Don't use the "
-             "flats); when used, they replace this correction for frames with the same aperture and focal "
-             "length.", form)
         ef = self._event_form
         _tip(self.eclipse_combo, "Which eclipse the frames are of. Automatic uses the eclipse on the date the frames "
              "were taken. The list holds the total and hybrid eclipses on this computer; the first time an "
@@ -468,7 +455,6 @@ class FramesTab(QWidget):
                 self.project.name = Path(folder).name
         finally:
             QApplication.restoreOverrideCursor()
-        self._refresh_lens_choices()
         self.apply_settings()
 
     def _fill_eclipses(self, selected: str = "") -> None:
@@ -591,46 +577,30 @@ class FramesTab(QWidget):
         if not self.inventory.frames:
             return
         self.bracket_report = detect_brackets(self.inventory.frames)
-        choice = self.lens_combo.currentText()
         calib = CalibrationFrames(
             bias=read_frames(self.project.bias_files) if self.project.bias_files else [],
             darks=read_frames(self.project.dark_files) if self.project.dark_files else [],
             flats=read_frames(self.project.flat_files) if self.project.flat_files else [],
         )
         fill_optics(calib.flats, self.project.focal_length_mm, self.project.aperture_f)
-        self.plan = plan_calibration(
-            self.inventory.lights(),
-            self.db,
-            calib,
-            lens_name=None if choice in (AUTOMATIC, NO_PROFILE) else choice,
-            use_lensfun=choice != NO_PROFILE,
-            profiles=load_profile_library() if choice != NO_PROFILE else [],
-        )
-        self.project.lens_profile = "" if choice == AUTOMATIC else choice
-        self.project.use_lensfun = choice != NO_PROFILE
+        # Only for "Write synthetic flat": the lensfun profile matched from the files. How the frames
+        # are calibrated is chosen on the Stack tab.
+        self.plan = plan_calibration(self.inventory.lights(), self.db, None, use_lensfun=True,
+                                     profiles=load_profile_library())
         self.project.store_inventory(self.inventory)
         self._fill_table()
+        lines = ["Calibration frames (how they are used is set on the Stack tab, in Calibration):",
+                 f"  {len(calib.darks)} dark(s), {len(calib.flats)} flat(s), {len(calib.bias)} bias frame(s)"]
+        if calib.flats:
+            from tse_core.masters import flat_mismatch
+
+            why = flat_mismatch(self.inventory.lights(), calib)
+            lines.append("  " + (why or "the flats match the light frames' f-number and focal length"))
+        lines.append("  lensfun profile matched from the files: "
+                     + (self.plan.lens.label() if self.plan.lens is not None else "none"))
         event = "\n\n".join(t for t in (getattr(self, "event_report", ""), getattr(self, "fit_report", "")) if t)
         self.report.setPlainText((event + "\n\n" if event else "") + self.bracket_report.describe() + "\n\n"
-                                 + self.plan.describe())
-
-    def _refresh_lens_choices(self) -> None:
-        current = self.project.lens_profile
-        self.lens_combo.blockSignals(True)
-        self.lens_combo.clear()
-        self.lens_combo.addItems([AUTOMATIC, NO_PROFILE])
-        sample = next((f for f in self.inventory.frames if f.lens_model or f.lens_spec), None)
-        if sample and not self.db.empty:
-            maker = sample.lens_make or sample.camera_make
-            for m in self.db.match_lens(sample.lens_model, sample.lens_spec, sample.focal_length_mm, maker, limit=8):
-                self.lens_combo.addItem(m.lens.label())
-        if current:
-            idx = self.lens_combo.findText(current)
-            if idx < 0:
-                self.lens_combo.addItem(current)
-                idx = self.lens_combo.count() - 1
-            self.lens_combo.setCurrentIndex(idx)
-        self.lens_combo.blockSignals(False)
+                                 + "\n".join(lines))
 
     def _fill_table(self) -> None:
         frames = self.inventory.frames
@@ -706,7 +676,6 @@ class FramesTab(QWidget):
             return
         QApplication.restoreOverrideCursor()
         self.link.log(f"Totality: lensfun database updated ({len(self.db.lenses)} lenses) in {path}")
-        self._refresh_lens_choices()
         self.replan()
 
     # -------------------------------------------------------------- project
@@ -741,9 +710,6 @@ class FramesTab(QWidget):
         for edit, files in ((self.bias_dir, self.project.bias_files), (self.dark_dir, self.project.dark_files),
                             (self.flat_dir, self.project.flat_files)):
             edit.setText(str(Path(files[0]).parent) if files else "")
-        self._refresh_lens_choices()
-        if not self.project.use_lensfun:
-            self.lens_combo.setCurrentText(NO_PROFILE)
         self.replan()
 
 
@@ -1022,19 +988,39 @@ class StackTab(StepTab):
         self.moon_frame.addItem("Alignment reference", None)
         f.addRow("Moon from frame:", self.moon_frame)
         self.include_rejected = QCheckBox("Include frames flagged as off the Moon's track")
+        f.addRow(self.include_rejected)
+        self.settings_layout.addWidget(opts)
+
+        cal = QGroupBox("Calibration")
+        c = QFormLayout(cal)
+        self.vignetting = QComboBox()
+        for label, key in (("Automatic (master flat if there are flats, else lensfun)", "auto"),
+                           ("Master flat (flats from the same session)", "master"),
+                           ("Profile from the flats (flats from another time)", "profile"),
+                           ("Master flat + compare with the profile", "compare"),
+                           ("Lensfun profile", "lensfun"), ("None", "none")):
+            self.vignetting.addItem(label, key)
+        c.addRow("Vignetting:", self.vignetting)
+        self.lens = QComboBox()
+        self.lens.addItem("Matched from the files", "")
+        c.addRow("Lensfun lens:", self.lens)
+        self.uneven_light = QCheckBox("The light on the flats was uneven")
+        c.addRow("", self.uneven_light)
+        self.darks = QComboBox()
+        self.darks.addItem("Don't use", "none")
+        self.darks.addItem("Use the darks", "use")
+        c.addRow("Darks:", self.darks)
         self.hot = QCheckBox("Fix isolated hot pixels")
         self.hot.setChecked(True)
-        f.addRow(self.include_rejected)
-        f.addRow(self.hot)
-        self.flat_mode = QComboBox()
-        self.flat_mode.addItem("Master flat", "master")
-        self.flat_mode.addItem("Smooth profile from the flats", "profile")
-        self.flat_mode.addItem("Master flat + compare with profile", "compare")
-        self.flat_mode.addItem("Don't use the flats", "none")
-        f.addRow("Flat frames:", self.flat_mode)
-        self.uneven_light = QCheckBox("The light on the flats was uneven")
-        f.addRow("", self.uneven_light)
-        self.settings_layout.addWidget(opts)
+        c.addRow("", self.hot)
+        self.bias = QComboBox()
+        self.bias.addItem("Use the bias frames", "use")
+        self.bias.addItem("Don't use (black level of each file)", "none")
+        c.addRow("Bias:", self.bias)
+        self.settings_layout.addWidget(cal)
+        self.vignetting.currentIndexChanged.connect(lambda _: self._calibration_enabled())
+        self.darks.currentIndexChanged.connect(lambda _: self._calibration_enabled())
+        self._calibration_enabled()
 
         _tip(self.full, "The output is the same size as the RAW files, so it lines up with your originals in "
              "Photoshop and keeps streamers out to the frame edges. Needs about 3-4 GB of memory.")
@@ -1049,18 +1035,26 @@ class StackTab(StepTab):
              "the sky lit unevenly). A straight slope across the flats is then taken out. Leave it off "
              "otherwise: a lens whose darkening is a little off-centre gives the same slope, and taking it out "
              "leaves the sky too dark or too bright towards the edges. The log reports any slope it finds.")
-        _tip(self.flat_mode, "How the flat frames chosen on the Frames tab are used (only flats taken at the same "
-             "aperture and focal length as the light frames are used; the log says which correction each frame "
-             "got). Master flat: divide by the average of your flats, pixel by pixel, which corrects vignetting "
-             "AND dust shadows; best when the flats were taken the same day without changing or cleaning "
-             "anything. Smooth profile: fit only the lens's smooth vignetting to the flats (off-centre too) and ignore dust; use it "
-             "if the dust may have moved since (a master flat would then add dark rings where the dust was). Master flat "
-             "+ compare: the master flat, and the log reports how much it differs from the smooth profile; "
-             "a FITS image of the difference is saved next to the stack (dark spots in it are dust). Darks and "
-             "bias frames from the Frames tab are always used when they match. Changing this needs a re-stack.",
-             f)
+        _tip(self.vignetting, "How the darkening towards the corners is corrected while stacking. Automatic: the "
+             "master flat if you chose flats on the Frames tab, otherwise the lensfun profile for your lens, "
+             "otherwise nothing. Master flat: divide by the average of your flats pixel by pixel, which also "
+             "removes dust shadows; use it for flats taken the same day without changing or cleaning anything. "
+             "Profile from the flats: a smooth surface fitted to the flats, vignetting only (dust ignored); use "
+             "it for flats taken at another time. Master flat + compare: the master flat, and the log reports how "
+             "much it differs from the smooth profile (a FITS image of the difference is saved; dark spots in it "
+             "are dust). Only flats at the light frames' f-number and focal length are used.", c)
+        _tip(self.lens, "The lensfun lens used when Vignetting is Lensfun profile (or Automatic without flats). "
+             "Matched from the files picks it from the lens recorded in the RAW files; choose one if that picks "
+             "none or the wrong one.", c)
+        _tip(self.darks, "Darks (same exposure and ISO as the lights, lens capped) remove hot pixels, the "
+             "sensor's thermal signal and amp glow. Don't use: the separate hot-pixel fix below cleans single "
+             "hot pixels instead. When darks are used that fix is switched off: the darks do the job.", c)
+        _tip(self.bias, "Bias frames (shortest exposure, lens capped, same ISO) give the sensor's baseline "
+             "pattern, removed from frames that have no dark. Don't use: the black level written in each RAW "
+             "file is subtracted instead.", c)
         _tip(self.hot, "Replace single hot or dead pixels with their neighbours' median. Real stars and "
-             "prominences, which cover several pixels, are left alone.")
+             "prominences, which cover several pixels, are left alone. Only when Darks is Don't use: with "
+             "darks the box is unticked and greyed out, as the darks remove the hot pixels.")
         run = QPushButton("Stack frames")
         run.clicked.connect(self.run)
         _tip(run, "Calibrates (darks, bias, flats), aligns and merges every light frame into one linear HDR stack "
@@ -1096,10 +1090,29 @@ class StackTab(StepTab):
         if st.get("radii"):
             self.square.setChecked(True)
             self.radii.setValue(float(st["radii"]))
-        i = self.flat_mode.findData(st.get("flat_mode", "master"))
-        if i >= 0:
-            self.flat_mode.setCurrentIndex(i)
-        self.uneven_light.setChecked(bool(st.get("flats_uneven_light", False)))
+        self.lens.blockSignals(True)
+        self.lens.clear()
+        self.lens.addItem("Matched from the files", "")
+        try:
+            for label in W.lens_choices(path):
+                self.lens.addItem(label, label)
+        except Exception:  # noqa: BLE001 - no lensfun database: only "matched from the files"
+            pass
+        self.lens.blockSignals(False)
+        cal = st.get("calibration") or {}
+        for box, key, default in ((self.vignetting, "vignetting", "auto"), (self.darks, "darks", "none"),
+                                  (self.bias, "bias", "use")):
+            i = box.findData(cal.get(key, default))
+            if i >= 0:
+                box.setCurrentIndex(i)
+        if cal.get("lens"):
+            i = self.lens.findData(cal["lens"])
+            if i < 0:
+                self.lens.addItem(cal["lens"], cal["lens"])
+                i = self.lens.count() - 1
+            self.lens.setCurrentIndex(i)
+        self.uneven_light.setChecked(bool(cal.get("uneven_light", False)))
+        self._calibration_enabled()
         if st.get("moon_frame") is not None:
             i = self.moon_frame.findData(st["moon_frame"])
             if i >= 0:
@@ -1113,12 +1126,26 @@ class StackTab(StepTab):
 
             self.show_matches(json.loads(Path(info).read_text(encoding="utf-8")).get("matches", []))
 
+    def _calibration_enabled(self) -> None:
+        """Hot pixels are fixed separately only while darks are not used; the lens list counts for
+        lensfun (or Automatic), the uneven-light box for the flats."""
+        darks = self.darks.currentData() == "use"
+        if darks:
+            self.hot.setChecked(False)
+        elif not self.hot.isEnabled():
+            self.hot.setChecked(True)
+        self.hot.setEnabled(not darks)
+        v = self.vignetting.currentData()
+        self.lens.setEnabled(v in ("auto", "lensfun"))
+        self.uneven_light.setEnabled(v in ("auto", "master", "profile", "compare"))
+
     def run(self) -> None:
         opts = W.StackOptions(radii=self.radii.value() if self.square.isChecked() else None,
                               moon_frame=self.moon_frame.currentData(),
                               include_rejected=self.include_rejected.isChecked(), hot_pixels=self.hot.isChecked(),
-                              flat_mode=self.flat_mode.currentData(),
-                              flats_uneven_light=self.uneven_light.isChecked())
+                              vignetting=self.vignetting.currentData(), lens=self.lens.currentData() or "",
+                              flats_uneven_light=self.uneven_light.isChecked(),
+                              darks=self.darks.currentData(), bias=self.bias.currentData())
         self.start("Stacking frames", lambda p, say, cancel: W.stack(p, opts, say, cancel), self._done)
 
     def _done(self, out) -> None:

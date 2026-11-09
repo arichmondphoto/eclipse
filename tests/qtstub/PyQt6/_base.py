@@ -19,6 +19,12 @@ class Dummy(metaclass=_Meta):
     def toolTip(self):
         return getattr(self, "_tooltip", "")
 
+    def setEnabled(self, v):
+        self._enabled = bool(v)
+
+    def isEnabled(self):
+        return getattr(self, "_enabled", True)
+
     def __getattr__(self, name):
         if name.startswith("__"):
             raise AttributeError(name)
@@ -102,10 +108,6 @@ class _Clickable(QWidget):
 
     def isChecked(self):
         return self._checked
-
-    def setEnabled(self, v):
-        self._enabled = bool(v)
-
 
 class QPushButton(_Clickable):
     pass

@@ -95,15 +95,66 @@ def ensure_elements(day: str, say: Say) -> None:
     _ensure(day, say)
 
 
-def _plan(project: EventProject, lights, lensfun_db, profile_dir, calib=None):
+VIGNETTING_CHOICES = ("auto", "master", "profile", "compare", "lensfun", "none")
+
+
+@dataclass
+class Calibration:
+    """How the light frames are calibrated while stacking (the Stack tab's Calibration box).
+
+    ``vignetting``: auto (master flat if flats are chosen, else the lensfun profile, else none),
+    master (flats from the same session: vignetting and dust), profile (a smooth surface fitted to
+    the flats, for flats from another time: vignetting only), compare (master, and a report against
+    that surface), lensfun (the lens's lensfun profile, ``lens`` or matched from the files), none.
+    ``darks``/``bias``: "use" the frames chosen on the Frames tab, or "none" (then the file's black
+    level). Hot pixels are fixed from the frames themselves only when darks are not used."""
+    vignetting: str = "auto"
+    lens: str = ""
+    uneven_light: bool = False
+    darks: str = "none"
+    bias: str = "use"
+
+    def record(self) -> dict:
+        return {"calibration": {"vignetting": self.vignetting, "lens": self.lens, "uneven_light": self.uneven_light,
+                                "darks": self.darks, "bias": self.bias}}
+
+
+def lens_choices(project_path, lensfun_db=None, limit: int = 8) -> list[str]:
+    """lensfun lenses that match the light frames' lens (for the Stack tab's lens list)."""
+    project = EventProject.load(Path(project_path))
+    sample = next((f for f in project.inventory.frames if f.lens_model or f.lens_spec), None)
+    db = _db(lensfun_db)
+    if sample is None or db.empty:
+        return []
+    maker = sample.lens_make or sample.camera_make
+    return [m.lens.label() for m in db.match_lens(sample.lens_model, sample.lens_spec, sample.focal_length_mm,
+                                                  maker, limit=limit)]
+
+
+def calibration_of(stack_params: dict, project: EventProject) -> Optional[Calibration]:
+    """The calibration a stack was made with (so the earthshine and prominence stacks repeat it);
+    None for a stack made before calibration frames were used."""
+    st = stack_params or {}
+    c = st.get("calibration")
+    if isinstance(c, dict):
+        return Calibration(c.get("vignetting", "auto"), c.get("lens", ""), bool(c.get("uneven_light", False)),
+                           c.get("darks", "none"), c.get("bias", "use"))
+    mode = st.get("flat_mode")
+    if mode is None:
+        return None
+    vign = mode if project.flat_files and mode in VIGNETTING_CHOICES else ("lensfun" if project.use_lensfun else "none")
+    return Calibration(vign, project.lens_profile or "", bool(st.get("flats_uneven_light", False)), "use", "use")
+
+
+def _plan(project: EventProject, lights, lensfun_db, profile_dir, calib=None, vignetting: str = "lensfun",
+          lens: str = ""):
     from .calibration import plan_calibration
 
     db = _db(lensfun_db)
-    # 'None' on the Frames tab switches the lens correction off: no lensfun, and no profile saved
-    # from earlier flats either (flats chosen for Stack are a separate choice, on the Stack tab).
-    profiles = load_profile_library(profile_dir) if project.use_lensfun else []
-    plan = plan_calibration(lights, db, calib, lens_name=project.lens_profile or None,
-                            use_lensfun=project.use_lensfun, profiles=profiles)
+    lensfun = vignetting == "lensfun"
+    # Own-flats profiles saved earlier count as a lens profile; flats are used only when chosen.
+    profiles = load_profile_library(profile_dir) if lensfun else []
+    plan = plan_calibration(lights, db, calib, lens_name=lens or None, use_lensfun=lensfun, profiles=profiles)
     cam = db.find_camera(lights[0].camera_make, lights[0].camera_model) if lights and not db.empty else None
     return plan, (cam.crop_factor if cam else 1.0)
 
@@ -128,34 +179,59 @@ def _calibration_frames(project_path, project: EventProject, say):
     return CalibrationFrames(**groups)
 
 
-def _calibrated_plan(project_path, project: EventProject, lights, lensfun_db, profile_dir, flat_mode, say,
-                     out_dir=None, name="stack", uneven_light: bool = False):
+def _calibrated_plan(project_path, project: EventProject, lights, lensfun_db, profile_dir,
+                     cal: Optional[Calibration], say, out_dir=None, name="stack"):
     """The calibration plan for Stack and the earthshine stack, with the master frames attached.
 
-    ``flat_mode`` None means the calibration frames are not used (a stack made before they were),
-    so that the earthshine stack stays in the same units as that HDR stack.
-    """
+    ``cal`` None means the calibration frames are not used (a stack made before they were), so that
+    the earthshine stack stays in the same units as that HDR stack. Returns (plan, crop factor,
+    what was done, for the project file)."""
     from .masters import attach_masters, describe_frames, flat_mismatch
     from . import rawio
 
-    if flat_mode is None:
-        plan, crop = _plan(project, lights, lensfun_db, profile_dir)
+    if cal is None:
+        plan, crop = _plan(project, lights, lensfun_db, profile_dir,
+                           vignetting="lensfun" if project.use_lensfun else "none", lens=project.lens_profile)
         info = {}
     else:
+        if cal.vignetting not in VIGNETTING_CHOICES:
+            raise ValueError(f"vignetting must be one of {', '.join(VIGNETTING_CHOICES)}")
         calib = _calibration_frames(project_path, project, say)
-        if flat_mode == "none":
-            if calib.flats:
-                say(f"flat frames not used ({len(calib.flats)} chosen on the Frames tab; Stack tab: "
-                    "Flat frames: Don't use)")
+        vign = cal.vignetting
+        if vign == "auto":
+            vign = "master" if calib.flats else "lensfun"
+        uses_flats = vign in ("master", "profile", "compare")
+        unused = []
+        if not uses_flats and calib.flats:
+            unused.append(f"{len(calib.flats)} flat(s)")
             calib.flats = []
-        plan, crop = _plan(project, lights, lensfun_db, profile_dir, calib)
-        why = flat_mismatch(lights, calib)
-        if why:
-            say("warning: " + why)
+        if cal.darks != "use" and calib.darks:
+            unused.append(f"{len(calib.darks)} dark(s)")
+            calib.darks = []
+        if cal.bias != "use" and calib.bias:
+            unused.append(f"{len(calib.bias)} bias frame(s)")
+            calib.bias = []
+        say("calibration: vignetting by " + {"master": "master flat", "profile": "smooth profile from the flats",
+                                             "compare": "master flat (compared with the smooth profile)",
+                                             "lensfun": "lensfun profile", "none": "nothing (none chosen)"}[vign]
+            + ("" if cal.vignetting != "auto" else " (automatic)")
+            + f"; darks {'used' if calib.darks else 'not used'}; "
+            + ("bias frames used" if calib.bias else "black level of each file for the offset")
+            + (f"; not used: {', '.join(unused)}" if unused else ""))
+        plan, crop = _plan(project, lights, lensfun_db, profile_dir, calib,
+                           vignetting="lensfun" if vign == "lensfun" else "none", lens=cal.lens)
+        if uses_flats:
+            why = flat_mismatch(lights, calib)
+            if why:
+                say("warning: " + why)
         # Masters are saved in fits/masters in the project folder and reused while their frames are unchanged.
-        info = attach_masters(plan, calib, lambda p: rawio.read_mosaic(p), lights, flat_mode, crop, say,
+        info = attach_masters(plan, calib, lambda p: rawio.read_mosaic(p), lights,
+                              vign if uses_flats else "master", crop, say,
                               out_dir=data_dirs(project_path)[0], name=name,
-                              cache_dir=data_dirs(project_path)[0] / "masters", uneven_light=uneven_light)
+                              cache_dir=data_dirs(project_path)[0] / "masters", uneven_light=cal.uneven_light)
+        info.pop("flat_mode", None)
+        info.pop("flats_uneven_light", None)
+        info.update(cal.record())
     for w in plan.warnings:
         say("warning: " + w)
     for line in describe_frames(plan):
@@ -202,7 +278,11 @@ def align(project_path, opts: AlignOptions, say: Optional[Say] = None, cancel=No
     if len(lights) < 2:
         raise WorkflowError("Need at least two light frames: read the RAW folder on the Frames tab first.")
     _locate_frames(path, lights)
-    plan, crop = _plan(project, lights, opts.lensfun_db, opts.profile_dir)
+    # Alignment does not need the flats; it follows the last Stack's lens choice (lensfun by default).
+    cal = calibration_of(project.parameters.get("stack", {}), project)
+    plan, crop = _plan(project, lights, opts.lensfun_db, opts.profile_dir,
+                       vignetting="none" if cal is not None and cal.vignetting == "none" else "lensfun",
+                       lens=cal.lens if cal is not None else project.lens_profile)
     site = None
     if project.latitude is not None and project.longitude is not None:
         site = Site(project.latitude, project.longitude, project.elevation_m)
@@ -255,11 +335,17 @@ class StackOptions:
     radii: Optional[float] = None  # None = full frame
     moon_frame: Optional[int] = None
     include_rejected: bool = False
-    hot_pixels: bool = True
+    hot_pixels: bool = True  # fixed from the frames themselves; only when darks are not used
     profile_dir: Optional[str] = None
     lensfun_db: Optional[str] = None
-    flat_mode: str = "master"  # how flat frames are used: master | profile | compare | none (masters.FLAT_MODES)
+    vignetting: str = "auto"  # see Calibration
+    lens: str = ""
     flats_uneven_light: bool = False  # the light on the flats was brighter on one side: take that slope out
+    darks: str = "none"
+    bias: str = "use"
+
+    def calibration(self) -> Calibration:
+        return Calibration(self.vignetting, self.lens, self.flats_uneven_light, self.darks, self.bias)
 
 
 def _frame_infos(project: EventProject, alignment: dict, include_rejected: bool):
@@ -324,8 +410,7 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
     name = opts.name or path.stem
     try:
         plan, crop_factor, calib_info = _calibrated_plan(path, project, lights, opts.lensfun_db, opts.profile_dir,
-                                                         opts.flat_mode, say, out_dir=out_dir, name=name,
-                                                         uneven_light=opts.flats_uneven_light)
+                                                         opts.calibration(), say, out_dir=out_dir, name=name)
     except ValueError as exc:
         raise WorkflowError(str(exc)) from exc
     calibs = {fc.frame_index: fc for fc in plan.frames}
@@ -342,7 +427,10 @@ def stack(project_path, opts: StackOptions, say: Optional[Say] = None, cancel=No
         write_fits(vpath, small, {"COMMENT": "Correction applied by Stack (frames divided by this), 1/8 size"})
         say(f"  saved as {vpath.name} (1/8 size; 1.0 = the middle)")
         calib_info = {**calib_info, "vignetting": str(vpath)}
-    params = StackParams(crop_radii=opts.radii, moon_frame=opts.moon_frame, hot_pixels=opts.hot_pixels)
+    hot = opts.hot_pixels and opts.darks != "use"
+    if opts.hot_pixels and not hot:
+        say("hot pixels: corrected by the darks (the separate hot-pixel fix is off while darks are used)")
+    params = StackParams(crop_radii=opts.radii, moon_frame=opts.moon_frame, hot_pixels=hot)
     try:
         result, _hdr, _w = stack_frames(infos, lambda f: read_mosaic(frames[f.index].path), calibs,
                                         tuple(alignment["image_size"]), ref, alignment.get("sun"), params,
@@ -776,13 +864,17 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
     lights = [frames[f.index] for f in use]
     _locate_frames(path, lights)
     # Calibrate exactly as the HDR stack was, so the two stay in the same units.
-    flat_mode = st.get("flat_mode")
-    if flat_mode is None and (project.flat_files or project.dark_files or project.bias_files):
+    cal = calibration_of(st, project)
+    if cal is not None and cal.darks == "use" and p.hot_pixels:
+        from dataclasses import replace as _replace
+
+        p = _replace(p, hot_pixels=False)
+        say("hot pixels: corrected by the darks, as in the HDR stack")
+    if cal is None and (project.flat_files or project.dark_files or project.bias_files):
         say("note: the HDR stack was made without your calibration frames; run Stack again to use them "
             "(the earthshine stack follows the HDR stack)")
     try:
-        plan, crop_factor, _ = _calibrated_plan(path, project, lights, lensfun_db, profile_dir, flat_mode, say,
-                                                uneven_light=bool(st.get("flats_uneven_light", False)))
+        plan, crop_factor, _ = _calibrated_plan(path, project, lights, lensfun_db, profile_dir, cal, say)
     except ValueError as exc:
         raise WorkflowError(str(exc)) from exc
     calibs = {fc.frame_index: fc for fc in plan.frames}
@@ -1145,9 +1237,8 @@ def prominence_stack(project_path, opts: Optional[ProminenceStackOptions] = None
     lights = [frames[f.index] for f in infos]
     _locate_frames(path, lights)
     try:
-        plan, crop_factor, _ = _calibrated_plan(path, project, lights, None, None, st.get("flat_mode", "master"),
-                                                say, out_dir=path.parent, name=path.stem,
-                                                uneven_light=bool(st.get("flats_uneven_light", False)))
+        plan, crop_factor, _ = _calibrated_plan(path, project, lights, None, None, calibration_of(st, project),
+                                                say, out_dir=path.parent, name=path.stem)
     except ValueError as exc:
         raise WorkflowError(str(exc)) from exc
     calibs = {fc.frame_index: fc for fc in plan.frames}

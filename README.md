@@ -113,9 +113,9 @@ The window has one tab per step, and each step saves into the project file:
 
 | Tab | What you do | What you see |
 | --- | --- | --- |
-| 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Calibration:** the lens profile, the focal length and f-number for frames that do not record them (a telescope; optional), and the calibration folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket and calibration report |
+| 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Lens:** the focal length and f-number for frames that do not record them (a telescope; optional); the darks, flats and bias folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket report and the calibration frames found |
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
-| 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; how the flat frames are used (master flat, smooth profile, master flat + compare, or not at all), and whether the light on the flats was uneven | The stacked preview and each frame's measured brightness |
+| 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; **Calibration:** vignetting (automatic, master flat, profile from the flats, master flat + compare, lensfun, none) and the lensfun lens, whether the light on the flats was uneven, darks (off by default) with the hot-pixel fix when they are off, and bias | The stacked preview and each frame's measured brightness |
 | 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Photoshop paste only (old way)**: kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, blend mode when pasting, use the prominence stack | The Moon close up, then a preview of the final picture; **Write final image**, **Write Moon layer (for Photoshop)** |
 | 6 Prominences | 1 Prominence stack: longest exposure (stops above the shortest), **Stack prominences**. 2 In the final image: sharpening, structure, prominence brightness, redness needed, chromosphere on or off, rim height (greyed out when the Moon hides the chromosphere) | The final image round the Sun at full size, exactly as it will be written; **Write final image** (as on the Earthshine tab) |
@@ -1013,48 +1013,47 @@ sRGB. In the window the Save dialog's file type chooses; on the command line
 
 ## Calibration
 
+The Frames tab only says where the darks, flats and bias frames are (and
+reports how many it found, and whether the flats match the lights). How
+they are used is chosen in the **Calibration** box on the Stack tab, and
+the earthshine and prominence stacks repeat that choice:
+
+| Setting | Choices | Default |
+| --- | --- | --- |
+| **Vignetting** (`--vignetting`) | **Automatic**; **Master flat** (flats from the same session); **Profile from the flats** (flats from another time); **Master flat + compare**; **Lensfun profile**; **None** | Automatic: the master flat if flats are chosen, otherwise the lensfun profile, otherwise none |
+| **Lensfun lens** (`--lens`) | The lens for the lensfun profile: matched from the files, or one you choose | Matched from the files |
+| **The light on the flats was uneven** (`--flats-uneven-light`) | Takes a straight slope across the flats out (below) | Off |
+| **Darks** (`--darks`) | **Use the darks** or **Don't use** | Don't use |
+| **Fix isolated hot pixels** (`--no-hot-pixels`) | Single hot pixels cleaned from the frames themselves; only when Darks is Don't use (the box is unticked and greyed out while darks are used) | On |
+| **Bias** (`--bias`) | **Use the bias frames** or **Don't use** (the black level written in each file) | Use |
+
 ### Vignetting
 
-Only one correction is ever applied to a frame, the first of these that
-fits:
+Only one correction is applied to a frame:
 
-1. a profile you name with `--profile`;
-2. **your own flats** (the flats folder on the Frames tab, or `--flats`),
-   when they were taken at the frame's f-number and focal length;
-3. a saved own-flats profile for the same lens, within 5 % focal length and
-   1/3 stop;
-4. the lensfun profile for your lens;
-5. none, with a warning.
-
-Flats are used in one of four ways (**Flat frames** on the Stack tab,
-`totality stack --flat-mode`):
-
-* **Master flat** (default): the flats are averaged and every frame is
-  divided by that, pixel by pixel. This corrects vignetting *and* dust
-  shadows, provided nothing was changed or cleaned between the eclipse and
-  the flats.
-* **Smooth profile from the flats**: a smooth surface is fitted to the
-  flats (a polynomial in x and y, each colour on its own, dust left out of
-  the fit) and used instead. It follows a lens whose darkening is
-  off-centre. Vignetting only, so dust that moved cannot add dark rings.
+* **Master flat**: the flats are averaged and every frame is divided by
+  that, pixel by pixel. This corrects vignetting *and* dust shadows,
+  provided nothing was changed or cleaned between the eclipse and the flats.
+* **Profile from the flats**: a smooth surface is fitted to the flats (a
+  polynomial in x and y, each colour on its own, dust left out of the fit)
+  and used instead. It follows a lens whose darkening is off-centre.
+  Vignetting only, so dust that moved since cannot add dark rings.
 * **Master flat + compare**: the master flat, and the log reports how far it
   differs from that smooth surface, with a warning when the difference is
   large. The difference is saved as `<name>_flat_vs_profile_<settings>.fit`
   (dark spots are dust).
-* **Don't use the flats**: the flats are ignored; darks and bias still
-  count, and the Frames tab's lens profile (if any) corrects vignetting.
+* **Lensfun profile**: the lens's lensfun profile (or a profile saved from
+  your own flats with `totality flat-profile`, which comes first); the flats
+  are not used.
+* **None**: no vignetting correction at all.
 
 A straight slope across the flats is measured and named in the log
 ("brighter on the right (3.2 % at the edge)"). It is kept: from flats alone,
 a light source brighter on one side and a lens whose darkening is a little
 off-centre give the same slope, and taking out the lens's leaves the sky
 too dark on one side and too bright on the other. If you know the light was
-uneven, tick **The light on the flats was uneven** on the Stack tab
-(`--flats-uneven-light`) and the slope is taken out.
-
-**None** as the lens profile on the Frames tab switches off lensfun and the
-saved own-flats profiles; the flats chosen for Stack are set separately, as
-above.
+uneven, tick **The light on the flats was uneven** and the slope is taken
+out.
 
 Flats that match no light frame are named in the log and not used.
 
@@ -1080,11 +1079,13 @@ Put the camera's RAW files in the folders as they are, any number of them;
 the toolkit averages them itself (pre-stacked masters are not read from
 these folders).
 
-* **Darks** are matched by exposure time and ISO and averaged into a master
-  dark, which is subtracted (it includes the bias). Frames without a match
-  use the bias, and hot pixels are found from the light frames.
-* **Bias** frames are matched by ISO and averaged into a master bias.
-  Without them, each file's own black level is used.
+* **Darks** (when **Darks** is Use the darks) are matched by exposure time
+  and ISO and averaged into a master dark, which is subtracted (it includes
+  the bias and removes hot pixels, thermal signal and amp glow). Frames
+  without a match use the bias.
+* **Bias** frames (when **Bias** is Use the bias frames) are matched by ISO
+  and averaged into a master bias. Without them, each file's own black level
+  is used.
 
 A dark only corrects light frames with its own exposure time and ISO, so
 for a bracket shoot darks at each shutter speed (10-20 each is plenty).
@@ -1107,7 +1108,8 @@ Siril to see what was divided out; 1.0 = the middle). When nothing matched
 it says "NONE applied". The folders chosen on the Frames tab are saved with
 the project as soon as a step runs. The earthshine stack is calibrated
 exactly as the HDR stack was, so the two stay in the same units. Align uses
-the lens profile only: vignetting and dust do not affect the alignment.
+the lensfun profile only (none if the last Stack used None): vignetting and
+dust do not affect the alignment.
 
 ## Own-flats profiles
 
@@ -1284,8 +1286,11 @@ merge the aligned frames into one linear HDR image.
 | `--moon-frame` | frame number whose Moon (and earthshine) is kept (default: the alignment reference) |
 | `--include-rejected` | also stack frames the Sun-centre fit flagged as off the Moon's track |
 | `--no-hot-pixels` | skip the hot-pixel correction |
-| `--flat-mode` | how the project's flat frames are used: master = divide by the master flat (vignetting and dust; default), profile = a smooth surface fitted to them (vignetting only, off-centre too), compare = master flat and report how it differs from that surface, none = do not use them |
+| `--vignetting` | vignetting correction: auto = master flat if flats are chosen, else the lensfun profile (default); master = master flat (flats from the same session: vignetting and dust); profile = a smooth surface fitted to the flats (flats from another time: vignetting only); compare = master flat and report how it differs from that surface; lensfun = the lens's lensfun profile; none = no correction |
+| `--lens` | lensfun lens for --vignetting lensfun/auto (default: matched from the files) |
 | `--flats-uneven-light` | the light on the flats was brighter on one side: take a straight slope across them out (off by default: an off-centre lens gives the same slope) |
+| `--darks` | use the project's dark frames (hot pixels, thermal signal, amp glow; the separate hot-pixel fix is then off), or not (default) |
+| `--bias` | use the project's bias frames for the offset (default), or the black level in each file |
 | `--profile-dir` | folder of saved own-flats profiles |
 | `--lensfun-db` | folder holding lensfun XML files (default: the installed database) |
 | `--quiet` | print only the result, not each step |
