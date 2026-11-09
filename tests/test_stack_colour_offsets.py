@@ -78,9 +78,13 @@ def test_blue_additive_light_is_taken_off_each_colour(tmp_path, monkeypatch):
     yy, xx = np.mgrid[0:truth.shape[1], 0:truth.shape[2]]
     r = np.hypot(xx - truth.shape[2] / 2, yy - truth.shape[1] / 2)
     far = (r > 110) & (r < 150)  # the faint outer corona, 3.7-5 solar radii
+    # Since Nov 2026 the stack's zero comes from the longest exposures (see test_stack_zero.py), so the
+    # longest frame's own extra light (0.024 x BLUE of its full scale, gain 4 against the reference)
+    # stays in the sky: expect the stack to differ from the truth by exactly that, per colour.
+    zero = 0.024 * BLUE / 4.0
     for c, name in enumerate("RGB"):
         level = float(np.median(truth[c][far]))
-        err = float(np.median(got[c][far] - truth[c][far]))
+        err = float(np.median(got[c][far] - truth[c][far])) - zero[c]
         # Each colour as without the extra light, to 5% of the faint corona there. The old shared
         # offset (fitted on the mean colour) left red low and blue high by about a third of it.
         assert abs(err) < 0.05 * level, (name, err, level)

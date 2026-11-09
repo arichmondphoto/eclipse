@@ -354,6 +354,18 @@ differences), is then fitted **per colour** with that gain, because that
 light has a colour of its own: the eclipse sky is blue (one offset for all
 three colours would over-correct red under a blue sky). The stack log's table lists the offsets per colour.
 
+The offsets are measured against the reference frame, so the stack's zero
+would be the reference frame's black level. A black level an ADU or two out
+(no bias frames, the level taken from the RAW file) is a sizeable part of the
+faint sky in a short reference exposure: on the 2024 stack every long frame
+carried the same offset against the reference (R 6.3, G 9.5, B 8.3 x 1e-5 of
+its full scale), the sky came out below zero by that much, black beyond the
+corona with **Keep the sky**. So the zero is taken from the longest
+exposures instead (the frames within 3 stops of the longest), where the same
+error divided by a gain of 100-500 does not matter. The log says by how much
+the reference was out ("zero of the stack from the N longest exposure(s):
+the reference frame's offset was ...").
+
 **Merging.** Each pixel is the inverse-variance weighted mean of the frames'
 radiance estimates. Weights fall to zero approaching saturation and inside
 each frame's own Moon (plus the margin above), so the moving Moon never

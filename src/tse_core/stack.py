@@ -322,6 +322,22 @@ def match_exposures(reduced: dict[int, tuple[np.ndarray, np.ndarray]], infos: di
             pixels[cur] = n
             prev = cur
             idx += direction
+    # The zero. The chain above measures each frame's offset against the reference frame, so the
+    # stack's zero is the reference frame's black level, and an error of an ADU or two there (no bias
+    # frames, a black level from the file) shifts the whole sky: Andy's 2024 stack came out below
+    # zero by ~1e-4. In the longest exposures the same error, divided by their large gain, is
+    # negligible: take the zero from them (the median of offset / gain over the frames within 3 stops
+    # of the longest, which carry the sky).
+    gmax = max(gains.values())
+    longest = [i for i in order if gains[i] >= gmax / 8.0 and i != ref]
+    if longest:
+        shift = np.median(np.array([offsets[i] / gains[i] for i in longest]), axis=0)
+        for i in order:
+            offsets[i] = offsets[i] - gains[i] * shift
+        say("zero of the stack from the {} longest exposure(s): the reference frame's offset was "
+            "{} (R, G, B, in units of its full scale; {} ADU at 14 bits)".format(
+                len(longest), ", ".join(f"{-v:+.2e}" for v in shift),
+                ", ".join(f"{-v * 16383:+.1f}" for v in shift)))
     out = {}
     for i in order:
         nom = infos[i].nominal_ratio
