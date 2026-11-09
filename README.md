@@ -706,7 +706,7 @@ corner and in the outer corona of the 2024 stack with the full-size result.
 
 </details>
 
-## Earthshine
+## Earthshine (Phase 5)
 
 ```bash
 totality earthshine eclipse2024.json       # after 'totality stack'
@@ -915,7 +915,7 @@ used only for that file.
 The final image needs `_earthshine_rgb.fit` and `_moon_surface.fit`; if they
 are missing it asks you to stack the earthshine again.
 
-## Prominences
+## Prominences (Phase 6)
 
 ```bash
 totality prominence-stack eclipse2024.json --brightness 0.3   # stack the short frames, save the settings
