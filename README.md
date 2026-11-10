@@ -11,8 +11,9 @@ The methods come from Druckmüller (2009, phase correlation alignment),
 Druckmüller, Rušin & Minarovjech (2006, Moon-aware HDR composition),
 Druckmüllerová, Morgan & Habbal (2011, the Fourier normalizing-radial-graded
 filter and the Sun's centre), Morgan, Habbal & Woo (2006, NRGF), Morgan &
-Druckmüller (2014, multi-scale Gaussian normalization) and H. Druckmüllerová's
-PhD thesis (2013, the adaptive circular high-pass filter).
+Druckmüller (2014, multi-scale Gaussian normalization), H. Druckmüllerová's
+PhD thesis (2013, the adaptive circular high-pass filter) and Auchère,
+Soubrié, Pelouze & Buchlin (2023, wavelet-optimized whitening, A&A 670, A66).
 
 Works on any total solar eclipse. Eclipse geometry comes from NASA's Besselian
 elements for any eclipse from 1600 to 2400.
