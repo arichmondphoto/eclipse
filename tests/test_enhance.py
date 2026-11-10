@@ -340,3 +340,25 @@ def test_parse_linear_blend_mode():
 
     assert W.parse_blend_modes("fnrgf_n=0.6:linear,adaptive=0.4:Linear (paper)") == {"fnrgf_n": "linear",
                                                                                      "adaptive": "linear"}
+
+
+def test_write_full_size_layers_writes_only_the_ticked_layers(tmp_path):
+    """Andy, Nov 2026 (list item 4): Write full-size layers wrote every layer the Blend used even
+    when unticked under Layers to write (only ACHF, at 0 % in his blend, stayed out). Only the ticked
+    layers, and the Blend itself, are written; the Blend still uses the unticked ones."""
+    img, g = _scene(size=(300, 400), sun=(200.0, 150.0), r_sun=30.0, noise=0.0005)
+    hdr = np.stack([img, img, img], axis=-1)
+    weight = np.ones(img.shape, np.float32)
+    header = {"SUNX": g.sun_x, "SUNY": g.sun_y, "SUNR": g.sun_r, "MOONX": g.moon_x, "MOONY": g.moon_y,
+              "MOONR": g.moon_r}
+    blend = {"natural": 1.0, "fnrgf_n": 0.5, "adaptive": 0.45, "nrgf": 0.2}
+    p = E.EnhanceParams(layers=("fnrgf_n",), blend=blend)
+    res, _ = E.enhance(hdr.copy(), weight, header, p, out_dir=tmp_path / "out", name="t")
+    written = {Path(f).name for f in (tmp_path / "out").iterdir() if Path(f).suffix == ".tif"}
+    assert written == {"t_fnrgf_n.tif", "t_blend.tif"}, written
+    assert set(res.layers) == {"fnrgf_n", "blend", "info"}
+    # the Blend is the same as when every layer it uses is also written
+    full, _ = E.enhance(hdr.copy(), weight, header, E.EnhanceParams(layers=E.DEFAULT_LAYERS, blend=blend),
+                        out_dir=tmp_path / "all", name="t")
+    from tse_core.imageout import read_image
+    assert np.abs(read_image(res.layers["blend"]) - read_image(full.layers["blend"])).max() == 0

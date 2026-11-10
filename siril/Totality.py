@@ -1431,7 +1431,9 @@ class EnhanceTab(StepTab):
         _tip(self.show_layer, "Which layer the preview shows. Blend is the mix set in the Blend box. Rest the mouse "
              "on a layer name in the list, or on its checkbox, for what it is.")
         for k, c in self.layer_checks.items():
-            _tip(c, layer_tips[k] + "\n\nTicked layers are written by 'Write full-size layers'. The preview "
+            _tip(c, layer_tips[k] + "\n\nTicked layers are written by 'Write full-size layers', with the Blend (always "
+                 "written). An unticked layer is not written, but the Blend still uses it if its strength there is "
+                 "above 0 %. The preview "
                  "shows every layer whatever is ticked, except Adaptive (ACHF): that one only when it is ticked, "
                  "blended or shown (it is slow).")
         blend_tip = ("How strongly this layer is applied over the natural layer. 0 % leaves it out (the default "

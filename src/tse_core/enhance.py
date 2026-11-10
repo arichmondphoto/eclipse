@@ -1747,7 +1747,16 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
 
+        # Only the layers asked for (Layers to write) and the Blend; the Blend's other layers are made
+        # but not written (Andy, Nov 2026: unticked layers were written when the Blend used them).
+        wanted = set(p.layers) | {"blend"}
+        skipped = sorted(needed_layers(p) - wanted)
+        if skipped:
+            say(f"made for the Blend but not written (not ticked): {', '.join(skipped)}")
+
         def emit(k, img):
+            if k not in wanted:
+                return
             paths[k] = str(write_image(with_format(out / f"{name}_{k}.tif", fmt), img))
             say(f"wrote {paths[k]}")
 

@@ -107,8 +107,8 @@ carefully against the PyQt6 API. Say so when handing it over.
      removed; **Moon's edge**: Corona as stacked / Corona blended into the Moon (`--moon-edge`).
   3. Done (10 Nov 2026): Earthshine **Preview** is a full-size box round the Moon (`final_moon_crop`,
      1.3 R each side), the very pixels Write final image writes.
-  4. Bug: Enhance **Write full-size layers** writes every layer except ACHF even when unticked
-     under **Layers to write**.
+  4. Done (10 Nov 2026): **Write full-size layers** writes only the ticked layers and the Blend (unticked
+     layers the Blend uses were written too).
   5. Every step that writes an image suggests a unique name with the chosen extension (.tif, .png,
      .jpg), e.g. `<project>_earthshine_stack.<ext>` for Stack earthshine and
      `<project>_earthshine_blend|natural|photoshop.<ext>` for Write final image by **Corona image**.
