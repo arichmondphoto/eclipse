@@ -280,6 +280,12 @@ assert pt._shown
 print("prominences:", pt.log.lines[-1].splitlines()[0])
 os.environ["STUB_SAVE"] = str(T / "out" / "with_proms.jpg")
 pt.write_final()
+# Settings panels open as wide as their rows (list item 6); with the stub's 470 px column: 470 + bar + frame.
+for tab in (win.align_tab, et, es, pt):
+    tab._fit_settings()
+    assert tab.split.sizes()[0] >= 470 and sum(tab.split.sizes()) == 1200, tab.split.sizes()
+win.frames_tab._fit_settings()
+assert win.frames_tab.settings_scroll.min_w == 420  # the stub tab is 640 px: capped at 60 %, never below 420
 # Each step suggests its own name (Andy's list item 5), in the format chosen last (TIFF so far).
 assert Path(QFileDialog.last_save[1]).name == f"{Path(path).stem}_earthshine_blend.tif", QFileDialog.last_save
 assert "*.tif" in QFileDialog.last_save[3]

@@ -71,9 +71,26 @@ class QObject(Dummy):
     pass
 
 
+class _Size:
+    def __init__(self, w, h):
+        self._w, self._h = w, h
+
+    def width(self):
+        return self._w
+
+    def height(self):
+        return self._h
+
+
 class QWidget(Dummy):
     def size(self):
         return Dummy()
+
+    def sizeHint(self):  # no layout here: a typical settings column
+        return _Size(470, 900)
+
+    def minimumSizeHint(self):
+        return _Size(400, 200)
 
     def width(self):
         return 640
@@ -159,6 +176,31 @@ class QSpinBox(_Spin):
 
 class QDoubleSpinBox(_Spin):
     pass
+
+
+class QScrollArea(QWidget):
+    def setWidget(self, w):
+        self._w = w
+
+    def frameWidth(self):
+        return 1
+
+    def verticalScrollBar(self):
+        return QWidget()
+
+    def setMinimumWidth(self, w):
+        self.min_w = w
+
+
+class QSplitter(QWidget):
+    def __init__(self, *a):
+        self._sizes = []
+
+    def setSizes(self, sizes):
+        self._sizes = list(sizes)
+
+    def sizes(self):
+        return list(self._sizes)
 
 
 class QComboBox(QWidget):

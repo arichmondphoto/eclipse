@@ -95,7 +95,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
 from tse_core import workflow as W  # noqa: E402
 from tse_core.brackets import detect_brackets  # noqa: E402
 from tse_core import imageout as IO  # noqa: E402
-from tse_core.viewzoom import ViewZoom  # noqa: E402
+from tse_core.viewzoom import ViewZoom, settings_panel_width  # noqa: E402
 from tse_core.enhance import (  # noqa: E402
     ACHF_SCALES, ACHF_WEIGHTS, LAYERS, MGN_SCALES, MGN_WEIGHTS, SUN_R_2024, EnhanceParams)
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
@@ -301,6 +301,8 @@ class FramesTab(QWidget):
         left_scroll.setWidget(left_w)
         left_scroll.setMinimumWidth(420)
         self.settings_scroll = left_scroll
+        self._settings_w = left_w
+        self._settings_fitted = False
         bl.addWidget(left_scroll, 0)
         self._settings_form = form
         self._event_form = ef
@@ -712,6 +714,17 @@ class FramesTab(QWidget):
             edit.setText(str(Path(files[0]).parent) if files else "")
         self.replan()
 
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().showEvent(event)
+        if not self._settings_fitted:  # once, after Qt has laid the tab out
+            self._settings_fitted = True
+            QTimer.singleShot(0, self._fit_settings)
+
+    def _fit_settings(self) -> None:
+        """The Event and Calibration column as wide as its rows need (no sideways scrolling)."""
+        w = _settings_width(self.settings_scroll, self._settings_w, self.width())
+        self.settings_scroll.setMinimumWidth(max(420, w))
+
 
 # ---------------------------------------------------------------------------
 # Running steps in the background
@@ -766,6 +779,8 @@ class StepTab(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.settings)
         scroll.setMinimumWidth(330)
+        self.settings_scroll = scroll
+        self._settings_fitted = False
         self.split.addWidget(scroll)
         self.split.addWidget(self.results)
         self.split.setSizes([360, 840])
@@ -793,6 +808,19 @@ class StepTab(QWidget):
         vsplit.setSizes([520, 180])
         outer.addWidget(vsplit)
         self.run_buttons: list[QPushButton] = []
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().showEvent(event)
+        if not self._settings_fitted:  # once, after Qt has laid the tab out
+            self._settings_fitted = True
+            QTimer.singleShot(0, self._fit_settings)
+
+    def _fit_settings(self) -> None:
+        """Open the settings panel as wide as its rows need, so it does not scroll sideways (the
+        divider can still be dragged)."""
+        total = sum(self.split.sizes()) or self.split.width()
+        w = _settings_width(self.settings_scroll, self.settings, total)
+        self.split.setSizes([w, max(1, total - w)])
 
     # Subclasses fill these in.
     def load_project(self, project: EventProject, path: Path) -> None:
@@ -2873,6 +2901,13 @@ def _ask_image_file(widget, main, proj, caption: str, default: Path, filters: st
     except Exception:  # noqa: BLE001 - remembering the format is a convenience only
         pass
     return f
+
+
+def _settings_width(scroll, content, total: int) -> int:
+    """The width a settings scroll area needs to show ``content`` without a horizontal scroll bar,
+    capped so the rest of a ``total`` px wide tab keeps room."""
+    want = max(content.sizeHint().width(), content.minimumSizeHint().width())
+    return settings_panel_width(want, scroll.verticalScrollBar().sizeHint().width(), scroll.frameWidth(), total)
 
 
 def _with_ext(fname: str, filt: str = "") -> Path:

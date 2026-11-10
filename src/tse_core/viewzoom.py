@@ -141,3 +141,14 @@ class ViewZoom:
                 setattr(self, attr, size / 2.0)
             else:
                 setattr(self, attr, min(max(getattr(self, attr), half), size - half))
+
+
+def settings_panel_width(content_w: int, scrollbar_w: int, frame_w: int, total_w: int,
+                         min_w: int = 330, max_frac: float = 0.6) -> int:
+    """Width to open a settings panel at: its content's own width (``content_w``, the widest row)
+    with room for the vertical scroll bar and the frame on both sides, so no horizontal scrolling is
+    needed; at least ``min_w`` and at most ``max_frac`` of ``total_w`` (the panel and the picture
+    together), so the picture keeps room on a small screen."""
+    need = int(content_w) + int(scrollbar_w) + 2 * int(frame_w) + 2
+    cap = int(max_frac * total_w) if total_w > 0 else need
+    return max(int(min_w), min(need, cap))

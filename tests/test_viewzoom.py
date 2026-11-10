@@ -88,3 +88,15 @@ def test_dragged_box_in_image_pixels_and_back():
     z.set_zoom(2.0, 400, 300)
     for ix, iy in ((10.0, 20.0), (900.5, 700.25)):
         assert all(abs(a - b) < 1e-9 for a, b in zip(z.to_image(*z.to_view(ix, iy)), (ix, iy)))
+
+
+def test_settings_panel_opens_wide_enough_for_its_content():
+    """Andy, Nov 2026 (list item 6): the settings panels opened at a fixed 360 px, narrower than
+    their rows, so they scrolled sideways. They open at their content's width plus the scroll bar."""
+    from tse_core.viewzoom import settings_panel_width
+
+    # a 470 px wide form, 15 px scroll bar, 1 px frame, in a 1250 px tab: all of it fits
+    w = settings_panel_width(470, 15, 1, 1250)
+    assert w >= 470 + 15 + 2 and w < 500
+    assert settings_panel_width(200, 15, 1, 1250) == 330          # never narrower than before
+    assert settings_panel_width(900, 15, 1, 1000) == 600          # the picture keeps 40 %
