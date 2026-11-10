@@ -1138,7 +1138,7 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
         moon_path = fout / f"{name}_moon_surface.fit"
         write_fits(moon_path, np.concatenate([np.moveaxis(surface, -1, 0), vis[None]], axis=0).astype(np.float32),
                    {**header, "COMMENT": "planes: surface R, G, B (display 0..1), visibility"})
-    crop_tif = write_image(with_format(out / f"{name}_earthshine_crop.tif", fmt), img)
+    crop_tif = write_image(with_format(out / f"{name}_earthshine_stack_crop.tif", fmt), img)
     # The layer on the HDR stack's canvas: black outside the disc, so it drops into the corona layers.
     cx0, cy0, cw, ch = canvas
     layer = np.zeros((ch, cw) + img.shape[2:], np.float32)
@@ -1149,7 +1149,7 @@ def _write(lum, detail, shown, good, weight, crop, canvas, centre, moon_r, p, ou
     ww = min(w - sx0, cw - tx0)
     if hh > 0 and ww > 0:
         layer[ty0 : ty0 + hh, tx0 : tx0 + ww] = img[sy0 : sy0 + hh, sx0 : sx0 + ww]
-    layer_tif = write_image(with_format(out / f"{name}_earthshine.tif", fmt), layer)
+    layer_tif = write_image(with_format(out / f"{name}_earthshine_stack.tif", fmt), layer)
     info = jout / f"{name}_earthshine.json"
     moon = [cx + X0 - canvas[0], cy + Y0 - canvas[1], moon_r]  # in the layer's (canvas) pixels
     info.write_text(json.dumps({"crop": crop, "canvas": canvas, "moon": moon, "params": asdict(p)}, indent=2),

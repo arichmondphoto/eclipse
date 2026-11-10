@@ -183,3 +183,19 @@ def test_earthshine_white_balance_without_written_enhance_layers(tmp_path):
     assert white is not None and np.allclose(white, expect, rtol=0.03), (white, expect)
     assert "HDR stack" in where
     assert white[0] > 1.3 and white[2] > 1.1  # the raw camera colour is green: red and blue are raised
+
+
+def test_each_written_image_gets_its_own_name(tmp_path):
+    """Andy, Nov 2026 (list item 5): Stack earthshine and Write Moon layer suggested look-alike names
+    (_earthshine.tif, _moon.tif) and every dialog suggested .tif whatever was chosen last. Each step
+    now has its own name, with the extension asked for."""
+    from tse_core import workflow as W
+
+    p = tmp_path / "Eclipse 2024.json"
+    assert W.output_name(p, "earthshine", ".png").name == "Eclipse 2024_earthshine_stack.png"
+    assert W.output_name(p, "blend", "jpg").name == "Eclipse 2024_earthshine_blend.jpg"
+    assert W.output_name(p, "natural", ".tif").name == "Eclipse 2024_earthshine_natural.tif"
+    assert W.output_name(p, "moon", ".png").name == "Eclipse 2024_earthshine_photoshop.png"
+    assert W.output_name(p, "moon", ".jpg").suffix == ".tif"  # no transparency in a JPG
+    names = {W.output_name(p, k, ".tif").name for k in ("earthshine", "blend", "natural", "moon")}
+    assert len(names) == 4 and W.output_name(p, "blend", ".tif").parent == tmp_path

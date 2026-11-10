@@ -281,8 +281,11 @@ class QMessageBox(Dummy):
 
 
 class QFileDialog(Dummy):
+    last_save = None  # (caption, suggested file, filters, initial filter) of the last save dialog
+
     @staticmethod
-    def getSaveFileName(*a, **k):
+    def getSaveFileName(parent=None, caption="", directory="", filters="", initial="", *a, **k):
+        QFileDialog.last_save = (caption, directory, filters, initial)
         return os.environ.get("STUB_SAVE", ""), ""
 
     @staticmethod

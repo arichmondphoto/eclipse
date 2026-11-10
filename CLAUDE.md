@@ -109,9 +109,9 @@ carefully against the PyQt6 API. Say so when handing it over.
      1.3 R each side), the very pixels Write final image writes.
   4. Done (10 Nov 2026): **Write full-size layers** writes only the ticked layers and the Blend (unticked
      layers the Blend uses were written too).
-  5. Every step that writes an image suggests a unique name with the chosen extension (.tif, .png,
-     .jpg), e.g. `<project>_earthshine_stack.<ext>` for Stack earthshine and
-     `<project>_earthshine_blend|natural|photoshop.<ext>` for Write final image by **Corona image**.
+  5. Done (10 Nov 2026): save dialogs suggest `workflow.output_name` names (`_earthshine_stack`,
+     `_earthshine_blend|natural`, `_earthshine_photoshop` for the Moon layer) in the format chosen last
+     (project `image_ext`).
   6. Right-side settings panels: default width so no horizontal scrolling is needed.
   7. WOW (plain and edge-aware) in Enhance: see `docs/FUTURE.md`.
   8. Decide whether to keep refining the Prominences tab or remove it; give Andy a recommendation.

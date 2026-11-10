@@ -1896,16 +1896,16 @@ class EnhanceTab(StepTab):
         proj = self.main.ensure_saved()
         if proj is None:
             return None
+        ext = _image_ext(self.main)
         last = self.outputs.get("blend") or next(iter(self.outputs.values()), "")
         if last:
-            default = Path(last).with_name(Path(last).name.rsplit("_", 1)[0] + ".tif")
+            default = Path(last).with_name(Path(last).name.rsplit("_", 1)[0] + ext)
         else:
-            default = Path(proj).with_suffix(".tif")
-        fname, filt = QFileDialog.getSaveFileName(
-            self, "Save layers as (each layer is saved as <name>_<layer>)", str(default), IO.FILTER)
-        if not fname:
+            default = Path(proj).with_suffix(ext)
+        f = _ask_image_file(self, self.main, proj, "Save layers as (each layer is saved as <name>_<layer>)",
+                            default)
+        if f is None:
             return None
-        f = _with_ext(fname, filt)
         stem = f.stem
         for k in list(LAYER_NAMES):
             if stem.endswith("_" + k):
@@ -2004,7 +2004,7 @@ class EarthshineTab(StepTab):
         fl.addRow("Keep glare (glow):", self.keep_glare)
         self.limb_soften = spin(0.0, 6.0, 0.5, 0.0, " px")
         fl.addRow("Soften the limb:", self.limb_soften)
-        note = QLabel("Only for the earthshine layer file (…_earthshine.tif), the old way of pasting the Moon "
+        note = QLabel("Only for the earthshine stack file (…_earthshine_stack.tif), the old way of pasting the Moon "
                       "in Photoshop. The final image and Write Moon layer above do not use these settings.")
         note.setWordWrap(True)  # wrap to the panel's width instead of running off to the side
         note.setTextFormat(Qt.TextFormat.PlainText)
@@ -2218,11 +2218,11 @@ class EarthshineTab(StepTab):
         proj = self.main.ensure_saved()
         if proj is None:
             return
-        default = self.final_path or str(Path(proj).with_name(Path(proj).stem + "_final.tif"))
-        fname, filt = QFileDialog.getSaveFileName(self, "Save final image as", default, IO.FILTER)
-        if not fname:
+        folder = Path(self.final_path).parent if self.final_path else None
+        f = _ask_image_file(self, self.main, proj, "Save final image as", _suggested(proj, base, self.main, folder))
+        if f is None:
             return
-        fname = str(_with_ext(fname, filt))
+        fname = str(f)
         fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname,
                                                       join=self.join.currentData())
         self.start("Writing the final image", fn, self._final_done)
@@ -2234,12 +2234,11 @@ class EarthshineTab(StepTab):
         proj = self.main.ensure_saved()
         if proj is None:
             return
-        default = str(Path(proj).with_name(Path(proj).stem + "_moon.tif"))
-        fname, filt = QFileDialog.getSaveFileName(self, "Save Moon layer as", default,
-                                                  "TIFF, 16-bit (*.tif *.tiff);;PNG, 16-bit (*.png)")
-        if not fname:
+        folder = Path(self.final_path).parent if self.final_path else None
+        f = _ask_image_file(self, self.main, proj, "Save Moon layer as", _suggested(proj, "moon", self.main, folder),
+                            "TIFF, 16-bit (*.tif);;PNG, 16-bit (*.png)")
+        if f is None:
             return
-        f = _with_ext(fname, filt)
         if f.suffix.lower() not in (".tif", ".tiff", ".png"):  # JPG has no transparency
             f = f.with_suffix(".tif")
         fname = str(f)
@@ -2308,12 +2307,16 @@ class EarthshineTab(StepTab):
         proj = self.main.ensure_saved()
         if proj is None:
             return
-        default = self.layer_path or str(Path(proj).with_name(Path(proj).stem + "_earthshine.tif"))
-        fname, filt = QFileDialog.getSaveFileName(self, "Save earthshine layer as", default, IO.FILTER)
-        if not fname:
+        folder = Path(self.layer_path).parent if self.layer_path else None
+        f = _ask_image_file(self, self.main, proj, "Save earthshine stack as",
+                            _suggested(proj, "earthshine", self.main, folder))
+        if f is None:
             return
-        f = _with_ext(fname, filt)
-        name = f.stem[: -len("_earthshine")] if f.stem.endswith("_earthshine") else f.stem
+        name = f.stem
+        for tail in ("_earthshine_stack", "_earthshine"):  # the step adds its own ending
+            if name.endswith(tail):
+                name = name[: -len(tail)]
+                break
         out_dir, fmt = str(f.parent), f.suffix.lstrip(".")
         self.start("Stacking earthshine",
                    lambda p, say, cancel: W.earthshine(p, params, include_rejected=inc, output=out_dir, name=name,
@@ -2838,6 +2841,38 @@ class MainWindow(QMainWindow):
             self.link.siril.cmd("load", f'"{path}"')
         except Exception as exc:
             QMessageBox.warning(self, "Totality", f"Siril could not open the file:\n{exc}")
+
+
+def _image_ext(main) -> str:
+    """The picture format last chosen in a save dialog (kept in the project), .tif at first."""
+    ext = str(getattr(main.frames_tab.project, "parameters", {}).get("image_ext", ".tif")).lower()
+    return ext if ext in (".tif", ".png", ".jpg") else ".tif"
+
+
+def _suggested(proj, kind: str, main, folder=None) -> Path:
+    """The name a save dialog suggests for ``kind`` (see workflow.output_name), in the format last
+    chosen, in ``folder`` (where this step last wrote) or next to the project."""
+    f = W.output_name(proj, kind, _image_ext(main))
+    return Path(folder) / f.name if folder else f
+
+
+def _ask_image_file(widget, main, proj, caption: str, default: Path, filters: str = IO.FILTER):
+    """A save dialog for a picture, opened on the file type of ``default``; returns the file with
+    its extension (or None), and remembers the format chosen for the next dialog."""
+    initial = next((f for f in filters.split(";;") if f"*{default.suffix.lower()}" in f), "")
+    fname, filt = QFileDialog.getSaveFileName(widget, caption, str(default), filters, initial)
+    if not fname:
+        return None
+    f = _with_ext(fname, filt)
+    ext = ".jpg" if f.suffix.lower() == ".jpeg" else ".tif" if f.suffix.lower() == ".tiff" else f.suffix.lower()
+    try:
+        main.frames_tab.project.parameters["image_ext"] = ext
+        disk = EventProject.load(proj)  # also on disk: the step reloads the project when it ends
+        disk.parameters["image_ext"] = ext
+        disk.save(proj)
+    except Exception:  # noqa: BLE001 - remembering the format is a convenience only
+        pass
+    return f
 
 
 def _with_ext(fname: str, filt: str = "") -> Path:

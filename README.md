@@ -900,24 +900,28 @@ measured over the whole stack, as for the written image, so it takes longer
 than a reduced preview (7.5 s on a 3000 px crop of the 2024 stack, against
 3.5 s for the reduced one).
 
-The earthshine layer file (`<name>_earthshine.tif`, for Photoshop) is drawn
+The earthshine stack file (`<name>_earthshine_stack.tif`, for Photoshop) is drawn
 on its own: the seas and highlands stretched by themselves, with **Keep
 glare (glow)** (`--keep-glare`, default 0.1) of the removed glare kept as a
 glow inside the limb and **Soften the limb** (`--limb-soften`, default 0).
 These two settings, under **Photoshop paste only (old way)**, are
 used only for that file.
 
+Each save dialog suggests its own name, after the project's name, in the format
+(TIFF, PNG or JPG) you chose last, so no two outputs look alike: the table
+below shows them as TIFF.
+
 | File | Contents |
 | --- | --- |
-| `<name>_final.tif` | the finished picture (or `-o`) |
-| `<name>_earthshine.tif` | layer the size of the HDR stack: the lunar surface inside the disc, black outside, for Screen or Lighten in Photoshop |
-| `<name>_earthshine_crop.tif` | the same, cropped to the Moon |
+| `<name>_earthshine_blend.tif`, `<name>_earthshine_natural.tif` | **Write final image**: the finished picture, by **Corona image** (or `-o`) |
+| `<name>_earthshine_stack.tif` | **Stack earthshine**: layer the size of the HDR stack: the lunar surface inside the disc, black outside, for Screen or Lighten in Photoshop |
+| `<name>_earthshine_stack_crop.tif` | the same, cropped to the Moon |
 | `<name>_earthshine.fit` | the Moon-aligned linear stack before glare removal |
 | `<name>_earthshine_rgb.fit` | the same, per colour channel (used by the final image) |
 | `<name>_earthshine_weight.fit` | how much went into each pixel of that stack |
 | `<name>_moon_surface.fit` | the seas and highlands, glare removed, as added to the final image |
 | `<name>_earthshine.json` | where the crop sits, the Moon's centre and radius, and the settings used |
-| `<name>_moon.tif` | **Write Moon layer**: the Moon as Blend draws it, transparent elsewhere, for Photoshop (Normal mode over the blend) |
+| `<name>_earthshine_photoshop.tif` | **Write Moon layer**: the Moon as Blend draws it, transparent elsewhere, for Photoshop (Normal mode over the blend) |
 
 The final image needs `_earthshine_rgb.fit` and `_moon_surface.fit`; if they
 are missing it asks you to stack the earthshine again.
@@ -1362,7 +1366,7 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | `--glare-order` | smoothness of the glare removed from the disc, 0-6 in half steps: higher follows uneven glare better but flattens the maria more (default 3.5; 2 = a gentle gradient, 0 = one even level; a half step averages the two neighbouring polynomial orders) |
 | `--smooth` | smoothing of the layer in pixels (default 0 = none) |
 | `--brightness` | brightest lunar surface in the layer, 0-1 (default 1) |
-| `--keep-glare` | earthshine layer file for Photoshop (<name>_earthshine.tif): how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1) |
+| `--keep-glare` | earthshine layer file for Photoshop (<name>_earthshine_stack.tif): how much of the removed glare to keep as a glow inside the limb, 0-1 (default 0.1) |
 | `--limb-soften` | earthshine layer file for Photoshop: extra softening of the limb in px, on top of the real one (default 0 = none) |
 | `--no-colour` | make the earthshine layer grey (default: natural colour, so a prominence at the limb stays red on the Moon side too) |
 | `--limb-colour` | colour of the glare just inside the limb: recorded (red from the chromosphere, as the camera saw it), no-red (the colour of the Moon's middle), neutral (no red, and the whole Moon in the corona's white instead of earthshine's own slightly blue colour) (default recorded) |
@@ -1388,9 +1392,9 @@ the finished image: Moon and corona stretched together from the stacks.
 | `--base` | enhanced layer to use as the corona (default: blend, the last one written) |
 | `--strength` | brightness of the lunar surface, 1 = as made by the earthshine step (default 1) |
 | `--moon-edge` | where the Moon meets the corona: as-stacked (the corona exactly as in the Blend without the Moon, the Moon only in the dark disc, black where no frame recorded anything; default) or blended (the older way: the first few px outside the limb recomputed from both stacks) |
-| `--moon-layer` | write only the Moon as --base draws it (with --strength), transparent elsewhere, for Photoshop: above that layer in Normal mode at 100 % it gives the final image (default <name>_moon.tif; TIFF or PNG) |
+| `--moon-layer` | write only the Moon as --base draws it (with --strength), transparent elsewhere, for Photoshop: above that layer in Normal mode at 100 % it gives the final image (default <name>_earthshine_photoshop.tif; TIFF or PNG) |
 | `--name` | output file name prefix (default: the project name) |
-| `--output`, `-o` | output file (.tif, .png or .jpg); default <name>_final.tif |
+| `--output`, `-o` | output file (.tif, .png or .jpg); default <name>_earthshine_blend.tif or _natural.tif by --base |
 | `--quiet` | print only the result, not each step |
 
 ### `totality prominence-stack`

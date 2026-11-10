@@ -172,6 +172,7 @@ def test_workflow_and_cli(tmp_path, monkeypatch, run, capsys):
     assert "Lunar surface detail" in out
     saved = EventProject.load(tmp_path / "e.json").parameters["earthshine"]
     assert Path(saved["earthshine"]).exists() and sorted(saved["frames"]) == [0, 1, 2, 3]
+    assert Path(saved["earthshine"]).name.endswith("_earthshine_stack.tif")  # its own name (list item 5)
     # Andy, Nov 2026: data files in their own folders inside the project folder, pictures beside it;
     # the align and stack files at the top (an existing project's layout) are still found.
     for k in ("linear", "rgb", "weight", "moon_surface"):
@@ -1326,3 +1327,14 @@ def test_corona_first_uses_earthshine_pixels_from_few_frames(tmp_path):
     merge_moon(H, W, head, es, ew, (40, 30), (float(eh["MOONX"]), float(eh["MOONY"])), say=msgs.append)
     assert (W[few] > 0).all(), msgs                                # used, not left black
     assert np.allclose(H[few], [0.30, 0.10, 0.12], atol=1e-4)      # the earthshine stack's own values
+
+
+def test_final_image_and_moon_layer_default_names(tmp_path):
+    """List item 5: without a file named, Write final image is <name>_earthshine_<blend|natural>
+    and the Moon layer <name>_earthshine_photoshop, not _final/_moon."""
+    from tse_core import workflow as W
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    stem = Path(proj).stem
+    assert Path(W.final_with_moon(proj, "natural", 1.0)).name == f"{stem}_earthshine_natural.tif"
+    assert Path(W.moon_layer(proj, "blend", 1.0)).name == f"{stem}_earthshine_photoshop.tif"

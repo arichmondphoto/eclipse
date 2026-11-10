@@ -921,6 +921,25 @@ def enhance_params_from_project(path, project):
     return EnhanceParams(**kw)
 
 
+# The name each written picture is given, after the project's name: one per step and choice, so no
+# two outputs look alike (Andy, Nov 2026)
+OUTPUT_SUFFIX = {"earthshine": "_earthshine_stack", "blend": "_earthshine_blend",
+                 "natural": "_earthshine_natural", "moon": "_earthshine_photoshop"}
+
+
+def output_name(project_path, kind: str, ext: str = ".tif", name: Optional[str] = None) -> Path:
+    """The suggested file for ``kind`` (earthshine: Stack earthshine; blend or natural: Write final
+    image; moon: Write Moon layer), next to the project, with extension ``ext`` (.tif, .png or .jpg;
+    the Moon layer needs transparency, so TIFF for a JPG)."""
+    path = Path(project_path)
+    ext = "." + str(ext or ".tif").lstrip(".").lower()
+    if ext == ".jpeg":
+        ext = ".jpg"
+    if ext not in (".tif", ".png", ".jpg") or (kind == "moon" and ext == ".jpg"):
+        ext = ".tif"
+    return path.parent / f"{name or path.stem}{OUTPUT_SUFFIX[kind]}{ext}"
+
+
 def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1.0,
                     preview_side: Optional[int] = None, name: Optional[str] = None, say: Optional[Say] = None,
                     cancel=None, output_file: Optional[str] = None, enhance_params=None, moon_only: bool = False,
@@ -942,7 +961,7 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     times their brightness. ``base_layer``: blend or natural.
     With ``preview_side`` returns a reduced image (no file); with ``box`` = (y0, y1, x0, x1) returns
     that part at full size, exactly as the written image has it (no file); otherwise writes
-    ``output_file`` (default ``<name>_final.tif``) and returns its path. ``prominences``: use the
+    ``output_file`` (default ``<name>_earthshine_<base_layer>.tif``) and returns its path. ``prominences``: use the
     prominence stack (None: as the project says), with ``prominence_params`` (None: the project's).
     """
     from dataclasses import replace
@@ -1034,7 +1053,7 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     if preview_side:
         return out
     say("writing the final image")
-    final = Path(output_file) if output_file else path.parent / f"{name or path.stem}_final.tif"
+    final = Path(output_file) if output_file else output_name(path, base_layer, ".tif", name)
     final = write_image(final, out)
     project.parameters["final"] = {"file": str(final), "base": base_layer, "strength": strength,
                                    "mode": "moon in the stack", "join": join}
@@ -1089,7 +1108,7 @@ def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, n
     than half an 8-bit level: the band just outside the limb, where the final image blends the Moon's
     stack into the corona. Laid over that layer at 100 % in Normal mode it gives the final image (a
     far-off difference under half a level, from the Moon changing the stack's statistics, is left).
-    Writes ``output_file`` (TIFF or PNG with transparency; default ``<name>_moon.tif``)."""
+    Writes ``output_file`` (TIFF or PNG with transparency; default ``<name>_earthshine_photoshop.tif``)."""
     say = reporter(say, cancel)
     path = Path(project_path).resolve()
     img, mask = final_with_moon(path, base_layer, strength, say=say, enhance_params=enhance_params, moon_only=True)
@@ -1121,7 +1140,7 @@ def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, n
     say(f"Moon layer edge: soft over {width:.1f} px outside")
     say("writing the Moon layer")
     rgba = np.concatenate([img * (alpha > 0)[..., None], alpha[..., None]], axis=2)
-    out = Path(output_file) if output_file else path.parent / f"{name or path.stem}_moon.tif"
+    out = Path(output_file) if output_file else output_name(path, "moon", ".tif", name)
     out = write_image(out, rgba)
     project.parameters["moon_layer"] = {"file": str(out), "base": base_layer, "strength": strength}
     project.save(path)
@@ -1129,17 +1148,6 @@ def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, n
         f"strength {strength:g}; over the {base_layer} layer at 100 % in Normal mode it gives the final "
         "image)")
     return str(out)
-
-
-def _write_final(path, project, out, preview_side, output_file, name, say, record: dict):
-    if preview_side:
-        return out
-    say("writing the final image")
-    final = Path(output_file) if output_file else path.parent / f"{name or path.stem}_final.tif"
-    final = write_image(final, out)
-    project.parameters["final"] = {"file": str(final), **record}
-    project.save(path)
-    return str(final)
 
 
 # ---------------------------------------------------------------------------

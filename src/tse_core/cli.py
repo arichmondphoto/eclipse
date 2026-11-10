@@ -275,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--brightness", type=float, default=1.0,
                    help="brightest lunar surface in the layer, 0-1 (default 1)")
     p.add_argument("--keep-glare", type=float, default=0.1,
-                   help="earthshine layer file for Photoshop (<name>_earthshine.tif): how much of the removed glare "
+                   help="earthshine layer file for Photoshop (<name>_earthshine_stack.tif): how much of the removed glare "
                         "to keep as a glow inside the limb, 0-1 (default 0.1)")
     p.add_argument("--limb-soften", type=float, default=0.0,
                    help="earthshine layer file for Photoshop: extra softening of the limb in px, on top of the real "
@@ -318,9 +318,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--moon-layer", action="store_true",
                    help="write only the Moon as --base draws it (with --strength), transparent elsewhere, for "
                         "Photoshop: above that layer in Normal mode at 100 %% it gives the final image (default "
-                        "<name>_moon.tif; TIFF or PNG)")
+                        "<name>_earthshine_photoshop.tif; TIFF or PNG)")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
-    p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <name>_final.tif")
+    p.add_argument("--output", "-o", help="output file (.tif, .png or .jpg); default <name>_earthshine_blend.tif or _natural.tif by --base")
     p.add_argument("--quiet", action="store_true", help="print only the result, not each step")
 
     p = sub.add_parser("prominence-stack",

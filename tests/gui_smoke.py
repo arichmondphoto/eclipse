@@ -6,7 +6,7 @@ import Totality as G
 # The window title: name, version and the commit, so the user can see which code is running.
 import re as _re
 assert _re.fullmatch(r"Totality - A Solar Eclipse Toolkit \d+\.\d+\.\d+( \([0-9a-f]{7}\))?", G.window_title()), G.window_title()
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QFileDialog, QMessageBox
 from tse_core.fits import write_fits
 from tse_core.project import EventProject
 from tse_core.inventory import Inventory
@@ -280,6 +280,9 @@ assert pt._shown
 print("prominences:", pt.log.lines[-1].splitlines()[0])
 os.environ["STUB_SAVE"] = str(T / "out" / "with_proms.jpg")
 pt.write_final()
+# Each step suggests its own name (Andy's list item 5), in the format chosen last (TIFF so far).
+assert Path(QFileDialog.last_save[1]).name == f"{Path(path).stem}_earthshine_blend.tif", QFileDialog.last_save
+assert "*.tif" in QFileDialog.last_save[3]
 # No RAW files here, so no earthshine stack: writing hands over to the Earthshine tab, which asks for it
 # (the merge itself is tested in tests/test_earthshine.py).
 assert QMessageBox.log[-1][0] == "warn" and "Stack the earthshine" in QMessageBox.log[-1][1]
@@ -288,6 +291,17 @@ assert EventProject.load(path).parameters["prominences"]["params"]["brightness"]
 os.environ["STUB_SAVE"] = str(T / "out" / "pngs.png")
 et.run()
 assert et.outputs["blend"].endswith("pngs_blend.png")
+assert QFileDialog.last_save[1].endswith(".jpg") and "*.jpg" in QFileDialog.last_save[3]  # JPG chosen last
+assert EventProject.load(path).parameters["image_ext"] == ".png"
+os.environ["STUB_SAVE"] = ""  # cancelled: only the suggestions are checked
+es.write_moon_layer()
+assert Path(QFileDialog.last_save[1]).name == f"{Path(path).stem}_earthshine_photoshop.png"
+es.base.setCurrentIndex(es.base.findData("natural"))
+es.write_final()
+assert Path(QFileDialog.last_save[1]).name == f"{Path(path).stem}_earthshine_natural.png"
+es.base.setCurrentIndex(es.base.findData("blend"))
+es.run()
+assert Path(QFileDialog.last_save[1]).name == f"{Path(path).stem}_earthshine_stack.png"
 # Opening a project folder with Browse... on the Frames tab: every tab shows that project (the Align
 # tab's site came up blank because only the Frames tab was told; seen by Andy, Nov 2026).
 root = T / "Folder project"
