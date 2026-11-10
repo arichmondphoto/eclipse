@@ -7,7 +7,7 @@ user documentation and describes every method in detail; this file covers how to
 
 Processing for DSLR photographs of total solar eclipses, RAW files to finished pictures:
 alignment on the corona, Moon-aware linear HDR stacking, coronal enhancement (natural, NRGF,
-FNRGF, FNRGF-N, adaptive layers), an earthshine Moon, and prominences. It runs as a PyQt6 script
+FNRGF, FNRGF-N, adaptive and WOW layers) and an earthshine Moon. It runs as a PyQt6 script
 inside Siril 1.4+ (`siril/Totality.py`) and from the command line as `totality`
 (`src/tse_core/cli.py`). Both drive the same functions in `src/tse_core/workflow.py`, and every
 step saves its results into one project file (`<event>/<event>.json`).
@@ -32,12 +32,11 @@ step saves its results into one project file (`<event>/<event>.json`).
 
 | Path | What |
 | --- | --- |
-| `src/tse_core/workflow.py` | Steps as used by the GUI and CLI: `align`, `stack`, `enhance_project`, `earthshine`, `final_with_moon`, `final_moon_crop`, `moon_layer`, `prominence_stack`, `prominence_layer`, `final_with_prominences` |
+| `src/tse_core/workflow.py` | Steps as used by the GUI and CLI: `align`, `stack`, `enhance_project`, `earthshine`, `final_with_moon`, `final_moon_crop`, `moon_layer` |
 | `src/tse_core/align.py`, `geometry.py`, `eclipse.py` | Phase correlation alignment, field rotation, the Sun's centre, Besselian elements |
 | `src/tse_core/stack.py` | Moon-aware HDR stacking with measured brightness matching |
 | `src/tse_core/enhance.py` | Stretch and filter layers; `MoonInput` lets the Moon be drawn with the same curve |
 | `src/tse_core/earthshine.py` | Moon-aligned stack, glare removal (limb terms, prominence fan), lunar surface, `merge_moon` (Moon into the HDR stack) |
-| `src/tse_core/prominences.py` | Prominences: blur measured on the Moon's edge, their own light against the corona behind them, `sharpen_prominences` (the HDR stack's prominences deconvolved by the extra blur measured against the short frames); the older layer found by colour |
 | `src/tse_core/viewzoom.py` | Zoom and pan arithmetic for the GUI's picture views (no Qt) |
 | `siril/Totality.py` | The Siril window, one tab per step |
 | `tools/cli_reference.py` | Generates README's command-line reference from the parser |
@@ -117,11 +116,12 @@ carefully against the PyQt6 API. Say so when handing it over.
   7. Done (10 Nov 2026): **WOW** layer (Auchère et al. 2023; `enhance.wow`), plain/edge-aware, n_s 5,2,1.
      Departures, all in README: noise per scale measured on the stack (not white), no c_S (units), the
      Moon's disc filled by odd reflection through the limb (`wow_disc_fill`; no white band).
-  8. Decide whether to keep refining the Prominences tab or remove it; give Andy a recommendation.
+  8. Done (10 Nov 2026): the Prominences tab removed on Andy's go-ahead (tab, `prominences.py`, the
+     prominence commands, the hook in Write final image). Red-weight brightness: `docs/FUTURE.md`.
   9. Investigate GPU and multi-core speed-ups for registration, stacking, enhancement (ACHF most)
      and previews, aiming at real-time work at high resolution.
 - `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
-  FITS and SER frames, gain, mono; prominences from the frames left out near the contacts). Not to be
+  FITS and SER frames, gain, mono; prominence brightness by red weight while stacking). Not to be
   started unless the user asks; read it when they do.
 
 ## Commits

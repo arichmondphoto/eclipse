@@ -17,8 +17,6 @@ Four tabs, one per step, each saving into the event's project file:
    reduced-size preview, then the full-size 16-bit TIFF layers.
 5. Earthshine: the lunar surface from a Moon-aligned stack of the long
    exposures, as a layer that fits the corona layers' black disc.
-6. Prominences: the HDR stack's prominences sharpened by as much as the short exposures show they are soft
-   and put on top of the final image.
 
 Picture outputs can be 16-bit TIFF, 16-bit PNG or 8-bit JPG, all 300 dpi.
 
@@ -2129,13 +2127,6 @@ class EarthshineTab(StepTab):
         _tip(self.strength, "Brightness of the seas and highlands added inside the Moon: 1 (default) = as made by "
              "the earthshine step (its Brightness setting), 0 = none, above 1 brightens a faint Moon (and its "
              "noise).", ff)
-        self.use_prom = QCheckBox("Use the prominence stack")
-        self.use_prom.setEnabled(False)
-        self.use_prom.toggled.connect(self._use_prom_toggled)
-        _tip(self.use_prom, "On: the final image (and the Moon layer) gets the sharper prominences from "
-             "the short exposures, with the settings on the Prominences tab. Off: the HDR stack's own, softer "
-             "prominences. Needs Stack prominences on the Prominences tab first.")
-        ff.addRow(self.use_prom)
         fb = QHBoxLayout()
         self.final_preview_btn = QPushButton("Preview")
         self.final_preview_btn.clicked.connect(self.preview_final)
@@ -2347,24 +2338,12 @@ class EarthshineTab(StepTab):
         if fin.get("strength") is not None:
             self.strength.setValue(float(fin["strength"]))
         self._final_shown = False
-        ps = project.parameters.get("prominence_stack", {})
-        self.use_prom.blockSignals(True)
-        self.use_prom.setEnabled(bool(ps.get("hdr")))
-        self.use_prom.setChecked(bool(ps.get("hdr")) and bool(ps.get("use", True)))
-        self.use_prom.blockSignals(False)
         e = project.parameters.get("earthshine", {})
         self.layer_path = W.resolve(path, e.get("earthshine"))
         self.open_btn.setEnabled(bool(self.layer_path))
         crop = W.resolve(path, e.get("crop"))
         if crop:
             self.view.show_file(crop)
-
-    def _use_prom_toggled(self, on: bool) -> None:
-        """Kept in the window's project, so every later step (and the saved project) has it."""
-        ps = self.main.frames_tab.project.parameters.get("prominence_stack")
-        if ps is not None:
-            ps["use"] = bool(on)
-        self._final_changed()
 
     def run(self) -> None:
         from tse_core.earthshine import EarthshineParams
@@ -2417,210 +2396,6 @@ class EarthshineTab(StepTab):
 # ---------------------------------------------------------------------------
 # Prominences
 # ---------------------------------------------------------------------------
-
-
-class ProminencesTab(StepTab):
-    """Stack the short exposures round the Sun, and sharpen the HDR stack's prominences by what they show."""
-
-    def __init__(self, window: "MainWindow") -> None:
-        super().__init__(window)
-        self._shown = False
-        self.timer = QTimer(self)
-        self.timer.setSingleShot(True)
-        self.timer.setInterval(600)
-        self.timer.timeout.connect(self.preview)
-
-        sbox = QGroupBox("1  Prominence stack (the short exposures)")
-        sf = QFormLayout(sbox)
-        self.stops = QDoubleSpinBox()
-        self.stops.setRange(0.0, 6.0)
-        self.stops.setSingleStep(0.5)
-        self.stops.setValue(2.0)
-        self.stops.setSuffix(" stops")
-        sf.addRow("Longest exposure:", self.stops)
-        self.stack_btn = QPushButton("Stack prominences")
-        self.stack_btn.clicked.connect(self.stack)
-        sf.addRow(self.stack_btn)
-        self.stack_label = QLabel("Not stacked yet.")
-        self.stack_label.setWordWrap(True)
-        sf.addRow(self.stack_label)
-        self.settings_layout.addWidget(sbox)
-
-        box = QGroupBox("2  In the final image")
-        f = QFormLayout(box)
-        self.sharpen = self._dspin(0.0, 1.0, 0.5, 0.1, "")
-        f.addRow("Sharpening:", self.sharpen)
-        self.structure = self._dspin(0.0, 1.0, 0.0, 0.1, "")
-        f.addRow("Structure:", self.structure)
-        self.brightness = self._dspin(0.05, 3.0, 1.0, 0.05, "")
-        f.addRow("Prominence brightness:", self.brightness)
-        self.min_redness = self._dspin(1.02, 2.0, 1.1, 0.02, "")
-        f.addRow("Redness needed:", self.min_redness)
-        self.chromo = QCheckBox("Include the chromosphere (thin pink rim)")
-        self.chromo.setChecked(True)
-        self.chromo.toggled.connect(self.changed)
-        f.addRow(self.chromo)
-        self.chromo.toggled.connect(self._chromo_enabled)
-        self.chromo_h = self._dspin(2.0, 40.0, 12.0, 1.0, " arcsec")
-        f.addRow("Rim height:", self.chromo_h)
-        self.cover_label = QLabel("")
-        self.cover_label.setWordWrap(True)
-        f.addRow(self.cover_label)
-        self._cover_hides = False
-        row = QHBoxLayout()
-        self.preview_btn = QPushButton("Preview")
-        self.preview_btn.clicked.connect(self.preview)
-        self.final_btn = QPushButton("Write final image")
-        self.final_btn.clicked.connect(self.write_final)
-        row.addWidget(self.preview_btn)
-        row.addWidget(self.final_btn)
-        f.addRow(row)
-        self.settings_layout.addWidget(box)
-        self.settings_layout.addStretch(1)
-        self.run_buttons += [self.stack_btn, self.preview_btn, self.final_btn]
-        self.view = ImageView()
-        self.results_layout.addWidget(self.view, 1)
-
-        _tip(sbox, "The prominences are sharpest in the shortest exposures: in the HDR stack they come mostly from "
-             "the longest frames not saturated there, where they are soft. Stack prominences stacks the short "
-             "frames round the Sun, with the HDR stack's own brightness matching, and measures how blurred they are "
-             "on the Moon's sharp edge. They are then used to measure how much softer the HDR stack's prominences "
-             "are, which Write final image undoes. Needs the HDR stack (Stack tab).")
-        _tip(self.stops, "Which frames go in: from the shortest aligned exposure up to this many stops longer. "
-             "2 (default) keeps the sharpest; 3-4 adds frames for less noise, a little softer. 0: the shortest "
-             "exposure alone.", sf)
-        _tip(self.stack_btn, "Stacks the short frames round the Sun (a few minutes) and saves the result with the "
-             "project. Write final image then uses it.")
-        _tip(box, "Write final image (here or on the Earthshine tab, where 'Use the prominence stack' turns it on "
-             "or off) sharpens the HDR stack's own prominences before the stretch, by as much as the short frames "
-             "show they are soft (measured for each prominence). The corona round them and the Moon are left as "
-             "they are.")
-        _tip(self.sharpen, "0.5 (default): the prominences as sharp as in the short frames. 1: sharper still (also "
-             "undoes the lens and air blur measured on the Moon's edge), a little noisier in faint ones. 0: as in "
-             "the HDR stack.", f)
-        _tip(self.structure, "Brings out fine strands and loops inside the prominences. 0 (default) off; 0.3 with "
-             "Sharpening 0.5 works well; more for stronger texture.", f)
-        _tip(self.brightness, "How bright the prominences are against the corona. They are far brighter than the "
-             "corona, so at 1 (as measured) their insides turn flat pink: about 0.5 shows their structure. Much "
-             "lower turns them pale. Changes only the prominences.", f)
-        _tip(self.min_redness, "How much redder than the corona light must be to count as a prominence. 1.1 "
-             "(default) catches faint ones low by the limb; raise to 1.2-1.3 if patches of corona turn pink.", f)
-        _tip(self.chromo, "The chromosphere is the thin pink rim along the edge of the Sun, seen near second and "
-             "third contact. Untick to leave it out: red light lower than 'Rim height' is removed, except the "
-             "bases of taller prominences.")
-        _tip(self.chromo_h, "Only when the chromosphere is left out: how high the rim reaches above the solar limb, "
-             "in arcseconds. Default 12; raise it if bits of rim remain, lower it if small prominences disappear.", f)
-        _tip(self.preview_btn, "Shows the final image round the Sun at full size, exactly as Write final image will "
-             "draw it (your Enhance settings, and the base and Lunar surface strength on the Earthshine tab), with "
-             "these prominences. Nothing is written. Takes about as long as reading the stack and stretching it.")
-        _tip(self.final_btn, "Saves these settings and writes the final image as the Earthshine tab does (same "
-             "base and lunar surface strength), with these prominences.")
-
-    def _dspin(self, lo, hi, val, step, suffix) -> QDoubleSpinBox:
-        sp = QDoubleSpinBox()
-        sp.setRange(lo, hi)
-        sp.setSingleStep(step)
-        sp.setValue(val)
-        sp.setSuffix(suffix)
-        sp.valueChanged.connect(self.changed)
-        return sp
-
-    def params(self):
-        from tse_core.prominences import ProminenceParams
-
-        return ProminenceParams(min_redness=self.min_redness.value(), chromosphere=self.chromo.isChecked(),
-                                chromosphere_arcsec=self.chromo_h.value(), brightness=self.brightness.value(),
-                                sharpen=self.sharpen.value(), structure=self.structure.value())
-
-    def load_project(self, project: EventProject, path: Path) -> None:
-        ps = project.parameters.get("prominence_stack", {})
-        if ps.get("hdr"):
-            blur = ps.get("blur_px")
-            self.stack_label.setText(f"Stacked: {len(ps.get('frames', []))} frame(s)"
-                                     + (f", blur at the Moon's edge {blur:.2f} px." if blur else "."))
-            self.stops.setValue(float(ps.get("longest_stops", 2.0)))
-        else:
-            self.stack_label.setText("Not stacked yet.")
-        self._cover_hides, self.cover_label_text = False, ""
-        try:
-            from tse_core.enhance import geometry_from_header
-            from tse_core.fits import read_fits_header
-            from tse_core.prominences import moon_cover_px
-
-            hdr = W.resolve(path, project.parameters.get("stack", {}).get("hdr"))
-            if hdr:
-                head = read_fits_header(hdr)
-                cover = moon_cover_px(geometry_from_header(head))
-                scale = float(head.get("PIXSCALE") or 0)
-                if cover > 0 and scale:
-                    arcsec = cover * scale
-                    self._cover_hides = arcsec >= 15.0
-                    self.cover_label_text = (
-                        f"In the final image the Moon covers the Sun's edge by at least {arcsec:.0f}\u2033 "
-                        f"({cover:.0f} px) all round, so the chromosphere (a few arcseconds high) is hidden"
-                        + (" and these two settings have no effect." if self._cover_hides else "."))
-        except (OSError, KeyError, ValueError):
-            pass
-        self.cover_label.setText(self.cover_label_text)
-        saved = project.parameters.get("prominences", {}).get("params", {}) or {}
-        for key, widget in (("sharpen", self.sharpen), ("structure", self.structure),
-                            ("brightness", self.brightness), ("min_redness", self.min_redness),
-                            ("chromosphere_arcsec", self.chromo_h)):
-            if key in saved:
-                widget.setValue(float(saved[key]))
-        if "chromosphere" in saved:
-            self.chromo.setChecked(bool(saved["chromosphere"]))
-        self._chromo_enabled()
-        self._shown = False
-
-    def _chromo_enabled(self, *_a) -> None:
-        self.chromo.setEnabled(not self._cover_hides)
-        self.chromo_h.setEnabled(not self._cover_hides and not self.chromo.isChecked())
-
-    def changed(self, *_a) -> None:
-        if self._shown:
-            self.timer.start()
-
-    def stack(self) -> None:
-        stops = self.stops.value()
-        self.start("Stacking the prominences",
-                   lambda p, say, cancel: W.prominence_stack(p, W.ProminenceStackOptions(longest_stops=stops),
-                                                             say=say, cancel=cancel), self._stacked)
-
-    def _stacked(self, entry) -> None:
-        blur = entry.get("blur_px")
-        self.stack_label.setText(f"Stacked: {len(entry.get('frames', []))} frame(s)"
-                                 + (f", blur at the Moon's edge {blur:.2f} px." if blur else "."))
-
-    def preview(self) -> None:
-        if self.worker is not None:
-            return
-        params = self.params()
-        es = self.main.earthshine_tab
-        base = es.base.currentData() if es.base.currentData() in ("blend", "natural") else "blend"
-        k = es.strength.value()
-
-        def job(path, say, cancel):
-            img, _sun = W.prominence_preview(path, params, say=say, cancel=cancel, base=base, strength=k)
-            return img
-
-        self.start("Prominences preview", job, self._preview_done, reload=False)
-
-    def _preview_done(self, img) -> None:
-        self._shown = True
-        self.view.show_array(img)
-
-    def write_final(self) -> None:
-        proj = self.main.ensure_saved()
-        if proj is None:
-            return
-        try:
-            W.save_prominence_settings(proj, self.params())
-        except W.WorkflowError as exc:
-            QMessageBox.warning(self, "Prominences", str(exc))
-            return
-        self.main.reload_project()  # so saving the project for the next step keeps these settings
-        self.main.earthshine_tab.write_final()
 
 
 # ---------------------------------------------------------------------------
@@ -2826,13 +2601,11 @@ class MainWindow(QMainWindow):
         self.stack_tab = StackTab(self)
         self.enhance_tab = EnhanceTab(self)
         self.earthshine_tab = EarthshineTab(self)
-        self.prominences_tab = ProminencesTab(self)
         self.tabs.addTab(self.frames_tab, "1 Frames")
         self.tabs.addTab(self.align_tab, "2 Align")
         self.tabs.addTab(self.stack_tab, "3 Stack")
         self.tabs.addTab(self.enhance_tab, "4 Enhance")
         self.tabs.addTab(self.earthshine_tab, "5 Earthshine")
-        self.tabs.addTab(self.prominences_tab, "6 Prominences")
         self.setCentralWidget(self.tabs)
 
         menu = self.menuBar().addMenu("&Project")
@@ -2899,7 +2672,7 @@ class MainWindow(QMainWindow):
         project = EventProject.load(path)
         self.frames_tab.project = project
         self.frames_tab.inventory = project.inventory
-        for tab in (self.align_tab, self.stack_tab, self.enhance_tab, self.earthshine_tab, self.prominences_tab):
+        for tab in (self.align_tab, self.stack_tab, self.enhance_tab, self.earthshine_tab):
             tab.load_project(project, Path(path))
         self._title(path)
 

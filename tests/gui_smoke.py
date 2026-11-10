@@ -273,28 +273,18 @@ assert es.base.findData("file") < 0 and es.base.findData("blend") >= 0 and es.ba
 assert es.join.findData("corona first") == 0 and es.join.findData("rebuilt") == 1
 assert es.join.itemText(0) == "Corona as stacked (recommended)" and "older" in es.join.itemText(1)
 assert "Corona as stacked" in es.join.toolTip() and "Corona blended into the Moon" in es.join.toolTip()
-# Prominences on the real 2024 data. No RAW files here to stack the short frames, so the HDR stack
-# stands in for the prominence stack (the swap's mechanics, settings saved, the final image written).
-pt = win.prominences_tab
+# The Prominences tab was removed (Nov 2026, list item 8): no tab, no checkbox on the Earthshine tab,
+# and a project that still has a prominence stack recorded opens and writes as any other.
+assert "prominences_tab" not in vars(win) and "use_prom" not in vars(es)
 pp = EventProject.load(path)
 st = pp.parameters["stack"]
-pp.parameters["prominence_stack"] = {"hdr": st["hdr"], "weight": st["weight"], "frames": [1, 2, 3], "blur_px": 1.4,
-                                     "longest_stops": 2.0}
+pp.parameters["prominence_stack"] = {"hdr": st["hdr"], "weight": st["weight"], "frames": [1, 2, 3], "use": True}
 pp.save(path)
 win.reload_project()
-assert "3 frame(s)" in pt.stack_label.text() and "1.40 px" in pt.stack_label.text()
-assert es.use_prom.isEnabled() and es.use_prom.isChecked()     # on the Earthshine tab
-es.use_prom.setChecked(False)
-assert win.frames_tab.project.parameters["prominence_stack"]["use"] is False
-es.use_prom.setChecked(True)
-pt.brightness.setValue(0.3)
-pt.preview()
-assert pt._shown
-print("prominences:", pt.log.lines[-1].splitlines()[0])
-os.environ["STUB_SAVE"] = str(T / "out" / "with_proms.jpg")
-pt.write_final()
+os.environ["STUB_SAVE"] = str(T / "out" / "final.jpg")
+es.write_final()
 # Settings panels open as wide as their rows (list item 6); with the stub's 470 px column: 470 + bar + frame.
-for tab in (win.align_tab, et, es, pt):
+for tab in (win.align_tab, et, es):
     tab._fit_settings()
     assert tab.split.sizes()[0] >= 470 and sum(tab.split.sizes()) == 1200, tab.split.sizes()
 win.frames_tab._fit_settings()
@@ -305,7 +295,6 @@ assert "*.tif" in QFileDialog.last_save[3]
 # No RAW files here, so no earthshine stack: writing hands over to the Earthshine tab, which asks for it
 # (the merge itself is tested in tests/test_earthshine.py).
 assert QMessageBox.log[-1][0] == "warn" and "Stack the earthshine" in QMessageBox.log[-1][1]
-assert EventProject.load(path).parameters["prominences"]["params"]["brightness"] == 0.3
 # The enhance layers as PNG.
 os.environ["STUB_SAVE"] = str(T / "out" / "pngs.png")
 et.run()

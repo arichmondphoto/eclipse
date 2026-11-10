@@ -24,21 +24,24 @@ work (no f-number: the same for every frame; flats matched as the same optics).
 4. Darks, flats and bias as FITS, matched by exposure, gain and temperature.
 5. SER video: a reader, and a rule for combining a burst (probably averaging each burst into
    one frame before alignment).
-6. Mono cameras: grey output, with the colour steps (white balance, prominences by colour,
-   earthshine tint) switched off. Colour through filters would be a larger project.
+6. Mono cameras: grey output, with the colour steps (white balance, earthshine tint) switched
+   off. Colour through filters would be a larger project.
 
 **Before starting:** ask whether the frames are FITS or SER, colour or mono, and for a few real
 test frames from the camera (any subject: a couple of lights at different exposures, a dark and
 a flat), since every capture program writes its headers a little differently.
 
-## Prominences from the frames left out near the contacts
+## Prominence brightness by red weight, as Druckmüller does
 
-Built 7 Nov 2026: Stack prominences (the short aligned frames), used to measure how much softer
-each prominence is in the HDR stack, which Write final image undoes. Not built: also using the
-frames marked as excluded near the contacts (on the 2024 set frames 0-4, 1/6400-1/2000 s, 30-35 s
-after second contact), which Align leaves out. They would need aligning to the existing reference
-(shift only when no field rotation is applied; a Moon fit for each), and brightness matching of
-their own, since the HDR stack has no gains for them.
+Pinned 10 Nov 2026, when the Prominences tab was removed (it stacked the short exposures and
+sharpened the HDR stack's prominences after stacking: 0.6-1.3 px on the 2024 stack, too little
+for its cost, and found prominences by a colour threshold measured on the 2024 frames). The one
+control worth having again is their brightness, so bright prominences do not turn flat pink.
+Druckmüller's way does it while the HDR stack is made: the red channel's weight on the
+prominences and chromosphere, so they come out of the stack at the brightness chosen and every
+later step (Enhance, the earthshine Moon) sees them that way. To be worked out from his papers
+(Druckmüller, Rušin & Minarovjech 2006; Druckmüller 2009) before starting, and it must not rely
+on a colour threshold tuned to one camera.
 
 ## Wavelet-optimized whitening (WOW)
 
