@@ -97,7 +97,7 @@ from tse_core.brackets import detect_brackets  # noqa: E402
 from tse_core import imageout as IO  # noqa: E402
 from tse_core.viewzoom import ViewZoom, settings_panel_width  # noqa: E402
 from tse_core.enhance import (  # noqa: E402
-    ACHF_SCALES, ACHF_WEIGHTS, LAYERS, MGN_SCALES, MGN_WEIGHTS, SUN_R_2024, EnhanceParams)
+    ACHF_SCALES, ACHF_WEIGHTS, LAYERS, MGN_SCALES, MGN_WEIGHTS, SUN_R_2024, WOW_DENOISE_DEFAULT, EnhanceParams)
 from tse_core.calibration import CalibrationFrames, plan_calibration, write_synthetic_flat  # noqa: E402
 from tse_core.frames import fill_optics, format_exposure  # noqa: E402
 from tse_core.inventory import Inventory, ProjectFolder, find_raw_files  # noqa: E402
@@ -1202,7 +1202,10 @@ class StackTab(StepTab):
 # ---------------------------------------------------------------------------
 
 LAYER_NAMES = {"natural": "Natural", "nrgf": "NRGF", "fnrgf": "FNRGF", "fnrgf_n": "FNRGF-N",
-               "adaptive": "Adaptive (MGN)", "achf": "Adaptive (ACHF)", "blend": "Blend"}
+               "adaptive": "Adaptive (MGN)", "wow": "WOW", "achf": "Adaptive (ACHF)",
+               "blend": "Blend"}
+# Computed for the preview only when ticked, blended or shown (slow on a large image).
+ON_REQUEST = ("wow", "achf")
 
 
 class EnhanceTab(StepTab):
@@ -1244,7 +1247,7 @@ class EnhanceTab(StepTab):
         self.layer_checks = {}
         for k in LAYERS:
             c = QCheckBox(LAYER_NAMES[k])
-            c.setChecked(k != "achf")  # Adaptive (ACHF) takes minutes on a full frame: on request
+            c.setChecked(k not in ON_REQUEST)  # ACHF and WOW are slow on a full frame: on request
             c.toggled.connect(self.changed)
             ll.addWidget(c)
             self.layer_checks[k] = c
@@ -1254,7 +1257,7 @@ class EnhanceTab(StepTab):
         bf = QFormLayout(blend)
         self.blend = {}
         self.blend_mode = {}
-        for k, default in (("fnrgf_n", 0), ("adaptive", 0), ("achf", 0), ("fnrgf", 0), ("nrgf", 0)):
+        for k, default in (("fnrgf_n", 0), ("adaptive", 0), ("wow", 0), ("achf", 0), ("fnrgf", 0), ("nrgf", 0)):
             sp = self._spin(0, 100, default, " %")
             mode = QComboBox()
             choices = [("Soft Light", "soft light"), ("Overlay", "overlay"), ("Linear", "linear")]
@@ -1337,6 +1340,22 @@ class EnhanceTab(StepTab):
             self.mgn_w.append(sp)
         self.settings_layout.addWidget(adaptive)
         self._adaptive_form = af
+
+        wow_box = QGroupBox("WOW (wavelet-optimized whitening)")
+        wf = QFormLayout(wow_box)
+        self.wow_kind = QComboBox()
+        self.wow_kind.addItem("Plain", False)
+        self.wow_kind.addItem("Edge-aware", True)
+        self.wow_kind.currentIndexChanged.connect(self.changed)
+        wf.addRow("Transform:", self.wow_kind)
+        self.wow_n = []
+        for i, v in enumerate(WOW_DENOISE_DEFAULT):
+            sp = self._dspin(0.0, 20.0, v, 0.5, "WOW: noise threshold of this scale")
+            sp.setDecimals(1)
+            wf.addRow(f"Noise threshold, scale {i + 1}:", sp)
+            self.wow_n.append(sp)
+        self.settings_layout.addWidget(wow_box)
+        self._wow_form = wf
 
         achf_box = QGroupBox("Adaptive layer (ACHF): size and strength of each scale")
         cf = QFormLayout(achf_box)
@@ -1446,6 +1465,14 @@ class EnhanceTab(StepTab):
                         "structure out evenly everywhere, so it also flattens the overall brightness. The usual "
                         "partner for FNRGF-N: 50-80 % on Soft Light, or 43 % on Linear for the published "
                         "look.",
+            "wow": "WOW, wavelet-optimized whitening (Auchère, Soubrié, Pelouze & Buchlin 2023): splits the "
+                   "picture into detail at every size from 1 px to the whole frame and gives each size the same "
+                   "local contrast, then adds them back with equal weight, so there are no scale strengths to set. "
+                   "Fine structure everywhere, like Adaptive (MGN), usually with more structure and less grain "
+                   "(its noise thresholds hold the grain back). It evens out the overall brightness, so blend it "
+                   "over the natural layer: Linear is the paper's own mix. Use it instead of Adaptive "
+                   "(MGN) rather than with it. Computed only when ticked, blended or shown (it works on the whole "
+                   "picture at every size, so it takes longer on a full frame).",
             "achf": "Adaptive (ACHF), adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; "
                     "described in Druckmüllerová 2013): fine detail like Adaptive (MGN), but without evening out "
                     "contrast, so bright structure stays brighter than faint structure (closer to the natural "
@@ -1495,6 +1522,10 @@ class EnhanceTab(StepTab):
         nrgf_linear = ("Linear: mixed as Druckmüllerová, Morgan & Habbal (2011) mix it, an average of the "
                        "natural layer and this layer. As in their published pictures the dark sky comes up towards "
                        "grey and the natural tones flatten. 30-100 %. " + fig9)
+        mode_tips["wow"] = ("Linear: the paper's own mix (Auchère et al. 2023, eq. 19, as Morgan & Druckmüller "
+                            "mix MGN): a weighted average of the natural layer (100 %) and WOW at this strength; "
+                            "43 % gives WOW 30 % of the picture. Start at 30-70 %.\n\nSoft Light: 40-70 %, a "
+                            "gentler look that keeps more of the natural tones.")
         for k, sp in self.blend.items():
             _tip(sp, f"{LAYER_NAMES[k]}: " + blend_tip, bf)
             _tip(self.blend_mode[k], mode_common + mode_tips.get(k, nrgf_linear))
@@ -1547,6 +1578,17 @@ class EnhanceTab(StepTab):
              "(default): off, the filter as Morgan & Druckmüller (2014) published it. 3 is a good start for a "
              "grainy layer; higher keeps more of the faint corona smooth, lower shows finer detail and more "
              "grain.", af)
+        _tip(self.wow_kind, "WOW: Plain is the paper's standard transform. Edge-aware (the paper's bilateral "
+             "version) keeps each size's smoothing from reaching across a sharp edge, so a bright prominence or "
+             "the Moon's edge gets no halo; the result is smoother, and fine rays come out as thin lines. It takes "
+             "about 5 times as long. Try both: Plain is closer to Adaptive (MGN).", self._wow_form)
+        for i, sp in enumerate(self.wow_n):
+            _tip(sp, f"WOW: noise threshold of scale {i + 1} ({2 ** i} px and finer detail at scale 1, each scale twice "
+                 "the size of the one before), in units of that scale's noise, measured from the stack. Detail "
+                 "near this many times the noise is faded out smoothly (the paper's soft threshold), detail well "
+                 "above it is kept. The paper uses 5, 2 and 1 (the default) and calls the values a matter of "
+                 "choice: higher is smoother and loses faint fine detail, lower keeps more and shows more grain. "
+                 "0: this scale is not denoised.", self._wow_form)
         _tip(self.even, "Stretch: Log only. Evens out bright streamers against dark coronal holes, as Flatten "
              "evens out the fading away from the Sun. 0 (default): off. 0.6-0.8 gives the even grey corona of a "
              "heavily processed eclipse picture; the fine strands stay.")
@@ -1687,6 +1729,8 @@ class EnhanceTab(StepTab):
                              achf_contrast=self.achf_contrast.value(),
                              mgn_scales=tuple(sp.value() for sp in self.mgn_size),
                              mgn_weights=tuple(sp.value() for sp in self.mgn_w),
+                             wow_edge_aware=bool(self.wow_kind.currentData()),
+                             wow_denoise=tuple(sp.value() for sp in self.wow_n),
                              saturation=self.saturation.value(), white=self.white.currentText(), blend=blend,
                              blend_modes=modes, neutral_background=not self.keep_sky.isChecked(), **self._hidden)
 
@@ -1717,6 +1761,10 @@ class EnhanceTab(StepTab):
         for size, sp, wpx, gi in zip(self.mgn_size, self.mgn_w, p.mgn_scales or MGN_SCALES, p.mgn_weights):
             size.setValue(wpx)
             sp.setValue(gi)
+        self.wow_kind.setCurrentIndex(1 if p.wow_edge_aware else 0)
+        nds = list(p.wow_denoise) + [0.0] * len(self.wow_n)
+        for sp, v in zip(self.wow_n, nds):
+            sp.setValue(float(v))
         self.achf_frac = list(p.achf_scales)
         for size, frac, sp, wt in zip(self.achf_size, self.achf_frac, self.achf_w, p.achf_weights):
             size.blockSignals(True)  # only the display: the fractions are the settings
@@ -1836,11 +1884,11 @@ class EnhanceTab(StepTab):
         from dataclasses import replace
 
         detail = self.detail_mode and self.box is not None
-        # Adaptive (ACHF) is slow (about 10 s even on the preview): only when it is wanted.
-        want_achf = (self.layer_checks["achf"].isChecked() or self.blend["achf"].value() > 0
-                     or self.show_layer.currentData() == "achf")
+        # Adaptive (ACHF) and WOW are slow: only when wanted (ticked, blended or shown).
+        wanted = {k for k in ON_REQUEST if self.layer_checks[k].isChecked() or self.blend[k].value() > 0
+                  or self.show_layer.currentData() == k}
         # The preview shows every layer the blend needs, whatever is ticked for writing.
-        p = replace(params, layers=tuple(k for k in LAYERS if k != "achf" or want_achf))
+        p = replace(params, layers=tuple(k for k in LAYERS if k not in ON_REQUEST or k in wanted))
         if detail:
             path = self.main.frames_tab.project_path
             key = W.detail_frame_key(path, p) if path else None
@@ -1899,8 +1947,8 @@ class EnhanceTab(StepTab):
         d = self.detail_layers.get(k)
         if d is not None:
             self.detail_view.show_array(d)
-        # Adaptive (ACHF) is computed on request: chosen here, so now.
-        if k == "achf" and self.worker is None:
+        # Adaptive (ACHF) and WOW are computed on request: chosen here, so now.
+        if k in ON_REQUEST and self.worker is None:
             if self.detail_mode and self.box is not None and d is None:
                 self.preview()
             elif not self.detail_mode and self.small is not None and img is None:

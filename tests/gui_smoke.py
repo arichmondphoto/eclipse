@@ -68,6 +68,19 @@ assert {"natural", "fnrgf_n", "adaptive", "blend"} <= set(et.preview_layers)
 d = et.params()
 assert (d.flatten, d.shoulder, d.even, d.midtone, d.noise_gate, d.mgn_k) == (0.0, 0.0, 0.0, 0.0, 0.0, 0.7), d
 assert d.blend == {"natural": 1.0}, d.blend  # every filter layer at 0 %
+# WOW (Auchère et al. 2023), list item 7: on request like ACHF, the paper's defaults, settings kept.
+assert "wow" not in et.preview_layers and not et.layer_checks["wow"].isChecked()
+assert d.wow_denoise == (5.0, 2.0, 1.0) and d.wow_edge_aware is False
+assert et.wow_kind.toolTip() and all(sp.toolTip() for sp in et.wow_n) and et.blend_mode["wow"].toolTip()
+et.wow_kind.setCurrentIndex(1)
+et.wow_n[0].setValue(4.0)
+assert et.params().wow_edge_aware and et.params().wow_denoise == (4.0, 2.0, 1.0)
+et.blend["wow"].setValue(43)
+et.blend_mode["wow"].setCurrentIndex(et.blend_mode["wow"].findData("linear"))
+et.preview()
+assert "wow" in et.preview_layers and "WOW (Auch" in et.log.toPlainText()
+et.set_params(d)
+assert et.params().wow_denoise == (5.0, 2.0, 1.0) and not et.params().wow_edge_aware and et.blend["wow"].value() == 0
 # Adaptive (ACHF): six per-scale strengths, all 1 by default, each with hover help; ticked off.
 from tse_core.enhance import ACHF_SCALES
 assert len(et.achf_w) == 6 and d.achf_weights == (1.0, 1.0, 1.0, 1.0, 0.0, 0.0), d.achf_weights

@@ -114,7 +114,9 @@ carefully against the PyQt6 API. Say so when handing it over.
      (project `image_ext`).
   6. Done (10 Nov 2026, not seen rendered): settings panels open at their content's width plus the scroll
      bar, at most 60 % of the tab (`viewzoom.settings_panel_width`, on first show).
-  7. WOW (plain and edge-aware) in Enhance: see `docs/FUTURE.md`.
+  7. Done (10 Nov 2026): **WOW** layer (Auchère et al. 2023; `enhance.wow`), plain/edge-aware, n_s 5,2,1.
+     Departures, all in README: noise per scale measured on the stack (not white), no c_S (units), the
+     Moon's disc filled by odd reflection through the limb (`wow_disc_fill`; no white band).
   8. Decide whether to keep refining the Prominences tab or remove it; give Andy a recommendation.
   9. Investigate GPU and multi-core speed-ups for registration, stacking, enhancement (ACHF most)
      and previews, aiming at real-time work at high resolution.

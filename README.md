@@ -116,7 +116,7 @@ The window has one tab per step, and each step saves into the project file:
 | 1 Frames | Read the RAW folder, check the frames and brackets. **Event:** the eclipse, the site (latitude, longitude, elevation), the camera time zone and clock error if known; **Compute contacts** fills in second and third contact. **Lens:** the focal length and f-number for frames that do not record them (a telescope; optional); the darks, flats and bias folders | Frame table (right-click to exclude a frame), the contacts and the check of your brackets against them, bracket report and the calibration frames found |
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; **Calibration:** vignetting (automatic, master flat, profile from the flats, master flat + compare, lensfun, none) and the lensfun lens, whether the light on the flats was uneven, darks (off by default) with the hot-pixel fix when they are off, and bias | The stacked preview and each frame's measured brightness |
-| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow; only ticked layers and the Blend are written, and the Blend still uses unticked layers given a strength); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
+| 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but WOW and Adaptive (ACHF) ticked: they are slow; only ticked layers and the Blend are written, and the Blend still uses unticked layers given a strength); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **WOW:** Transform (Plain or Edge-aware) and Noise threshold of scales 1-3 (5, 2, 1, as Auchère et al. 2023); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
 | 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Photoshop paste only (old way)**: kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings), lunar surface strength, Moon's edge, use the prominence stack | The Moon close up, then the final picture round the Moon at full resolution; **Write final image**, **Write Moon layer (for Photoshop)** |
 | 6 Prominences | 1 Prominence stack: longest exposure (stops above the shortest), **Stack prominences**. 2 In the final image: sharpening, structure, prominence brightness, redness needed, chromosphere on or off, rim height (greyed out when the Moon hides the chromosphere) | The final image round the Sun at full size, exactly as it will be written; **Write final image** (as on the Earthshine tab) |
 
@@ -421,6 +421,7 @@ pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | `fnrgf` | Fourier NRGF (Druckmüllerová et al. 2011): mean and spread follow position angle too, so faint and bright regions at the same height get similar contrast |
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
 | `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the linear image, as in Morgan & Druckmüller 2014 ("the original image normalised by exposure time"): fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
+| `wow` | **WOW**, wavelet-optimized whitening (Auchère, Soubrié, Pelouze & Buchlin 2023): the linear image split into à trous wavelet planes at every scale up to the whole frame, each divided by its own local power and added back with equal weight; plain or edge-aware, with the paper's soft noise thresholds. Written only on request (`--layers ...,wow`): about a minute on a full frame, a few minutes edge-aware (below) |
 | `achf` | **Adaptive (ACHF)**: Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; defined in Druckmüllerová 2013): the log image minus its local mean under a kernel that follows the circles round the Sun, at its own six scales (size and strength each), Moon left out. Written only on request (`--layers ...,achf`): a few minutes on a full frame |
 | `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light, Overlay or Linear at the given strengths; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay`, or `:linear` for the combination each method's own publication uses (below) (`--blend none` to skip); the same thing you would do with layers in Photoshop |
 
@@ -434,6 +435,7 @@ pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | FNRGF-N | FNRGF with noise compensation | Druckmüllerová, Morgan & Habbal (2011) |
 | MGN | Multi-scale Gaussian Normalization (the **Adaptive (MGN)** layer) | Morgan & Druckmüller (2014) |
 | ACHF | Adaptive Circular High-pass Filter (the **Adaptive (ACHF)** layer) | Druckmüller, Rušin & Minarovjech (2006); Druckmüllerová's thesis (2013) |
+| WOW | Wavelet-Optimized Whitening (the **WOW** layer) | Auchère, Soubrié, Pelouze & Buchlin (2023), A&A 670, A66 |
 
 ### Getting a good picture
 
@@ -448,6 +450,7 @@ points:
 | Morgan & Druckmüller (2014) | Stretch **Gamma**, Gamma 3.2, Gamma white point 99.9 %; **Adaptive (MGN)** 43 % on **Linear** |
 | The same structure on a brighter base | Stretch **Log**; **Adaptive (MGN)** 43 % on **Linear** |
 | A gentler MGN | **Adaptive (MGN)** 43 % on **Weighted average** |
+| WOW as Auchère et al. (2023) combine it | **WOW** 30-70 % on **Linear** (their eq. 19), instead of Adaptive (MGN) |
 | ACHF as Druckmüllerová's thesis (2013) combines it | Stretch **Log**; **Adaptive (ACHF)** 2000-5000 % on **Linear**, **Contrast** 1 (about twice the strength with Gamma) |
 | Druckmüllerová, Morgan & Habbal (2011), Figure 9 | **FNRGF** 40 % on **Linear** and **Adaptive (ACHF)** 60 % on **Weighted average** |
 
@@ -605,6 +608,59 @@ same scale as the plain one, so where there is little real structure it
 stays flat.
 
 </details>
+
+### WOW (wavelet-optimized whitening)
+
+WOW follows Auchère, Soubrié, Pelouze & Buchlin (2023), "Image enhancement
+with wavelet-optimized whitening", A&A 670, A66 (equation numbers are
+theirs). The linear stack is split by the à trous transform with the
+B3-spline kernel into ln N / ln 2 planes (N the image's width in pixels:
+every scale from 1 px to the whole frame), which add up exactly to the
+image (eqs. 4-5). Each plane is divided by the square root of its local
+power, the squared plane smoothed with that scale's own kernel (eq. 8), and
+the planes are added back with weight 1 (eq. 9): every scale gets the same
+local contrast, so there are no scale strengths to set. The result is put
+on 0..1 with black and white at the 0.1 and 99.9 percentiles, as the paper
+displays it. **Linear** in the Blend box is the paper's own combination
+with a stretched image (eq. 19, as Morgan & Druckmüller's for MGN).
+
+| Setting | What it does | Default |
+| --- | --- | --- |
+| **Transform** (`--wow-edge-aware`) | **Plain**: the paper's standard transform. **Edge-aware**: its bilateral version (eqs. 16-18), each smoothing step weighting a neighbour by how close its brightness is, on that scale's own local spread, so a sharp edge (a prominence) gets no halo; smoother, fine rays come out as thin lines, about 5 times slower | Plain |
+| **Noise threshold, scale 1-3** (`--wow-denoise`) | The paper's soft threshold (eqs. 12, 15): each coefficient multiplied by erf(\|w\| / (n σ)), σ the noise at that scale; higher is smoother, lower keeps more faint fine detail and more grain; 0 leaves a scale alone | 5, 2, 1 (the paper's) |
+
+Three choices are this toolkit's, for an eclipse stack rather than the
+paper's space-telescope images, and none depends on one camera or eclipse:
+
+* **The noise at each scale is measured on the stack.** The paper computes
+  it as the pixel noise (here the stack's noise map, from its weights)
+  times each scale's response to white noise, as a detector's raw noise is.
+  A debayered, aligned stack's noise is spread over neighbouring pixels: on
+  the 2024 stack it was 1.8-2.2 times white noise's at scales 2 and 3, and
+  the thresholds acted at half the strength asked for. So each scale's
+  response is measured on the faintest half of the image (never below white
+  noise's), and the log gives it ("WOW: noise at each denoised scale,
+  measured on the stack's faint half: ...").
+* **The coarse residual is left out.** At ln N / ln 2 scales it is nearly
+  constant over the frame (on the 2024 stack its spread was 1/200 000 of the
+  whitened planes'), but eq. 9 adds it in the image's own units, which are
+  arbitrary for a stack: scaled 1000 times, it changed the picture by up to
+  0.4 %. Without it, WOW is the same whatever the stack's units.
+* **The Moon's disc.** It has no data. Filled with the limb's own
+  brightness, every scale read the limb as the top of a ridge: a white band
+  about 3 px wide on the 2024 stack binned 8 times. WOW sees the corona
+  continued through the limb instead, by an odd reflection of its log
+  brightness along each radius (a pixel t inside the limb mirrors the corona
+  t outside it, the other way up), so the brightness keeps its slope through
+  the limb. Pixels with data are not changed.
+
+WOW works on the whole image at every scale, so the detail box renders the
+whole image and shows its part (exact, but not faster), and the preview
+computes it only when it is ticked, blended or shown. On a 3000 px crop of
+the 2024 stack: 12 s plain, 27 s edge-aware (Adaptive (MGN): 9 s). In areas
+holding only noise, the whitening gives the noise the same contrast as
+structure elsewhere, as in the paper: lower the blend strength or raise the
+thresholds if the outer corona looks mottled.
 
 ### Adaptive layer (ACHF)
 
@@ -1320,8 +1376,8 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--hdr` | HDR FITS file (default: the one saved by 'totality stack') |
 | `--output`, `-o` | folder for the pictures (default: next to the project); the .fit and .json files always go in the fits and json folders inside the project folder |
 | `--name` | output file name prefix (default: the project name) |
-| `--layers` | comma-separated layers to write, from natural, nrgf, fnrgf, fnrgf_n, adaptive, achf (default: all but achf, which takes minutes on a full frame) |
-| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' or ':linear' (combined as each method's own publication does: NRGF, FNRGF and FNRGF-N as Druckmuellerova, Morgan & Habbal 2011, typically 0.3-1; adaptive as Morgan & Druckmueller 2014, 0.43 for their mix; achf as Druckmuellerova's thesis 2013, added to the linear stack before the natural stretch, typically 20-50 with the log stretch, about twice that with gamma) or, for adaptive and achf only, ':average' (a gentler look, typically 0.4-0.6); default soft light, e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
+| `--layers` | comma-separated layers to write, from natural, nrgf, fnrgf, fnrgf_n, adaptive, wow, achf (default: all but wow and achf, which take longer on a full frame) |
+| `--blend` | suggested blend as layer=weight pairs, each optionally ':overlay' or ':linear' (combined as each method's own publication does: NRGF, FNRGF and FNRGF-N as Druckmuellerova, Morgan & Habbal 2011, typically 0.3-1; adaptive as Morgan & Druckmueller 2014, 0.43 for their mix; achf as Druckmuellerova's thesis 2013, added to the linear stack before the natural stretch, typically 20-50 with the log stretch, about twice that with gamma; wow as Auchere et al. 2023 eq. 19, typically 0.3-0.7) or, for adaptive and achf only, ':average' (a gentler look, typically 0.4-0.6); default soft light, e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: natural=1.0) |
 | `--order` | FNRGF Fourier order (default 10) |
 | `--segments` | FNRGF angular segments (default 50) |
 | `--mean-att` | FNRGF attenuation A0,A1,... for the mean (default 1,0.9,...,0) |
@@ -1331,6 +1387,8 @@ reveal coronal structure: NRGF, FNRGF, adaptive filter, natural, blend.
 | `--achf-scales` | Adaptive (ACHF): the size (kernel sigma) of each of its six scales, finest first, in % of the Sun's radius (default 0.121,0.242,0.7259,2.42,10,20; the last two start at strength 0) |
 | `--mgn-scales` | Adaptive (MGN): the width (kernel sigma) of each of its six scales, finest first, in px of the full-size stack (default 1.25,2.5,5,10,20,40, as Morgan & Druckmueller 2014; a frame of reference: a 400 mm lens on a 45-megapixel full-frame camera; raise them with a longer lens or smaller pixels) |
 | `--mgn-weights` | Adaptive (MGN): the weight g_i of each scale, 0-1, finest first (default 1,1,1,1,1,1: the plain mean); the layer is 1/6 of the weighted sum, as in Morgan & Druckmueller 2014, so lowering one weakens it; 0 leaves the scale out |
+| `--wow-edge-aware` | WOW (Auchere et al. 2023): use the paper's edge-aware (bilateral) transform, smoother and without halos at sharp edges, about 5 times slower (default: the plain transform) |
+| `--wow-denoise` | WOW: noise thresholds n_s of the finest scales, finest first, in units of each scale's noise measured from the stack (soft threshold, the paper's eq. 12); 0 leaves a scale alone (default 5,2,1, as in the paper) |
 | `--achf-weights` | Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out (default 1,1,1,1,0,0) |
 | `--achf-part-limit` | Adaptive (ACHF): a pixel this many times brighter or darker than the corona at its height (a prominence) is a separate part, left out of the corona's kernels and filtered with its own pixels only, so no dark fringe forms round it; 0 = off (default 2) |
 | `--achf-contrast` | Adaptive (ACHF): how strongly the layer shows its detail with soft light, overlay or average: at 1, a pixel about 1.1% brighter than its surroundings shows at 82% grey; raise it (1.5-3) if the layer looks flat. With achf on ':linear' it multiplies that blend weight instead: leave it at 1 there (default 1) |

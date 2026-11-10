@@ -45,8 +45,9 @@ from scipy import ndimage
 
 Say = Callable[[str], None]
 
-LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive", "achf")
-# Written unless asked otherwise: Adaptive (ACHF) takes minutes on a full frame, so only on request.
+LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive", "wow", "achf")
+# Written unless asked otherwise: Adaptive (ACHF) takes minutes on a full frame and WOW works on the
+# whole image at every scale, so they are only on request.
 DEFAULT_LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive")
 # Adaptive (ACHF) scales, finest first, as fractions of the Sun's radius (so they suit any lens):
 # Andy's choice (4 Nov 2026) of 0.5, 1, 3 and 10 px on his 2024 frames (Sun radius 413.29 px, from
@@ -61,6 +62,7 @@ ACHF_WEIGHTS = (1.0, 1.0, 1.0, 1.0, 0.0, 0.0)
 # layers start at 0 (Andy, Nov 2026: every Enhance option off by default), so the blend starts as the
 # natural layer and each layer is added by choice.
 DEFAULT_BLEND = {"natural": 1.0}
+WOW_DENOISE_DEFAULT = (5.0, 2.0, 1.0)  # the paper's n_s for the three finest scales (Fig. 3)
 
 
 @dataclass
@@ -111,6 +113,10 @@ class EnhanceParams:
     # (measured from the stack); the number is how many times the noise counts as "clearly above"
     # (3 is a good start). Keeps the finest scales from turning grain into texture.
     noise_gate: float = 0.0
+    # WOW (Auchère et al. 2023): the edge-aware (bilateral) transform, and the noise thresholds n_s
+    # of the finest scales (the paper's 5, 2, 1; 0 = that scale not denoised).
+    wow_edge_aware: bool = False
+    wow_denoise: Sequence[float] = WOW_DENOISE_DEFAULT
     saturation: float = 1.0  # colour saturation of every layer (0 = monochrome)
     white: str = "corona"  # "corona" (inner corona is white), "camera" (as-shot), or "none"
     neutral_background: bool = True  # model and remove the sky (level, colour and gradient) before filtering
@@ -1215,6 +1221,209 @@ def _mgn_reach(scales: Sequence[float], gated: bool) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Wavelet-optimized whitening (WOW)
+# ---------------------------------------------------------------------------
+# Auchère, Soubrié, Pelouze & Buchlin (2023), "Image enhancement with wavelet-optimized whitening",
+# A&A 670, A66. Equation numbers below are the paper's.
+
+B3 = (1.0 / 16, 4.0 / 16, 6.0 / 16, 4.0 / 16, 1.0 / 16)  # the cubic B3-spline kernel h
+WOW_DENOISE = WOW_DENOISE_DEFAULT
+
+
+def wow_scales(n: int) -> int:
+    """S, the number of scales: ln N / ln 2 for an image N px across (section 3)."""
+    return max(1, int(math.log(max(int(n), 2)) / math.log(2)))
+
+
+def _shifted(a: np.ndarray, step: int, axis: int):
+    """The five taps of the à trous kernel at spacing ``step`` along ``axis``: a(k + step*l),
+    l = -2..2, with mirror boundaries c(k + N) = c(N - 1 - k) (section 2)."""
+    pad = [(0, 0)] * a.ndim
+    pad[axis] = (2 * step, 2 * step)
+    big = np.pad(a, pad, mode="symmetric")
+    n = a.shape[axis]
+    out = []
+    for l in range(-2, 3):
+        sl = [slice(None)] * a.ndim
+        sl[axis] = slice(2 * step + l * step, 2 * step + l * step + n)
+        out.append(big[tuple(sl)])
+    return out
+
+
+def atrous_smooth(c: np.ndarray, s: int) -> np.ndarray:
+    """h_s * c: the B3 kernel with holes, spacing 2^s (Eq. 4), applied along each axis."""
+    step = 2 ** s
+    for axis in (0, 1):
+        taps = _shifted(c, step, axis)
+        c = sum(np.float32(hl) * t for hl, t in zip(B3, taps))
+    return c.astype(np.float32, copy=False)
+
+
+def bilateral_smooth(c: np.ndarray, s: int) -> np.ndarray:
+    """The edge-aware step (Eq. 16): each neighbour weighted by h(l) and by
+    b = exp(-((c(k) - c(k + 2^s l)) / nu_s(k))^2 / 2) (Eq. 17), nu_s^2 = h_s*(c^2) - (h_s*c)^2 the
+    local variance at that scale (Eq. 18)."""
+    step = 2 ** s
+    mean = atrous_smooth(c, s)
+    var = np.maximum(atrous_smooth(c * c, s) - mean * mean, 0.0)
+    inv = np.where(var > 0, 1.0 / np.maximum(var, 1e-30), 0.0).astype(np.float32)  # 1 / nu^2
+    num = np.zeros_like(c)
+    den = np.zeros_like(c)
+    rows = _shifted(c, step, 0)
+    for hy, row in zip(B3, rows):
+        for hx, t in zip(B3, _shifted(row, step, 1)):
+            d = c - t
+            wgt = np.float32(hy * hx) * np.exp(-0.5 * d * d * inv)
+            num += wgt * t
+            den += wgt
+    return (num / np.maximum(den, 1e-30)).astype(np.float32)
+
+
+def atrous(x: np.ndarray, n_scales: int, bilateral: bool = False) -> list:
+    """The à trous transform {w_1..w_S, c_S} (Eqs. 4 and 5): w_{s+1} = c_s - c_{s+1}; the planes
+    and the residual add up exactly to ``x``."""
+    c = np.asarray(x, np.float32)
+    out = []
+    for s in range(n_scales):
+        nxt = bilateral_smooth(c, s) if bilateral else atrous_smooth(c, s)
+        out.append(c - nxt)
+        c = nxt
+    out.append(c)
+    return out
+
+
+_WOW_NOISE_CACHE: dict = {}
+
+
+def wow_noise_response(n: int, bilateral: bool) -> list:
+    """sigma'_s, the standard deviation of the first ``n`` planes of Gaussian white noise of unit
+    standard deviation, measured numerically (section 4)."""
+    key = (int(n), bool(bilateral))
+    if key not in _WOW_NOISE_CACHE:
+        rng = np.random.default_rng(12345)
+        noise = rng.standard_normal((512, 512)).astype(np.float32)
+        planes = atrous(noise, n, bilateral)[:n]
+        _WOW_NOISE_CACHE[key] = [float(np.std(w[32:-32, 32:-32])) for w in planes]
+    return _WOW_NOISE_CACHE[key]
+
+
+def wow_measured_response(planes: list, valid: np.ndarray, x: np.ndarray, noise: np.ndarray,
+                          white: Sequence[float]) -> list:
+    """sigma'_s, the noise's own spread at scale s per unit of pixel noise, measured on the image: the
+    robust spread of each plane over the faintest half of ``valid`` (where structure counts least, as
+    :func:`noise_constant` measures the pixel noise) divided by the pixel noise there; never below the
+    white-noise value ``white``. The paper derives sigma'_s from white noise, as a detector's raw noise
+    is; a debayered, aligned stack's noise is spread over neighbouring pixels (on the 2024 stack
+    about 2x white noise's at scales 2 and 3), and with white noise's values the thresholds acted at
+    about half the strength asked for."""
+    ok = valid & (noise > 0) & np.isfinite(x)
+    if ok.sum() < 1000:
+        return list(white)
+    faint = ok & (x < np.percentile(x[ok], 50))
+    n0 = float(np.median(noise[faint])) if faint.any() else 0.0
+    if n0 <= 0:
+        return list(white)
+    out = []
+    for s, wv in enumerate(white):
+        w = planes[s][faint]
+        spread = 1.4826 * float(np.median(np.abs(w - np.median(w))))
+        out.append(max(float(wv), spread / n0))
+    return out
+
+
+def wow(x: np.ndarray, valid: np.ndarray, noise: Optional[np.ndarray] = None, denoise: Sequence[float] = WOW_DENOISE,
+        bilateral: bool = False, n_scales: Optional[int] = None, residual: bool = True,
+        measure_noise: bool = False, say: Optional[Say] = None) -> np.ndarray:
+    """Wavelet-optimized whitening of the linear image ``x``, as in the paper; returns the
+    whitened image (not yet put on a display scale, see :func:`wow_display`).
+
+    Each plane w_s is divided by the square root of its local power P_s = w_s^2 * h_s (Eq. 8) and the
+    planes are added back with weight 1, with the coarse residual c_S (Eq. 9). Denoising (Eq. 15):
+    each coefficient first multiplied by erf(|w_s| / (n_s sigma_s)) (Eq. 12), sigma_s = sigma(k)
+    sigma'_s, sigma(k) the stack's measured noise ``noise`` and sigma'_s from white noise; ``denoise``
+    holds n_s from the finest scale (0 or missing: not denoised). ``bilateral``: the edge-aware
+    transform (Eqs. 16-18). ``residual``: add c_S as in Eq. 9. ``measure_noise``: sigma'_s measured
+    on the stack's own noise (see :func:`wow_measured_response`) instead of white noise's."""
+    from scipy.special import erf
+
+    b = np.asarray(x, np.float32)
+    # Pixels with no data (frame edges) filled from their surroundings so they do not ring, as for MGN.
+    if not valid.all():
+        m = valid.astype(np.float32)
+        fill = blur(b * m, 8.0) / np.maximum(blur(m, 8.0), 1e-6)
+        b = np.where(valid, b, fill).astype(np.float32)
+    S = wow_scales(max(b.shape)) if n_scales is None else int(n_scales)
+    planes = atrous(b, S, bilateral)
+    resp = wow_noise_response(min(S, len(denoise)), bilateral) if noise is not None and len(denoise) else []
+    if resp and measure_noise:
+        resp = wow_measured_response(planes, valid, b, noise, resp)
+        if say is not None:
+            say("WOW: noise at each denoised scale, measured on the stack's faint half: " +
+                ", ".join(f"{m:.3g}" for m in resp) + " x the pixel noise")
+    out = planes[-1].copy() if residual else np.zeros_like(b)
+    for s, w in enumerate(planes[:-1]):
+        ns = float(denoise[s]) if s < len(denoise) else 0.0
+        if ns > 0 and noise is not None and s < len(resp):
+            sig = (ns * resp[s]) * np.asarray(noise, np.float32)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                alpha = np.where(sig > 0, erf(np.abs(w) / sig), 1.0).astype(np.float32)
+            w = alpha * w
+        power = atrous_smooth(w * w, s)  # P_s = w_s^2 * h_s, the same kernel as that scale
+        out += np.where(power > 0, w / np.sqrt(np.maximum(power, 1e-30)), 0.0).astype(np.float32)
+    return out
+
+
+def wow_disc_fill(x: np.ndarray, valid: np.ndarray, g: Geometry, margin: float,
+                  origin: tuple[int, int] = (0, 0)) -> tuple[np.ndarray, np.ndarray]:
+    """What WOW sees inside the Moon's disc, which has no data: the corona continued through the limb
+    by an odd reflection of its log brightness (a pixel t inside the boundary gets 2 L(edge) - L(t
+    outside), along its own radius), so the brightness keeps its slope through the limb. Filled with
+    the limb's own brightness (a plateau), every scale read the limb as the top of a ridge: a white
+    band about 3 px wide on the 2024 stack binned 8x. The pixels with data are not changed. Returns
+    (image, pixels now with data)."""
+    h, w = x.shape
+    cy, cx = g.moon_y - origin[0], g.moon_x - origin[1]
+    rb = g.moon_r + float(margin)
+    # Only a square round the Moon is needed: the disc and its mirror, up to 2 rb from the centre.
+    reach = int(math.ceil(2.0 * rb)) + 3
+    Y0, Y1 = max(0, int(cy) - reach), min(h, int(cy) + reach + 1)
+    X0, X1 = max(0, int(cx) - reach), min(w, int(cx) + reach + 1)
+    if Y0 >= Y1 or X0 >= X1:
+        return x, valid
+    sub, vs = np.asarray(x[Y0:Y1, X0:X1], np.float64), valid[Y0:Y1, X0:X1]
+    yy = (np.arange(Y0, Y1, dtype=np.float64) - cy)[:, None]
+    xx = (np.arange(X0, X1, dtype=np.float64) - cx)[None, :]
+    rr = np.sqrt(xx * xx + yy * yy)
+    disc = (rr < rb) & ~vs
+    if not disc.any() or not vs.any():
+        return x, valid
+    # Log brightness, each pixel without data taking its nearest measured neighbour's, so every
+    # sample below interpolates measured values only.
+    lg = np.log(np.maximum(sub, 1e-30))
+    idx = ndimage.distance_transform_edt(~vs, return_distances=False, return_indices=True)
+    lg = lg[idx[0], idx[1]]
+    ys, xs = np.nonzero(disc)
+    r = np.maximum(rr[ys, xs], 1e-9)
+    uy, ux = yy[ys, 0] / r, xx[0, xs] / r
+    oy, ox = cy - Y0, cx - X0
+    edge = ndimage.map_coordinates(lg, [oy + rb * uy, ox + rb * ux], order=1, mode="nearest")
+    rm = 2.0 * rb - r
+    mirror = ndimage.map_coordinates(lg, [oy + rm * uy, ox + rm * ux], order=1, mode="nearest")
+    out = np.array(x, np.float32, copy=True)
+    out[Y0 + ys, X0 + xs] = np.exp(np.minimum(2.0 * edge - mirror, 80.0)).astype(np.float32)
+    vout = valid.copy()
+    vout[Y0 + ys, X0 + xs] = True
+    return out, vout
+
+
+def wow_display(f: np.ndarray, valid: np.ndarray, lo: float = 0.1, hi: float = 99.9) -> np.ndarray:
+    """The whitened image to 0..1 as the paper displays it: black and white at the 0.1 and 99.9
+    percentiles (Fig. 4)."""
+    a, b = np.percentile(f[valid], [lo, hi]) if valid.any() else (0.0, 1.0)
+    return np.clip((f - a) / ((b - a) or 1.0), 0.0, 1.0).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
 # Colour
 # ---------------------------------------------------------------------------
 
@@ -1530,6 +1739,7 @@ LAYER_SETTINGS = {
     "fnrgf": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation"),
     "fnrgf_n": ("segments", "order", "ring_smooth", "mean_attenuation", "std_attenuation", "noise_m"),
     "adaptive": ("mgn_scales", "mgn_weights", "mgn_k", "noise_gate"),
+    "wow": ("wow_edge_aware", "wow_denoise"),
     "achf": ("achf_scales", "achf_weights", "achf_part_limit"),  # Contrast is applied after (achf_display)
 }
 
@@ -1591,6 +1801,8 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
         whatever the other layers need)."""
         if name_l == "adaptive":
             m = _mgn_reach(_mgn_used(p, g), p.noise_gate > 0)
+        elif name_l == "wow":
+            m = max(H, W)  # every scale up to the whole image: always the whole image, then the box
         elif name_l == "achf":
             m = _achf_reach([g.sun_r * f for f in p.achf_scales], list(p.achf_weights), p.achf_part_limit,
                             0.1 * g.sun_r)
@@ -1614,6 +1826,12 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
                 y = to_linear(fnrgf(lum, r, phi, rvalid, stats, mean_att, std_att), FNRGF_SPREAD)
             else:
                 y = to_linear(fnrgf(lum, r, phi, rvalid, stats, mean_att, std_att, p.noise_m), FNRGF_N_SPREAD)
+        elif name_l == "wow":
+            say("WOW (Auchère et al. 2023)" + (", edge-aware" if p.wow_edge_aware else "") +
+                f": {wow_scales(max(shape))} scales; noise thresholds {', '.join(f'{v:g}' for v in p.wow_denoise)}")
+            xin, vin = wow_disc_fill(lum, rvalid, g, frame.moon_margin_px, origin)
+            y = wow_display(wow(xin, vin, frame.noise[reg], list(p.wow_denoise), p.wow_edge_aware, residual=False,
+                                measure_noise=True, say=say), rvalid)
         elif name_l == "achf":
             # Raw (before Contrast), so a Contrast change needs no filtering: see below.
             y = achf(lum, rvalid, [g.sun_r * f for f in p.achf_scales], frame.nlev, g.sun_x - origin[1],

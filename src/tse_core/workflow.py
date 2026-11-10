@@ -708,8 +708,12 @@ def load_enhance_settings(path, base=None):
                 v = str(v)
                 if v not in ("log", "gamma"):
                     raise bad(k, v)
-            elif k == "neutral_background":
+            elif k in ("neutral_background", "wow_edge_aware"):
                 v = bool(v)
+            elif k == "wow_denoise":
+                v = tuple(float(x) for x in v)
+                if any(x < 0 for x in v):
+                    raise bad(k, v)
             elif k in ("segments", "order"):
                 v = int(v)
             else:

@@ -15,7 +15,7 @@ from .frames import format_exposure, parse_duration
 from .inventory import Inventory, find_raw_files
 from .lensfun import LensfunDatabase, corner_falloff, download_database, import_database
 from .metadata import ExifToolReader, rawpy_available, read_frames
-from .enhance import ACHF_SCALES, ACHF_WEIGHTS, DEFAULT_BLEND, DEFAULT_LAYERS, LAYERS, MGN_SCALES, MGN_WEIGHTS
+from .enhance import ACHF_SCALES, ACHF_WEIGHTS, DEFAULT_BLEND, DEFAULT_LAYERS, LAYERS, MGN_SCALES, MGN_WEIGHTS, WOW_DENOISE_DEFAULT
 from .project import EventProject
 from .vignetting_profile import VignettingProfile, fit_profile_from_files, load_profile_library
 
@@ -169,14 +169,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--output", "-o", help="folder for the pictures (default: next to the project); the .fit and .json files always go in the fits and json folders inside the project folder")
     p.add_argument("--name", help="output file name prefix (default: the project name)")
     p.add_argument("--layers", default=",".join(DEFAULT_LAYERS),
-                   help=f"comma-separated layers to write, from {', '.join(LAYERS)} (default: all but achf, which "
-                        "takes minutes on a full frame)")
+                   help=f"comma-separated layers to write, from {', '.join(LAYERS)} (default: all but wow and "
+                        "achf, which take longer on a full frame)")
     p.add_argument("--blend", default=",".join(f"{k}={v}" for k, v in DEFAULT_BLEND.items()),
                    help="suggested blend as layer=weight pairs, each optionally ':overlay' or ':linear' (combined as "
                         "each method's own publication does: NRGF, FNRGF and FNRGF-N as Druckmuellerova, Morgan & "
                         "Habbal 2011, typically 0.3-1; adaptive as Morgan & Druckmueller 2014, 0.43 for their mix; "
                         "achf as Druckmuellerova's thesis 2013, added to the linear stack before the natural "
-                        "stretch, typically 20-50 with the log stretch, about twice that with gamma) or, for "
+                        "stretch, typically 20-50 with the log stretch, about twice that with gamma; wow as Auchere et al. "
+                        "2023 eq. 19, typically 0.3-0.7) or, for "
                         "adaptive and achf only, ':average' (a gentler look, typically 0.4-0.6); "
                         "default soft light, "
                         "e.g. natural=1,fnrgf_n=0.7,adaptive=0.1:overlay; or 'none' (default: %(default)s)")
@@ -200,6 +201,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="Adaptive (MGN): the weight g_i of each scale, 0-1, finest first (default %(default)s: the "
                         "plain mean); the layer is 1/6 of the weighted sum, as in Morgan & Druckmueller "
                         "2014, so lowering one weakens it; 0 leaves the scale out")
+    p.add_argument("--wow-edge-aware", action="store_true",
+                   help="WOW (Auchere et al. 2023): use the paper's edge-aware (bilateral) transform, smoother and "
+                        "without halos at sharp edges, about 5 times slower (default: the plain transform)")
+    p.add_argument("--wow-denoise", default=",".join(f"{v:g}" for v in WOW_DENOISE_DEFAULT),
+                   help="WOW: noise thresholds n_s of the finest scales, finest first, in units of each scale's "
+                        "noise measured from the stack (soft threshold, the paper's eq. 12); 0 leaves a scale "
+                        "alone (default %(default)s, as in the paper)")
     p.add_argument("--achf-weights", default=",".join(f"{v:g}" for v in ACHF_WEIGHTS),
                    help="Adaptive (ACHF): strength of each of its six scales, finest first; 0 leaves a scale out "
                         "(default %(default)s)")
@@ -788,6 +796,13 @@ def _floats(text):
     return [float(v) for v in text.split(",") if v.strip()] if text else None
 
 
+def _wow_denoise(text: str) -> tuple:
+    vals = _floats(text) or []
+    if any(v < 0 for v in vals):
+        raise SystemExit(f"--wow-denoise: thresholds must be 0 or more, got {text!r}")
+    return tuple(vals)
+
+
 # Enhance options and the settings they set (the rest, such as --output, are not settings).
 ENHANCE_OPTION_SETTINGS = {
     "layers": ("layers",), "segments": ("segments",), "order": ("order",), "mean_att": ("mean_attenuation",),
@@ -797,6 +812,7 @@ ENHANCE_OPTION_SETTINGS = {
     "achf_weights": ("achf_weights",), "achf_scales": ("achf_scales",),
     "mgn_scales": ("mgn_scales",), "mgn_weights": ("mgn_weights",), "achf_part_limit": ("achf_part_limit",),
     "achf_contrast": ("achf_contrast",), "saturation": ("saturation",), "white": ("white",),
+    "wow_edge_aware": ("wow_edge_aware",), "wow_denoise": ("wow_denoise",),
     "blend": ("blend", "blend_modes"), "keep_background_colour": ("neutral_background",),
 }
 ENHANCE_NOT_SETTINGS = {"help", "project", "hdr", "output", "name", "format", "quiet", "settings"}
@@ -843,6 +859,7 @@ def enhance_params(args, given: set | None = None):
                                         tuple(v / 100.0 for v in _six(args.achf_scales, "--achf-scales", positive=True))),
                            achf_part_limit=args.achf_part_limit, achf_contrast=args.achf_contrast,
                            saturation=args.saturation,
+                           wow_edge_aware=bool(args.wow_edge_aware), wow_denoise=_wow_denoise(args.wow_denoise),
                            white=args.white, blend=blend, blend_modes=blend_modes,
                            neutral_background=not args.keep_background_colour)
     if not args.settings:
