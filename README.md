@@ -117,7 +117,7 @@ The window has one tab per step, and each step saves into the project file:
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; **Calibration:** vignetting (automatic, master flat, profile from the flats, master flat + compare, lensfun, none) and the lensfun lens, whether the light on the flats was uneven, darks (off by default) with the hot-pixel fix when they are off, and bias | The stacked preview and each frame's measured brightness |
 | 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
-| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Photoshop paste only (old way)**: kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings), lunar surface strength, Moon's edge, use the prominence stack | The Moon close up, then a preview of the final picture; **Write final image**, **Write Moon layer (for Photoshop)** |
+| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Photoshop paste only (old way)**: kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings), lunar surface strength, Moon's edge, use the prominence stack | The Moon close up, then the final picture round the Moon at full resolution; **Write final image**, **Write Moon layer (for Photoshop)** |
 | 6 Prominences | 1 Prominence stack: longest exposure (stops above the shortest), **Stack prominences**. 2 In the final image: sharpening, structure, prominence brightness, redness needed, chromosphere on or off, rim height (greyed out when the Moon hides the chromosphere) | The final image round the Sun at full size, exactly as it will be written; **Write final image** (as on the Earthshine tab) |
 
 Every setting has hover help explaining what it does and when to change it.
@@ -126,7 +126,8 @@ drag to move round, double-click for 100% at that point (again for fit),
 **0** fit, **1** 100%; the zoom shows in the corner. A preview run again with
 other settings keeps the zoom and place, so settings can be compared on the
 same detail. Previews are reduced copies (about 1400 px), so 100% there is a
-preview pixel, not a full-size one. On the Enhance tab, hold **Shift** and
+preview pixel, not a full-size one; the Earthshine tab's final-image preview is
+the exception, shown at full size (below). On the Enhance tab, hold **Shift** and
 drag on the whole picture to choose a **detail box**: the **Detail box (full
 resolution)** tab then shows that part at full resolution, the very pixels
 **Write full-size layers** will write (see [The detail box](#the-detail-box)).
@@ -891,7 +892,13 @@ matched the Blend final image exactly where it is opaque (the disc and about
 
 After **Stack earthshine**, the tab shows the Moon as the final image draws it
 (a preview with your Enhance settings), so what you set there is what Blend
-and Natural give.
+and Natural give. **Preview** shows a box round the Moon, 1.3 Moon radii
+each side of its centre (about 1135 px square on the 2024 stack), at full
+resolution: exactly the pixels **Write final image** writes there, so the
+limb can be judged at 100 % (double-click). White balance and sky are
+measured over the whole stack, as for the written image, so it takes longer
+than a reduced preview (7.5 s on a 3000 px crop of the 2024 stack, against
+3.5 s for the reduced one).
 
 The earthshine layer file (`<name>_earthshine.tif`, for Photoshop) is drawn
 on its own: the seas and highlands stretched by themselves, with **Keep

@@ -2054,7 +2054,7 @@ class EarthshineTab(StepTab):
         self.use_prom = QCheckBox("Use the prominence stack")
         self.use_prom.setEnabled(False)
         self.use_prom.toggled.connect(self._use_prom_toggled)
-        _tip(self.use_prom, "On: the final image (and the Moon layer, and Paste) gets the sharper prominences from "
+        _tip(self.use_prom, "On: the final image (and the Moon layer) gets the sharper prominences from "
              "the short exposures, with the settings on the Prominences tab. Off: the HDR stack's own, softer "
              "prominences. Needs Stack prominences on the Prominences tab first.")
         ff.addRow(self.use_prom)
@@ -2063,7 +2063,10 @@ class EarthshineTab(StepTab):
         self.final_preview_btn.clicked.connect(self.preview_final)
         self.final_btn = QPushButton("Write final image")
         self.final_btn.clicked.connect(self.write_final)
-        _tip(self.final_preview_btn, "Shows the final picture, reduced, with the choices above. Nothing is written.")
+        _tip(self.final_preview_btn, "Shows the Moon and the corona round it (1.3 Moon radii each side of its centre) "
+             "at full resolution, exactly as 'Write final image' will draw them, with the choices above. Double-click "
+             "the picture for 100 %. Nothing is written.\n\nIt is measured over the whole stack (white balance, "
+             "sky), as the written image is, so it takes a little longer than a reduced preview.")
         _tip(self.final_btn, "Writes the final picture full size; you choose the name and format (see the box's "
              "own help).")
         fb.addWidget(self.final_preview_btn)
@@ -2199,11 +2202,12 @@ class EarthshineTab(StepTab):
         if self.worker is not None:
             return
         base, k = self.base.currentData(), self.strength.value()
-        fn = lambda p, say, cancel: W.final_with_moon(p, base, k, preview_side=1400, say=say, cancel=cancel,
+        fn = lambda p, say, cancel: W.final_moon_crop(p, base, k, say=say, cancel=cancel,
                                                       join=self.join.currentData())
-        self.start("Preview of the final image", fn, self._final_preview_done, reload=False)
+        self.start("Preview of the final image (the Moon at full size)", fn, self._final_preview_done, reload=False)
 
-    def _final_preview_done(self, img) -> None:
+    def _final_preview_done(self, result) -> None:
+        img, _box = result
         self._final_shown = True
         self.view.show_array(img)
 
@@ -2320,7 +2324,7 @@ class EarthshineTab(StepTab):
         self.open_btn.setEnabled(bool(self.layer_path))
         self.view.show_file(result.outputs.get("crop", ""))
         # Then the Moon as the final image draws it (with the Enhance settings), so what is set here
-        # is what Blend, Natural and pasting give.
+        # is what Blend and Natural give.
         if self.main.frames_tab.project.parameters.get("enhance", {}).get("info"):
             self.log.appendPlainText("Showing the Moon as the final image draws it (Preview of the final image).")
             QTimer.singleShot(0, self.preview_final)

@@ -1203,6 +1203,28 @@ def test_final_image_box_is_the_written_image(tmp_path):
     assert np.abs(part - full[60:260, 40:200]).max() < 2 / 65535
 
 
+def test_earthshine_preview_is_the_moon_at_full_size(tmp_path):
+    """Andy, Nov 2026 (list item 3): the Earthshine tab's preview showed the whole frame reduced, too
+    small to judge the limb. It now shows a box round the Moon at full resolution, sized from the
+    Moon's radius, exactly as Write final image draws it."""
+    from tse_core import imageout as IO
+    from tse_core import workflow as W
+    from tse_core.fits import read_fits_header
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    full = IO.read_image(W.final_with_moon(proj, "blend", 1.0, output_file=str(tmp_path / "f.tif")))
+    part, box = W.final_moon_crop(proj, "blend", 1.0)
+    h = read_fits_header(W.resolve(Path(proj), W.EventProject.load(proj).parameters["stack"]["hdr"]))
+    mx, my, mr = float(h["MOONX"]), float(h["MOONY"]), float(h["MOONR"])
+    y0, y1, x0, x1 = box
+    assert part.shape == (y1 - y0, x1 - x0, 3)
+    # centred on the Moon, a little more than its diameter each way (unless cut by the image's edge)
+    for lo, hi, c, n in ((y0, y1, my, full.shape[0]), (x0, x1, mx, full.shape[1])):
+        assert lo <= c - mr and hi >= min(n, c + mr)
+        assert hi - lo <= 2 * 1.3 * mr + 2
+    assert np.abs(part - full[y0:y1, x0:x1]).max() < 2 / 65535
+
+
 def test_limb_colour_takes_the_red_glare_off_and_can_make_the_moon_neutral():
     """As on the 2024 frame-9 earthshine stack: the Moon's middle R/G 0.47, B/G 0.79; the
     chromosphere's glare reddens the last pixels inside the limb to R/G 0.64, B/G 0.69 at 2-4 px

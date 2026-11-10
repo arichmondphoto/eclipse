@@ -1042,6 +1042,38 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     return str(final)
 
 
+# Half-side of the Earthshine tab's preview box, as a fraction of the Moon's radius: the Moon, the
+# limb all round and the inner corona with its prominences
+MOON_CROP_HALF = 1.3
+
+
+def moon_crop_box(project_path) -> tuple:
+    """The box (y0, y1, x0, x1, full-size px) round the Moon that the Earthshine tab previews:
+    MOON_CROP_HALF Moon radii each side of its centre, cut to the image."""
+    from .fits import read_fits_header
+
+    path = Path(project_path).resolve()
+    project = EventProject.load(path)
+    hdr_path = resolve(path, project.parameters.get("stack", {}).get("hdr"))
+    if not hdr_path:
+        raise WorkflowError("Stack first: the preview box is placed on the Moon in the HDR stack.")
+    h = read_fits_header(hdr_path)
+    mx, my, mr = float(h["MOONX"]), float(h["MOONY"]), float(h["MOONR"])
+    w, hh = int(h["NAXIS1"]), int(h["NAXIS2"])
+    half = int(math.ceil(mr * MOON_CROP_HALF))
+    return (max(0, int(my) - half), min(hh, int(my) + half + 1), max(0, int(mx) - half), min(w, int(mx) + half + 1))
+
+
+def final_moon_crop(project_path, base_layer: str = "blend", strength: float = 1.0, say: Optional[Say] = None,
+                    cancel=None, join: Optional[str] = None):
+    """The Earthshine tab's preview: the box round the Moon (:func:`moon_crop_box`) of the final
+    image at full resolution, exactly as Write final image draws it there. Returns (picture, box)."""
+    say = reporter(say, cancel)
+    box = moon_crop_box(project_path)
+    say(f"preview: {box[3] - box[2]} x {box[1] - box[0]} px round the Moon at full size (x {box[2]}, y {box[0]})")
+    return final_with_moon(project_path, base_layer, strength, say=say, cancel=cancel, box=box, join=join), box
+
+
 # Width of the Moon layer's soft edge outside its cover, as a fraction of the Moon's radius (5 px for a
 # 400 mm lens on a 45-megapixel full-frame camera)
 MOON_LAYER_FADE = 0.0115
