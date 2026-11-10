@@ -1102,8 +1102,12 @@ def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, n
 def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, mode: str = "screen",
                 preview_side: Optional[int] = None, name: Optional[str] = None,
                 say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None,
-                base_file: Optional[str] = None, enhance_params=None):
+                base_file: Optional[str] = None, enhance_params=None, join: Optional[str] = None):
     """The chosen enhanced layer with the Moon pasted into the lunar disc.
+
+    ``join`` "corona first" (default, as last saved for Write final image): the Moon replaces the
+    file exactly where the stack has no corona (the Blend's black disc) and every other pixel of the
+    file is kept; "rebuilt": the Moon is laid over the file with ``mode`` (the older way).
 
     Once Enhance layers are written, the Moon pasted is the Moon as Blend draws it (see
     :func:`final_with_moon`), cut to the corona layers' black disc, so pasting it into that blend
@@ -1143,12 +1147,22 @@ def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, 
         # cut to the corona layers' black disc: pasted into that blend it gives the Blend final image.
         say(f"final image, pasting: the Moon as Blend draws it (Enhance settings, lunar surface strength "
             f"{strength:g}) into {Path(base_path).name}")
+        if join is None:
+            join = str(project.parameters.get("final", {}).get("join", "corona first"))
         img, mask = final_with_moon(path, "blend", strength, preview_side=preview_side, say=say,
-                                    enhance_params=enhance_params, moon_only=True)
+                                    enhance_params=enhance_params, moon_only=True, join=join)
         earth = np.zeros_like(base)
+        m = np.zeros(base.shape[:2], bool)
         hh, ww = min(base.shape[0], img.shape[0]), min(base.shape[1], img.shape[1])
         earth[:hh, :ww] = img[:hh, :ww] * mask[:hh, :ww, None]
-        out = composite(base, earth, 1.0, mode)
+        m[:hh, :ww] = mask[:hh, :ww] > 0
+        if join == "corona first":
+            # The rule: the Moon exactly where the stack has no corona, the file everywhere else.
+            out = np.where(m[..., None], earth, base)
+            say(f"Moon meets corona: corona wherever the stack has it; the Moon put in on {int(m.sum())} px, "
+                "the rest of the file kept as it is")
+        else:
+            out = composite(base, earth, 1.0, mode)
         return _write_final(path, project, out, preview_side, output_file, name, say,
                             {"base": base_layer, "base_file": str(base_file or ""), "strength": strength, "mode": mode,
                              "moon": "as Blend draws it"})

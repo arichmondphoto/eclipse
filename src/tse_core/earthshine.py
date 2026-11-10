@@ -1573,9 +1573,8 @@ def _join_corona_first(hdr, weight, es_rgb, es_weight, shift, ys, xs, sy, sx, rr
 
     1. the HDR stack wherever the corona layers have it (outside their black disc, ``margin_px``
        past the limb, with stack data): exactly as in the Blend without the Moon;
-    2. otherwise the earthshine stack, where it has data (``es_rgb`` and ``es_weight`` already moved
-       onto the stack; ``es_weight`` 0 where under 10 % of its usual frames went in: by a bright
-       prominence those few are near full well and their colours are off);
+    2. otherwise the earthshine stack, wherever it has data (``es_rgb`` and ``es_weight`` already
+       moved onto the stack), however few of its frames went in;
     3. otherwise nothing: left black and counted in the log.
     """
     from .enhance import MoonInput, noise_constant
@@ -1654,7 +1653,9 @@ def merge_moon(hdr: np.ndarray, weight: np.ndarray, header: dict, es_rgb: np.nda
     frac = ew / np.maximum(med[ri], 1e-30)
     es_ok = es_good & (frac >= 0.1)
     if join == "corona first":
-        return _join_corona_first(hdr, weight, es_rgb, np.where(es_ok, ew, 0.0), (dx, dy), ys, xs, sy, sx, rr, mr,
+        # Every pixel the earthshine stack recorded counts: by a bright prominence only its short
+        # frames are left (on the 2024 frame-9 stack 0.5-9.5 % of them), and they hold the glare.
+        return _join_corona_first(hdr, weight, es_rgb, np.where(es_good, ew, 0.0), (dx, dy), ys, xs, sy, sx, rr, mr,
                                   margin_px, (ox, oy), say)
     # Between 10 and 40 % of the usual frames the stack is only partly trusted (see the radial
     # fill below): a hard cut there gave a ragged edge round a bright prominence.

@@ -1367,3 +1367,68 @@ def test_corona_first_keeps_the_blend_and_uses_the_earthshine_only_where_the_ble
     g = np.zeros(W.shape, bool); g[crop] = gap[crop] & ~blend_has[crop]
     assert g.any() and (W[g] == 0).all() and (H[g] == 0).all()        # neither: black
     assert moon.mask[inside].all() and not moon.mask[blend_has].any()
+
+
+def test_pasting_follows_the_rule_even_into_a_disc_that_is_not_black(tmp_path):
+    """Andy, Nov 2026: Moon meets corona must hold whatever Corona image is chosen. Pasting into a
+    file finished elsewhere, whose disc is not black (grey here), the Moon goes in exactly where the
+    stack has no corona, as Blend draws it, and every other pixel of the file stays as it is. Before,
+    the Moon was laid over the file with the blend mode (Screen), which mixed in the grey."""
+    import tifffile
+
+    from tse_core import workflow as W
+    from tse_core.enhance import EnhanceParams, enhance
+    from tse_core.imageout import write_image
+
+    from tse_core.project import EventProject
+
+    proj, rr, phi, r = _moon_project(tmp_path)
+    tifffile.imwrite(tmp_path / "e_earthshine.tif", np.zeros(rr.shape + (3,), np.uint16), photometric="rgb")
+    p = EventProject.load(proj)
+    p.parameters["earthshine"]["earthshine"] = "e_earthshine.tif"
+    p.save(proj)
+    params = EnhanceParams(layers=(), blend={"natural": 1.0})
+    data = W.load_hdr(proj)
+    _, col = enhance(data.hdr.copy(), data.weight, data.header, params, out_dir=None, keep={"blend"})
+    grey = np.clip(col["blend"] * 0.7 + 0.3, 0, 1)                 # a finished corona, grey disc
+    base = write_image(tmp_path / "e_finished.tif", grey)
+    want = W.final_with_moon(proj, "blend", 0.6, enhance_params=params, output_file=str(tmp_path / "a.tif"))
+    got = W.final_image(proj, "blend", 0.6, "screen", base_file=str(base), enhance_params=params,
+                        output_file=str(tmp_path / "b.tif"), join="corona first")
+    a = tifffile.imread(want).astype(np.float32) / 65535
+    b = tifffile.imread(got).astype(np.float32) / 65535
+    f = tifffile.imread(base).astype(np.float32) / 65535
+    disc = rr < r - 1
+    assert np.abs(a[disc] - b[disc]).max() < 3 / 65535             # the Moon as Blend draws it
+    out = rr > r + 3
+    assert np.abs(b[out] - f[out]).max() < 3 / 65535               # the file untouched
+
+
+def test_corona_first_uses_earthshine_pixels_from_few_frames(tmp_path):
+    """On Andy's frame-9 stack (Nov 2026) 1119 px by the limb were left black under the rule, most of
+    them just inside the limb by the 6 o'clock prominence: the earthshine stack had data there, but
+    from only 0.5-9.5 % of its usual frames (the longer ones saturated by the prominence's glare),
+    and the rule used it only from 10 %. Those pixels hold the glare recorded by the short frames
+    (red, 150x the earthshine); in his final image without the limit they continue the prominence's
+    glare and 280 px are left, which no frame recorded. Now any earthshine data is used."""
+    from tse_core.earthshine import merge_moon
+    from tse_core.fits import read_fits
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    hdr, head = read_fits(tmp_path / "e_hdr.fit")
+    wt, _ = read_fits(tmp_path / "e_weight.fit")
+    es, eh = read_fits(tmp_path / "e_earthshine_rgb.fit")
+    ew, _ = read_fits(tmp_path / "e_earthshine_weight.fit")
+    crop = (slice(30, 270), slice(40, 280))
+    few = (np.abs(phi) < 0.05) & (rr > r - 6) & (rr < r - 1)
+    fc = few[crop]
+    es = es.astype(np.float32).copy()
+    es[0][fc], es[1][fc], es[2][fc] = 0.30, 0.10, 0.12           # red glare, as by the prominence
+    ew = ew.astype(np.float32).copy()
+    ew[fc] = 0.05 * float(np.median(ew[ew > 0]))                 # 5 % of the usual frames
+    H = np.moveaxis(hdr, 0, -1).astype(np.float32).copy()
+    W = wt.astype(np.float32).copy()
+    msgs = []
+    merge_moon(H, W, head, es, ew, (40, 30), (float(eh["MOONX"]), float(eh["MOONY"])), say=msgs.append)
+    assert (W[few] > 0).all(), msgs                                # used, not left black
+    assert np.allclose(H[few], [0.30, 0.10, 0.12], atol=1e-4)      # the earthshine stack's own values

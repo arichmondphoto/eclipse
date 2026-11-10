@@ -2061,7 +2061,9 @@ class EarthshineTab(StepTab):
              "stack has it (recommended): the HDR stack is kept everywhere the Blend without the Moon shows it, "
              "the earthshine stack fills the rest of the disc, and pixels neither stack recorded stay black (the "
              "log counts them). Band by the limb rebuilt: the older way, which rebuilds the corona in the few "
-             "pixels just outside the limb from both stacks; try it if black pixels show at the limb.", ff)
+             "pixels just outside the limb from both stacks; try it if black pixels show at the limb. With "
+             "'Paste into a file…' the rule holds too: the Moon goes in only where the stack has no corona, and "
+             "the rest of your file is kept as it is.", ff)
         _tip(self.strength, "Brightness of the seas and highlands added inside the Moon: 1 (default) = as made by "
              "the earthshine step (its Brightness setting), 0 = none, above 1 brightens a faint Moon (and its "
              "noise).", ff)
@@ -2111,13 +2113,16 @@ class EarthshineTab(StepTab):
         self._final_shown = False
         for w in (self.strength,):
             w.valueChanged.connect(self._final_changed)
-        for w in (self.base, self.mode):
+        for w in (self.base, self.mode, self.join):
             w.currentIndexChanged.connect(self._final_changed)
+        self.join.currentIndexChanged.connect(self._mode_enabled)
         _tip(final, "The finished picture with the Moon in it, written as TIFF (16-bit), PNG (16-bit) or JPG "
              "(8-bit), so Photoshop is optional. Needs the earthshine stack above and, for Blend or Natural, one "
              "'Write full-size layers' run on the Enhance tab: its settings (not the tab's current ones, and not "
              "its files) are used to draw the corona and the Moon together.")
-        _tip(self.mode, "Used only with 'Paste into a file…': how the earthshine layer is combined with that "
+        _tip(self.mode, "Used only with 'Paste into a file…' and Moon meets corona 'Band by the limb rebuilt' "
+             "(with 'Corona wherever the stack has it' the Moon is put in exactly where the stack has no corona "
+             "and the rest of your file is left untouched): how the earthshine layer is combined with that "
              "image, as Photoshop's layer modes. The corona is black inside the disc and the earthshine black "
              "outside it, so they differ only at the soft edge of the limb. screen (default): smooth and never "
              "clips; lighten: the brighter of the two; add: the sum (can clip at the limb).", ff)
@@ -2219,8 +2224,12 @@ class EarthshineTab(StepTab):
             elif not self.base_file:
                 self.base.setCurrentIndex(0)  # nothing chosen: back to the last-written blend
         self._show_base()
-        self.mode.setEnabled(self.base.currentData() == "file")  # the blend mode only matters when pasting
+        self._mode_enabled()
         self._final_changed()
+
+    def _mode_enabled(self, *_a) -> None:
+        # The blend mode only matters when pasting the older way (the band by the limb rebuilt).
+        self.mode.setEnabled(self.base.currentData() == "file" and self.join.currentData() == "rebuilt")
 
     def _show_base(self) -> None:
         self.base_label.setText(f"File: {Path(self.base_file).name}" if self.base.currentData() == "file"
@@ -2241,7 +2250,7 @@ class EarthshineTab(StepTab):
         (base, bfile), k, mode = self._base_args(), self.strength.value(), self.mode.currentText()
         if bfile:  # an image from elsewhere: the older way, pasting the earthshine layer in
             fn = lambda p, say, cancel: W.final_image(p, base, k, mode, preview_side=1400, say=say, cancel=cancel,
-                                                      base_file=bfile)
+                                                      base_file=bfile, join=self.join.currentData())
         else:  # Moon and corona stretched together from the stacks
             fn = lambda p, say, cancel: W.final_with_moon(p, base, k, preview_side=1400, say=say, cancel=cancel,
                                                           join=self.join.currentData())
@@ -2263,7 +2272,7 @@ class EarthshineTab(StepTab):
         fname = str(_with_ext(fname, filt))
         if bfile:
             fn = lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname,
-                                                      base_file=bfile)
+                                                      base_file=bfile, join=self.join.currentData())
         else:
             fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname,
                                                           join=self.join.currentData())

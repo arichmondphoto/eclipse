@@ -100,11 +100,8 @@ carefully against the PyQt6 API. Say so when handing it over.
   the per-pixel rule "corona first" (c527ce0). His frame-9 files were staged as a 3000 px crop in
   `~/Desktop/Eclipse 2024/_claude_trial` (hdr.fit, weight.fit; origin 2466, 1292); the earthshine
   files are in `fits/`. He is short of usage: keep sessions lean and do not re-derive this.
-  1. The rule must apply to every **Corona image** choice (blend, natural, paste). Then the black
-     pixels by the limb (1119 px on frame 9: base of the 6 o'clock prominence, 3 and 10 o'clock).
-     Andy sees data there in the earthshine stack itself. First suspect: step 2 uses the earthshine
-     stack only where >= 10 % of its usual frames went in (`es_ok` in `merge_moon`); check those
-     pixels' weights and values before changing anything.
+  1. Done (10 Nov 2026): the rule holds for Paste into a file too, and under the rule the earthshine
+     stack is used wherever it has data (1119 black px on frame 9 down to 280 that no frame recorded).
   2. **Write Moon layer (for Photoshop)** seems to write the same file as Stack earthshine. It must
      write only the Moon as it appears in the merged blend/natural image, for layering by hand.
   3. Earthshine tab preview: a full-resolution crop of the merged result, not the whole frame small.

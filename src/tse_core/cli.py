@@ -316,11 +316,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--base-file", help="use this image as the corona instead (the size of the HDR stack)")
     p.add_argument("--strength", type=float, default=1.0, help="brightness of the lunar surface, 1 = as made by the "
                    "earthshine step (default 1)")
-    p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"], help="blend mode (default screen)")
+    p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"],
+                   help="blend mode when pasting with --join rebuilt (default screen); with corona-first the Moon "
+                        "replaces the image only where the stack has no corona")
     p.add_argument("--join", default="corona-first", choices=["corona-first", "rebuilt"],
                    help="how Moon and corona meet: corona-first (the HDR stack wherever the Blend has it, the "
                         "earthshine stack elsewhere in the disc, black where neither has data) or rebuilt (the older "
-                        "way: the band just outside the limb rebuilt from both stacks) (default corona-first)")
+                        "way: the band just outside the limb rebuilt from both stacks) (default corona-first); also when "
+                        "pasting (--paste, --base-file)")
     p.add_argument("--moon-layer", action="store_true",
                    help="write only the Moon as --base draws it (with --strength), transparent elsewhere, for "
                         "Photoshop: above that layer in Normal mode at 100 %% it gives the final image (default "
@@ -419,7 +422,8 @@ def main(argv: list[str] | None = None) -> int:
             return code
         if args.paste or args.base_file:
             out, code = _run(final_image, args.project, args.base, args.strength, args.mode, name=args.name,
-                             base_file=args.base_file, output_file=args.output, quiet=args.quiet)
+                             base_file=args.base_file, output_file=args.output, quiet=args.quiet,
+                             join=args.join.replace("-", " "))
         else:
             out, code = _run(final_with_moon, args.project, args.base, args.strength, name=args.name,
                              output_file=args.output, quiet=args.quiet, join=args.join.replace("-", " "))
