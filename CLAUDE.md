@@ -32,7 +32,7 @@ step saves its results into one project file (`<event>/<event>.json`).
 
 | Path | What |
 | --- | --- |
-| `src/tse_core/workflow.py` | Steps as used by the GUI and CLI: `align`, `stack`, `enhance_project`, `earthshine`, `final_with_moon`, `final_image` (the older paste way), `prominence_stack`, `prominence_layer`, `final_with_prominences` |
+| `src/tse_core/workflow.py` | Steps as used by the GUI and CLI: `align`, `stack`, `enhance_project`, `earthshine`, `final_with_moon`, `moon_layer`, `prominence_stack`, `prominence_layer`, `final_with_prominences` |
 | `src/tse_core/align.py`, `geometry.py`, `eclipse.py` | Phase correlation alignment, field rotation, the Sun's centre, Besselian elements |
 | `src/tse_core/stack.py` | Moon-aware HDR stacking with measured brightness matching |
 | `src/tse_core/enhance.py` | Stretch and filter layers; `MoonInput` lets the Moon be drawn with the same curve |
@@ -102,8 +102,9 @@ carefully against the PyQt6 API. Say so when handing it over.
   files are in `fits/`. He is short of usage: keep sessions lean and do not re-derive this.
   1. Done (10 Nov 2026): the rule holds for Paste into a file too, and under the rule the earthshine
      stack is used wherever it has data (1119 black px on frame 9 down to 280 that no frame recorded).
-  2. **Write Moon layer (for Photoshop)** seems to write the same file as Stack earthshine. It must
-     write only the Moon as it appears in the merged blend/natural image, for layering by hand.
+  2. Done (10 Nov 2026): **Write Moon layer (for Photoshop)** was right (`_moon.tif`, checked on frame 9); the
+     file like Stack earthshine's is `_earthshine.tif`, the old paste layer (its box: item 5). Paste into a file
+     removed; **Moon's edge**: Corona as stacked / Corona blended into the Moon (`--moon-edge`).
   3. Earthshine tab preview: a full-resolution crop of the merged result, not the whole frame small.
   4. Bug: Enhance **Write full-size layers** writes every layer except ACHF even when unticked
      under **Layers to write**.

@@ -254,27 +254,12 @@ assert es.edge_fill.value() == 0.0  # Filled edge, at least: % of the Moon's rad
 n = len(QMessageBox.log)
 es.preview_final()
 assert not es._final_shown and len(QMessageBox.log) == n + 1 and "Stack the earthshine again" in QMessageBox.log[-1][1]
-# The older way (pasting into a file) still works with just the layer.
-os.environ["STUB_OPEN"] = et.outputs["blend"]
-es.base.setCurrentIndex(es.base.findData("file"))
-es._base_chosen()
-es.preview_final()
-assert es._final_shown
-os.environ["STUB_SAVE"] = str(T / "out" / "my picture")
-es.write_final()
-assert Path(es.final_path).name == "my picture.tif"
-assert Path(es.final_path).exists() and EventProject.load(path).parameters["final"]["strength"] == 1.5
-print("final image:", Path(es.final_path).name)
-es.base.setCurrentIndex(es.base.findData("blend"))
-# From file: a blend saved earlier under another name.
-os.environ["STUB_OPEN"] = et.outputs["blend"]
-es.base.setCurrentIndex(es.base.findData("file"))
-es._base_chosen()
-assert es._base_args() == ("blend", et.outputs["blend"])
-os.environ["STUB_SAVE"] = str(T / "out" / "from_file_final.tif")
-es.write_final()
-assert Path(es.final_path).name == "from_file_final.tif"
-assert EventProject.load(path).parameters["final"]["base_file"] == et.outputs["blend"]
+# Corona image: Blend or Natural only (pasting into a file was removed, Nov 2026); Moon's edge named
+# for the user, with hover help, and the older way still available.
+assert es.base.findData("file") < 0 and es.base.findData("blend") >= 0 and es.base.findData("natural") >= 0
+assert es.join.findData("corona first") == 0 and es.join.findData("rebuilt") == 1
+assert es.join.itemText(0) == "Corona as stacked (recommended)" and "older" in es.join.itemText(1)
+assert "Corona as stacked" in es.join.toolTip() and "Corona blended into the Moon" in es.join.toolTip()
 # Prominences on the real 2024 data. No RAW files here to stack the short frames, so the HDR stack
 # stands in for the prominence stack (the swap's mechanics, settings saved, the final image written).
 pt = win.prominences_tab
@@ -295,7 +280,9 @@ assert pt._shown
 print("prominences:", pt.log.lines[-1].splitlines()[0])
 os.environ["STUB_SAVE"] = str(T / "out" / "with_proms.jpg")
 pt.write_final()
-assert es.final_path.endswith("with_proms.jpg") and Path(es.final_path).exists()
+# No RAW files here, so no earthshine stack: writing hands over to the Earthshine tab, which asks for it
+# (the merge itself is tested in tests/test_earthshine.py).
+assert QMessageBox.log[-1][0] == "warn" and "Stack the earthshine" in QMessageBox.log[-1][1]
 assert EventProject.load(path).parameters["prominences"]["params"]["brightness"] == 0.3
 # The enhance layers as PNG.
 os.environ["STUB_SAVE"] = str(T / "out" / "pngs.png")

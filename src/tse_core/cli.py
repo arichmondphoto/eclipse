@@ -307,23 +307,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("final", help="the finished image: Moon and corona stretched together from the stacks")
     p.add_argument("project", help="the project file (.json)")
-    p.add_argument("--paste", action="store_true",
-                   help="another way: paste the Moon as Blend draws it into an enhanced layer or --base-file, "
-                        "inside the corona layers' black disc, with a blend mode (the earthshine layer itself "
-                        "before any Enhance layers are written)")
     p.add_argument("--base", default="blend", choices=["blend", "natural"],
                    help="enhanced layer to use as the corona (default: blend, the last one written)")
-    p.add_argument("--base-file", help="use this image as the corona instead (the size of the HDR stack)")
     p.add_argument("--strength", type=float, default=1.0, help="brightness of the lunar surface, 1 = as made by the "
                    "earthshine step (default 1)")
-    p.add_argument("--mode", default="screen", choices=["screen", "lighten", "add"],
-                   help="blend mode when pasting with --join rebuilt (default screen); with corona-first the Moon "
-                        "replaces the image only where the stack has no corona")
-    p.add_argument("--join", default="corona-first", choices=["corona-first", "rebuilt"],
-                   help="how Moon and corona meet: corona-first (the HDR stack wherever the Blend has it, the "
-                        "earthshine stack elsewhere in the disc, black where neither has data) or rebuilt (the older "
-                        "way: the band just outside the limb rebuilt from both stacks) (default corona-first); also when "
-                        "pasting (--paste, --base-file)")
+    p.add_argument("--moon-edge", default="as-stacked", choices=["as-stacked", "blended"],
+                   help="where the Moon meets the corona: as-stacked (the corona exactly as in the Blend without the "
+                        "Moon, the Moon only in the dark disc, black where no frame recorded anything; default) or "
+                        "blended (the older way: the first few px outside the limb recomputed from both stacks)")
     p.add_argument("--moon-layer", action="store_true",
                    help="write only the Moon as --base draws it (with --strength), transparent elsewhere, for "
                         "Photoshop: above that layer in Normal mode at 100 %% it gives the final image (default "
@@ -411,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "earthshine":
         return cmd_earthshine(args)
     if args.command == "final":
-        from .workflow import final_image, final_with_moon
+        from .workflow import final_with_moon
 
         if args.moon_layer:
             from .workflow import moon_layer
@@ -420,13 +411,9 @@ def main(argv: list[str] | None = None) -> int:
             if not code:
                 print(f"Moon layer written to {out}")
             return code
-        if args.paste or args.base_file:
-            out, code = _run(final_image, args.project, args.base, args.strength, args.mode, name=args.name,
-                             base_file=args.base_file, output_file=args.output, quiet=args.quiet,
-                             join=args.join.replace("-", " "))
-        else:
-            out, code = _run(final_with_moon, args.project, args.base, args.strength, name=args.name,
-                             output_file=args.output, quiet=args.quiet, join=args.join.replace("-", " "))
+        join = {"as-stacked": "corona first", "blended": "rebuilt"}[args.moon_edge]
+        out, code = _run(final_with_moon, args.project, args.base, args.strength, name=args.name,
+                         output_file=args.output, quiet=args.quiet, join=join)
         if not code:
             print(f"Final image written to {out}")
         return code

@@ -117,7 +117,7 @@ The window has one tab per step, and each step saves into the project file:
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; **Calibration:** vignetting (automatic, master flat, profile from the flats, master flat + compare, lensfun, none) and the lensfun lens, whether the light on the flats was uneven, darks (off by default) with the hot-pixel fix when they are off, and bias | The stacked preview and each frame's measured brightness |
 | 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but Adaptive (ACHF) ticked: it is slow); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
-| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Photoshop paste only (old way)**: kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings) or paste into a file, lunar surface strength, Moon meets corona, blend mode when pasting the older way, use the prominence stack | The Moon close up, then a preview of the final picture; **Write final image**, **Write Moon layer (for Photoshop)** |
+| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Photoshop paste only (old way)**: kept glare and limb softening. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings), lunar surface strength, Moon's edge, use the prominence stack | The Moon close up, then a preview of the final picture; **Write final image**, **Write Moon layer (for Photoshop)** |
 | 6 Prominences | 1 Prominence stack: longest exposure (stops above the shortest), **Stack prominences**. 2 In the final image: sharpening, structure, prominence brightness, redness needed, chromosphere on or off, rim height (greyed out when the Moon hides the chromosphere) | The final image round the Sun at full size, exactly as it will be written; **Write final image** (as on the Earthshine tab) |
 
 Every setting has hover help explaining what it does and when to change it.
@@ -825,11 +825,11 @@ Enhance again.
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| **Corona image** (`--base`) | The blend or the natural layer, stretched with the Moon; or paste into a file (below). | blend |
+| **Corona image** (`--base`) | The blend or the natural layer, stretched with the Moon. | blend |
 | **Lunar surface strength** (`--strength`) | How bright the seas and highlands are, 1 = as made in part 2. | 1 |
-| **Moon meets corona** (`--join`) | How Moon and corona meet, pixel by pixel, before the stretch: **Corona wherever the stack has it** or **Band by the limb rebuilt** (both below). | Corona wherever the stack has it |
+| **Moon's edge** (`--moon-edge`) | How Moon and corona meet, pixel by pixel, before the stretch: **Corona as stacked** or **Corona blended into the Moon** (both below). | Corona as stacked |
 
-**Corona wherever the stack has it** (`corona-first`) follows one rule for
+**Corona as stacked (recommended)** (`as-stacked`) follows one rule for
 each pixel:
 
 1. Where the Blend without the Moon has the corona (outside its black disc,
@@ -846,7 +846,7 @@ data); K px by the limb with neither, left black"). On the 2024 stack with
 the Moon from frame 9, 280 px had neither, in a thin sliver at the base of the
 6 o'clock prominence and at 3 o'clock: no frame of either stack recorded them.
 
-**Band by the limb rebuilt** (`rebuilt`), the older way:
+**Corona blended into the Moon (older)** (`blended`), the older way:
 just outside the limb neither stack is good on its own: the earthshine
 stack's corona is smeared (it is aligned on the Moon) and the HDR stack
 holds few frames there (the Moon covered it part of the time). So the
@@ -871,19 +871,6 @@ the limb: MGN in particular read the edge as a dark feature, a 1 px dark line
 round the limb. So just outside the limb the blend is the blend without the
 Moon, and on Linear the Moon gets the same overall treatment as the corona.
 
-**Another way: pasting.** **Paste into a file** on the tab (`totality final
---paste` / `--base-file`) pastes the Moon into a picture you choose, for a
-corona finished elsewhere. The Moon pasted is the Moon as Blend draws it
-(with your Enhance settings and **Lunar surface strength**). With **Moon
-meets corona** at **Corona wherever the stack has it** the same rule holds:
-the Moon replaces the picture exactly where the stack has no corona (the
-Blend's black disc), and every other pixel of the picture is kept as it is,
-even if its disc is not black. With **Band by the limb rebuilt** the Moon is
-laid over the picture with **Blend mode** (screen by default). Before any
-**Write full-size layers** run there are no settings to draw the Moon with,
-so the earthshine layer itself is pasted with the blend mode, and the log
-says so.
-
 **A Moon layer for Photoshop.** **Write Moon layer (for Photoshop)** on the
 tab (`totality final --moon-layer`) writes only the Moon, exactly as Blend (or
 Natural, from **Corona image**) draws it, with **Lunar surface strength**
@@ -903,8 +890,8 @@ matched the Blend final image exactly where it is opaque (the disc and about
 4-8 px outside the limb) and within half an 8-bit level everywhere else.
 
 After **Stack earthshine**, the tab shows the Moon as the final image draws it
-(a preview with your Enhance settings), so what you set there is what Blend,
-Natural and pasting give.
+(a preview with your Enhance settings), so what you set there is what Blend
+and Natural give.
 
 The earthshine layer file (`<name>_earthshine.tif`, for Photoshop) is drawn
 on its own: the seas and highlands stretched by themselves, with **Keep
@@ -1391,12 +1378,9 @@ the finished image: Moon and corona stretched together from the stacks.
 | Option | What it does |
 | --- | --- |
 | `project` | the project file (.json) |
-| `--paste` | another way: paste the Moon as Blend draws it into an enhanced layer or --base-file, inside the corona layers' black disc, with a blend mode (the earthshine layer itself before any Enhance layers are written) |
 | `--base` | enhanced layer to use as the corona (default: blend, the last one written) |
-| `--base-file` | use this image as the corona instead (the size of the HDR stack) |
 | `--strength` | brightness of the lunar surface, 1 = as made by the earthshine step (default 1) |
-| `--mode` | blend mode when pasting with --join rebuilt (default screen); with corona-first the Moon replaces the image only where the stack has no corona |
-| `--join` | how Moon and corona meet: corona-first (the HDR stack wherever the Blend has it, the earthshine stack elsewhere in the disc, black where neither has data) or rebuilt (the older way: the band just outside the limb rebuilt from both stacks) (default corona-first); also when pasting (--paste, --base-file) |
+| `--moon-edge` | where the Moon meets the corona: as-stacked (the corona exactly as in the Blend without the Moon, the Moon only in the dark disc, black where no frame recorded anything; default) or blended (the older way: the first few px outside the limb recomputed from both stacks) |
 | `--moon-layer` | write only the Moon as --base draws it (with --strength), transparent elsewhere, for Photoshop: above that layer in Normal mode at 100 % it gives the final image (default <name>_moon.tif; TIFF or PNG) |
 | `--name` | output file name prefix (default: the project name) |
 | `--output`, `-o` | output file (.tif, .png or .jpg); default <name>_final.tif |

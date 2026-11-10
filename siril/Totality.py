@@ -2028,42 +2028,26 @@ class EarthshineTab(StepTab):
         self.base = QComboBox()
         self.base.addItem("Blend (Enhance settings)", "blend")
         self.base.addItem("Natural (Enhance settings)", "natural")
-        self.base.addItem("Paste into a file… (older way)", "file")
-        self.base_file = ""
-        self.base.activated.connect(self._base_chosen)
         ff.addRow("Corona image:", self.base)
-        self.base_label = QLabel("")
-        self.base_label.setWordWrap(True)
-        ff.addRow(self.base_label)
         self.strength = QDoubleSpinBox()
         self.strength.setRange(0.0, 3.0)
         self.strength.setSingleStep(0.1)
         self.strength.setValue(1.0)
         ff.addRow("Lunar surface strength:", self.strength)
         self.join = QComboBox()
-        self.join.addItem("Corona wherever the stack has it", "corona first")
-        self.join.addItem("Band by the limb rebuilt (older)", "rebuilt")
-        ff.addRow("Moon meets corona:", self.join)
-        self.mode = QComboBox()
-        self.mode.addItems(["screen", "lighten", "add"])
-        ff.addRow("Blend mode (pasting only):", self.mode)
-        self.mode.setEnabled(False)
+        self.join.addItem("Corona as stacked (recommended)", "corona first")
+        self.join.addItem("Corona blended into the Moon (older)", "rebuilt")
+        ff.addRow("Moon's edge:", self.join)
         _tip(self.base, "Blend or Natural (Enhance settings): the Moon-aligned stack goes into the HDR stack inside "
              "the lunar disc, and Moon and corona are stretched together with the settings of your last 'Write "
              "full-size layers' run, so the limb is the stack's own: one curve, one colour, no seam. The seas and "
-             "highlands are then added inside. Blend gives that run's blend, Natural the natural layer alone.\n\n"
-             "'Paste into a file…': the Moon as Blend draws it (with your Enhance settings and the Lunar surface "
-             "strength) is pasted into an image you choose, inside the corona layers' black disc, with the Blend "
-             "mode below; the rest of that image is left as it is. Use it for a corona finished elsewhere. The "
-             "image must be the full size of the HDR stack (not cropped or resized), so the Moon lines up. Before "
-             "any 'Write full-size layers' run, the earthshine layer itself is pasted instead.", ff)
-        _tip(self.join, "How the Moon and the corona meet, pixel by pixel, before the stretch. Corona wherever the "
-             "stack has it (recommended): the HDR stack is kept everywhere the Blend without the Moon shows it, "
-             "the earthshine stack fills the rest of the disc, and pixels neither stack recorded stay black (the "
-             "log counts them). Band by the limb rebuilt: the older way, which rebuilds the corona in the few "
-             "pixels just outside the limb from both stacks; try it if black pixels show at the limb. With "
-             "'Paste into a file…' the rule holds too: the Moon goes in only where the stack has no corona, and "
-             "the rest of your file is kept as it is.", ff)
+             "highlands are then added inside. Blend gives that run's blend, Natural the natural layer alone.", ff)
+        _tip(self.join, "Where the Moon meets the corona. Corona as stacked (recommended): every pixel of the "
+             "corona is exactly as in your Blend or Natural layer without the Moon, and the Moon fills only the "
+             "dark disc; the few pixels that no frame of either stack recorded stay black (the log counts them). "
+             "Corona blended into the Moon: the older way, which recomputes the first few pixels outside the limb "
+             "from the HDR and earthshine stacks so the corona fades into the Moon; it can hide those black "
+             "pixels but changes the corona there (for example a reddish ring, or a small prominence lost).", ff)
         _tip(self.strength, "Brightness of the seas and highlands added inside the Moon: 1 (default) = as made by "
              "the earthshine step (its Brightness setting), 0 = none, above 1 brightens a faint Moon (and its "
              "noise).", ff)
@@ -2113,19 +2097,12 @@ class EarthshineTab(StepTab):
         self._final_shown = False
         for w in (self.strength,):
             w.valueChanged.connect(self._final_changed)
-        for w in (self.base, self.mode, self.join):
+        for w in (self.base, self.join):
             w.currentIndexChanged.connect(self._final_changed)
-        self.join.currentIndexChanged.connect(self._mode_enabled)
         _tip(final, "The finished picture with the Moon in it, written as TIFF (16-bit), PNG (16-bit) or JPG "
              "(8-bit), so Photoshop is optional. Needs the earthshine stack above and, for Blend or Natural, one "
              "'Write full-size layers' run on the Enhance tab: its settings (not the tab's current ones, and not "
              "its files) are used to draw the corona and the Moon together.")
-        _tip(self.mode, "Used only with 'Paste into a file…' and Moon meets corona 'Band by the limb rebuilt' "
-             "(with 'Corona wherever the stack has it' the Moon is put in exactly where the stack has no corona "
-             "and the rest of your file is left untouched): how the earthshine layer is combined with that "
-             "image, as Photoshop's layer modes. The corona is black inside the disc and the earthshine black "
-             "outside it, so they differ only at the soft edge of the limb. screen (default): smooth and never "
-             "clips; lighten: the brighter of the two; add: the sum (can clip at the limb).", ff)
         self.settings_layout.addStretch(1)
         self.layer_path = ""
         self.view = ImageView()
@@ -2214,32 +2191,6 @@ class EarthshineTab(StepTab):
         _tip(self.include_rejected, "Frames whose Moon is off the track the others follow are usually shaken; "
              "they would blur the lunar surface.")
 
-    def _base_chosen(self, *_a) -> None:
-        if self.base.currentData() == "file":
-            start = self.base_file or str(self.main.frames_tab.project_dir())
-            fname, _ = QFileDialog.getOpenFileName(self, "Corona image to blend the earthshine into", start,
-                                                   "Images (*.tif *.tiff *.png)")
-            if fname:
-                self.base_file = fname
-            elif not self.base_file:
-                self.base.setCurrentIndex(0)  # nothing chosen: back to the last-written blend
-        self._show_base()
-        self._mode_enabled()
-        self._final_changed()
-
-    def _mode_enabled(self, *_a) -> None:
-        # The blend mode only matters when pasting the older way (the band by the limb rebuilt).
-        self.mode.setEnabled(self.base.currentData() == "file" and self.join.currentData() == "rebuilt")
-
-    def _show_base(self) -> None:
-        self.base_label.setText(f"File: {Path(self.base_file).name}" if self.base.currentData() == "file"
-                                and self.base_file else "")
-
-    def _base_args(self):
-        if self.base.currentData() == "file":
-            return "blend", self.base_file or None
-        return self.base.currentData(), None
-
     def _final_changed(self, *_a) -> None:
         if self._final_shown:
             self.final_timer.start()
@@ -2247,13 +2198,9 @@ class EarthshineTab(StepTab):
     def preview_final(self) -> None:
         if self.worker is not None:
             return
-        (base, bfile), k, mode = self._base_args(), self.strength.value(), self.mode.currentText()
-        if bfile:  # an image from elsewhere: the older way, pasting the earthshine layer in
-            fn = lambda p, say, cancel: W.final_image(p, base, k, mode, preview_side=1400, say=say, cancel=cancel,
-                                                      base_file=bfile, join=self.join.currentData())
-        else:  # Moon and corona stretched together from the stacks
-            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, preview_side=1400, say=say, cancel=cancel,
-                                                          join=self.join.currentData())
+        base, k = self.base.currentData(), self.strength.value()
+        fn = lambda p, say, cancel: W.final_with_moon(p, base, k, preview_side=1400, say=say, cancel=cancel,
+                                                      join=self.join.currentData())
         self.start("Preview of the final image", fn, self._final_preview_done, reload=False)
 
     def _final_preview_done(self, img) -> None:
@@ -2261,7 +2208,7 @@ class EarthshineTab(StepTab):
         self.view.show_array(img)
 
     def write_final(self) -> None:
-        (base, bfile), k, mode = self._base_args(), self.strength.value(), self.mode.currentText()
+        base, k = self.base.currentData(), self.strength.value()
         proj = self.main.ensure_saved()
         if proj is None:
             return
@@ -2270,12 +2217,8 @@ class EarthshineTab(StepTab):
         if not fname:
             return
         fname = str(_with_ext(fname, filt))
-        if bfile:
-            fn = lambda p, say, cancel: W.final_image(p, base, k, mode, say=say, cancel=cancel, output_file=fname,
-                                                      base_file=bfile, join=self.join.currentData())
-        else:
-            fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname,
-                                                          join=self.join.currentData())
+        fn = lambda p, say, cancel: W.final_with_moon(p, base, k, say=say, cancel=cancel, output_file=fname,
+                                                      join=self.join.currentData())
         self.start("Writing the final image", fn, self._final_done)
 
     def write_moon_layer(self) -> None:
@@ -2313,15 +2256,13 @@ class EarthshineTab(StepTab):
         fin = project.parameters.get("final", {})
         self.final_path = W.resolve(path, fin.get("file"))
         self.open_final_btn.setEnabled(bool(self.final_path))
-        self.base_file = W.resolve(path, fin.get("base_file")) if fin.get("base_file") else ""
-        key = "file" if self.base_file else fin.get("base")
-        if key:
-            i = self.base.findData(key)
+        if fin.get("base"):
+            i = self.base.findData(fin["base"])
             if i >= 0:
                 self.base.setCurrentIndex(i)
-        self._show_base()
-        if fin.get("mode"):
-            self.mode.setCurrentText(fin["mode"])
+        i = self.join.findData(fin.get("join", "corona first"))
+        if i >= 0:
+            self.join.setCurrentIndex(i)
         if fin.get("strength") is not None:
             self.strength.setValue(float(fin["strength"]))
         self._final_shown = False

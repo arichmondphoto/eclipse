@@ -932,8 +932,8 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
     HDR stack wherever the Blend has it, then the earthshine stack, else black) or "rebuilt" (the
     band by the limb rebuilt from both); None: as last saved in the project (default corona first).
 
-    With ``moon_only`` returns (picture, Moon mask) without writing, for pasting the Moon as drawn
-    here into another picture (see :func:`final_image`).
+    With ``moon_only`` returns (picture, Moon mask) without writing, for writing the Moon as drawn
+    on its own (see :func:`moon_layer`).
 
     The Moon-aligned earthshine stack (linear, same units) replaces the inside of the lunar disc
     in the HDR stack, and the Enhance step's settings stretch Moon and corona together, so the
@@ -1097,99 +1097,6 @@ def moon_layer(project_path, base_layer: str = "blend", strength: float = 1.0, n
         f"strength {strength:g}; over the {base_layer} layer at 100 % in Normal mode it gives the final "
         "image)")
     return str(out)
-
-
-def final_image(project_path, base_layer: str = "blend", strength: float = 1.0, mode: str = "screen",
-                preview_side: Optional[int] = None, name: Optional[str] = None,
-                say: Optional[Say] = None, cancel=None, output_file: Optional[str] = None,
-                base_file: Optional[str] = None, enhance_params=None, join: Optional[str] = None):
-    """The chosen enhanced layer with the Moon pasted into the lunar disc.
-
-    ``join`` "corona first" (default, as last saved for Write final image): the Moon replaces the
-    file exactly where the stack has no corona (the Blend's black disc) and every other pixel of the
-    file is kept; "rebuilt": the Moon is laid over the file with ``mode`` (the older way).
-
-    Once Enhance layers are written, the Moon pasted is the Moon as Blend draws it (see
-    :func:`final_with_moon`), cut to the corona layers' black disc, so pasting it into that blend
-    gives the Blend final image. Otherwise the earthshine layer itself is pasted.
-
-    ``base_file`` uses any image file as the corona instead of an enhanced layer (it must be the
-    size of the HDR stack, for example a blend written earlier or one finished elsewhere).
-    With ``preview_side`` returns a reduced image (no file); otherwise writes
-    ``output_file`` (default ``<name>_final.tif`` next to the project) and returns its path.
-    """
-    from .earthshine import composite
-
-    say = reporter(say, cancel)
-    path = Path(project_path).resolve()
-    project = EventProject.load(path)
-    if base_file:
-        base_path = resolve(path, base_file)
-        if not base_path:
-            raise WorkflowError(f"Image not found: {base_file}")
-    else:
-        base_path = resolve(path, project.parameters.get("enhance", {}).get(base_layer))
-        if not base_path:
-            raise WorkflowError(f"No '{base_layer}' layer yet: write the full-size layers on the Enhance tab first.")
-    earth_path = resolve(path, project.parameters.get("earthshine", {}).get("earthshine"))
-    if not earth_path:
-        raise WorkflowError("No earthshine layer yet: click 'Stack earthshine' first.")
-    step = 1
-    if preview_side:
-        w, h = image_size(base_path)
-        step = max(1, int(math.ceil(max(h, w) / preview_side)))
-    base = read_image(base_path, step)
-    es = project.parameters.get("earthshine", {})
-    can_draw = all(resolve(path, es.get(k)) for k in ("info", "rgb", "weight", "moon_surface")) and (
-        enhance_params is not None or resolve(path, project.parameters.get("enhance", {}).get("info")))
-    if can_draw:
-        # The Moon as Blend draws it (Moon and corona stretched together with the Enhance settings),
-        # cut to the corona layers' black disc: pasted into that blend it gives the Blend final image.
-        say(f"final image, pasting: the Moon as Blend draws it (Enhance settings, lunar surface strength "
-            f"{strength:g}) into {Path(base_path).name}")
-        if join is None:
-            join = str(project.parameters.get("final", {}).get("join", "corona first"))
-        img, mask = final_with_moon(path, "blend", strength, preview_side=preview_side, say=say,
-                                    enhance_params=enhance_params, moon_only=True, join=join)
-        earth = np.zeros_like(base)
-        m = np.zeros(base.shape[:2], bool)
-        hh, ww = min(base.shape[0], img.shape[0]), min(base.shape[1], img.shape[1])
-        earth[:hh, :ww] = img[:hh, :ww] * mask[:hh, :ww, None]
-        m[:hh, :ww] = mask[:hh, :ww] > 0
-        if join == "corona first":
-            # The rule: the Moon exactly where the stack has no corona, the file everywhere else.
-            out = np.where(m[..., None], earth, base)
-            say(f"Moon meets corona: corona wherever the stack has it; the Moon put in on {int(m.sum())} px, "
-                "the rest of the file kept as it is")
-        else:
-            out = composite(base, earth, 1.0, mode)
-        return _write_final(path, project, out, preview_side, output_file, name, say,
-                            {"base": base_layer, "base_file": str(base_file or ""), "strength": strength, "mode": mode,
-                             "moon": "as Blend draws it"})
-    say(f"final image, pasting {Path(earth_path).name} into {Path(base_path).name} (no Enhance layers written "
-        "yet, so the earthshine layer itself: write the full-size layers on the Enhance tab to paste the Moon as "
-        "Blend draws it)")
-    earth = read_image(earth_path, step)
-    if base.shape != earth.shape:
-        raise WorkflowError(f"{Path(base_path).name} is {base.shape[1] * step} x {base.shape[0] * step} px but the "
-                            f"earthshine layer is {earth.shape[1] * step} x {earth.shape[0] * step} px. Use an image "
-                            "the size of the HDR stack (not cropped or resized), or re-run the earthshine step after "
-                            "the latest stack.")
-    moon, limb_px, reach = None, 1.5, 6.0
-    info_path = resolve(path, project.parameters.get("earthshine", {}).get("info"))
-    if info_path:
-        try:
-            info = json.loads(Path(info_path).read_text(encoding="utf-8"))
-            if info.get("moon"):
-                mx, my, mr = info["moon"]
-                moon = ((mx + 0.5) / step - 0.5, (my + 0.5) / step - 0.5, mr / step)
-                limb_px = float(info.get("params", {}).get("limb_px", 1.5)) / step
-                reach = float(info.get("params", {}).get("limb_reach", 6.0)) / step
-        except (OSError, ValueError):
-            moon = None
-    out = composite(base, earth, strength, mode, moon=moon, limb_px=limb_px, reach=reach)
-    return _write_final(path, project, out, preview_side, output_file, name, say,
-                        {"base": base_layer, "base_file": str(base_file or ""), "strength": strength, "mode": mode})
 
 
 def _write_final(path, project, out, preview_side, output_file, name, say, record: dict):

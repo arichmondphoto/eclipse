@@ -193,6 +193,9 @@ class QComboBox(QWidget):
     def currentText(self):
         return self.items[self.i][0] if self.i >= 0 else ""
 
+    def itemText(self, i):
+        return self.items[i][0] if 0 <= i < len(self.items) else ""
+
     def currentData(self):
         return self.items[self.i][1] if self.i >= 0 else None
 
