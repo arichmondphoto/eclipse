@@ -1338,3 +1338,32 @@ def test_final_image_and_moon_layer_default_names(tmp_path):
     stem = Path(proj).stem
     assert Path(W.final_with_moon(proj, "natural", 1.0)).name == f"{stem}_earthshine_natural.tif"
     assert Path(W.moon_layer(proj, "blend", 1.0)).name == f"{stem}_earthshine_photoshop.tif"
+
+
+def test_earthshine_preview_keeps_its_work_when_only_the_strength_changes(tmp_path):
+    """List item 9 (Nov 2026): every Earthshine preview merged the Moon and measured the whole
+    stack again, even when only Lunar surface strength changed. That work does not depend on the
+    strength (the surface is added when the picture is drawn), so it is kept: the same pixels as a
+    fresh preview, and anything else changed (Moon's edge, Enhance settings) starts afresh."""
+    from tse_core import workflow as W
+
+    proj, rr, phi, r = _moon_project(tmp_path, holes=False)
+    W._FINAL_PREVIEW.clear()
+    W.final_moon_crop(proj, "blend", 1.0)
+    log = []
+    kept, _ = W.final_moon_crop(proj, "blend", 0.4, say=log.append)
+    assert any("kept from the last preview" in m for m in log)
+    W._FINAL_PREVIEW.clear()
+    fresh, _ = W.final_moon_crop(proj, "blend", 0.4)
+    assert np.array_equal(kept, fresh)
+    # another Moon's edge: not kept
+    log = []
+    W.final_moon_crop(proj, "blend", 0.4, join="rebuilt", say=log.append)
+    assert not any("kept from the last preview" in m for m in log)
+    # and the written image agrees with the kept preview
+    full = W.final_with_moon(proj, "blend", 0.4, output_file=str(tmp_path / "f.tif"))
+    from tse_core import imageout as IO
+
+    _p, box = W.final_moon_crop(proj, "blend", 0.4)
+    y0, y1, x0, x1 = box
+    assert np.abs(IO.read_image(full)[y0:y1, x0:x1] - kept).max() < 2 / 65535

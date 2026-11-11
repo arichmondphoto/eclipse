@@ -1011,6 +1011,25 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         params = replace(params, layers=("natural",), blend={})
     else:
         params = replace(params, layers=())
+    if join is None:
+        join = str(project.parameters.get("final", {}).get("join", "corona first"))
+    key = None
+    if box is not None and not moon_only:
+        # The Earthshine tab's preview: the whole-image work (the Moon merged, the measurements, the
+        # layers) does not depend on the lunar surface strength, which is only added when the picture is
+        # drawn. Kept from the last preview while nothing else changed, so trying strengths is quick.
+        st = project.parameters.get("stack", {})
+        files = [resolve(path, st.get("hdr")), resolve(path, st.get("weight")), info_path, rgb_path, wpath, mpath]
+        key = (str(path), tuple((str(f), Path(f).stat().st_mtime_ns) for f in files if f), base_layer, join,
+               repr(params))
+        hit = _FINAL_PREVIEW.get("key") == key
+        if hit:
+            say("the Moon in the stack and the whole-image measurements kept from the last preview "
+                "(only the lunar surface strength changed)")
+            frame, shift = _FINAL_PREVIEW["frame"], _FINAL_PREVIEW["shift"]
+            moon_data, _ = read_fits(mpath)
+            frame.moon.surface, frame.moon.visibility = _moon_surface(moon_data, strength, shift)
+            return _render_box(frame, params, box, base_layer, say)
     say("reading the HDR stack")
     data = load_hdr(path)
     es_rgb, es_head = read_fits(rgb_path)
@@ -1040,24 +1059,18 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
         ox, oy = (ox + sx0) // b, (oy + sy0) // b
         centre = ((centre[0] - sx0 + 0.5) / b - 0.5, (centre[1] - sy0 + 0.5) / b - 0.5)
     no_data = ~(np.asarray(data.weight) > 0) if moon_only else None  # black in the corona layers
-    if join is None:
-        join = str(project.parameters.get("final", {}).get("join", "corona first"))
     moon, shift = merge_moon(data.hdr, data.weight, data.header, es_rgb, es_w, (ox, oy), centre,
                              params.moon_margin_px, say, join=join)
-    surface = np.moveaxis(np.asarray(moon_data[:3], np.float32), 0, -1) * float(strength)
-    vis = np.asarray(moon_data[3], np.float32)
-    if abs(shift[0]) + abs(shift[1]) > 1e-3:
-        surface = np.stack([ndimage.shift(surface[..., c], shift[::-1], order=1) for c in range(3)], axis=-1)
-        vis = ndimage.shift(vis, shift[::-1], order=1)
-    moon.surface, moon.visibility = surface.astype(np.float32), vis.astype(np.float32)
+    moon.surface, moon.visibility = _moon_surface(moon_data, strength, shift)
     say("stretching Moon and corona together")
     if box is not None:  # the whole-image measurements, then only this part drawn
-        from .enhance import prepare, render
+        from .enhance import prepare
 
         frame = prepare(data.hdr, data.weight, data.header, params, moon=moon, progress=say)
-        y0, y1, x0, x1 = box
-        return render(frame, params, box=(max(0, y0), min(frame.shape[0], y1), max(0, x0), min(frame.shape[1], x1)),
-                      keep={base_layer}, progress=say)[base_layer]
+        if key is not None:
+            _FINAL_PREVIEW.clear()  # one kept at a time: a full frame takes a few GB
+            _FINAL_PREVIEW.update(key=key, frame=frame, shift=shift)
+        return _render_box(frame, params, box, base_layer, say)
     _, colour = enhance(data.hdr, data.weight, data.header, params, out_dir=None, progress=say, moon=moon,
                         keep={base_layer})
     out = colour[base_layer]
@@ -1078,6 +1091,31 @@ def final_with_moon(project_path, base_layer: str = "blend", strength: float = 1
                                    "mode": "moon in the stack", "join": join}
     project.save(path)
     return str(final)
+
+
+# The last Earthshine preview's prepared frame (see final_with_moon), while nothing but the lunar
+# surface strength changes.
+_FINAL_PREVIEW: dict = {}
+
+
+def _moon_surface(moon_data, strength: float, shift) -> tuple:
+    """The seas and highlands at ``strength``, and where they show, moved by the merge's ``shift``."""
+    from scipy import ndimage
+
+    surface = np.moveaxis(np.asarray(moon_data[:3], np.float32), 0, -1) * float(strength)
+    vis = np.asarray(moon_data[3], np.float32)
+    if abs(shift[0]) + abs(shift[1]) > 1e-3:
+        surface = np.stack([ndimage.shift(surface[..., c], shift[::-1], order=1) for c in range(3)], axis=-1)
+        vis = ndimage.shift(vis, shift[::-1], order=1)
+    return surface.astype(np.float32), vis.astype(np.float32)
+
+
+def _render_box(frame, params, box, base_layer: str, say):
+    from .enhance import render
+
+    y0, y1, x0, x1 = box
+    return render(frame, params, box=(max(0, y0), min(frame.shape[0], y1), max(0, x0), min(frame.shape[1], x1)),
+                  keep={base_layer}, progress=say)[base_layer]
 
 
 # Half-side of the Earthshine tab's preview box, as a fraction of the Moon's radius: the Moon, the

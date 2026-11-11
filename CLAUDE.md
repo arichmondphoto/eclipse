@@ -128,7 +128,8 @@ carefully against the PyQt6 API. Say so when handing it over.
      test_parallel.py). On 2 cores, frame 9 crop: layers 12.7 -> 9.3 s, ACHF 189 -> 108 s. Andy (M5 Air):
      stacking at least 5x faster, ACHF "fast enough now". Step 1 declined (10 Nov 2026): sharing the
      polar resampling would only work per part and needs one grid for all scales, so not bit-identical;
-     do not propose it again. Step 3 (Earthshine preview) still open if previews feel slow.
+     do not propose it again. Step 3 done: `final_with_moon` keeps the last preview's prepared frame
+     (`_FINAL_PREVIEW`) while only the strength changes; frame 9: 13.4 s, then 1.8 s per strength.
 - `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
   FITS and SER frames, gain, mono; prominence brightness by red weight while stacking). Not to be
   started unless the user asks; read it when they do.

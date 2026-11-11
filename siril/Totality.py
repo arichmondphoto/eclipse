@@ -2073,15 +2073,16 @@ class EarthshineTab(StepTab):
         self.colour.setChecked(True)
         f.addRow(self.colour)
 
-        # Only for the separate earthshine layer (pasting it in, or Photoshop).
-        layer_box = QGroupBox("Photoshop paste only (old way)")
+        # Only for the picture Stack earthshine writes (…_earthshine_stack.tif), for layering by hand.
+        layer_box = QGroupBox("Earthshine stack picture (for Photoshop)")
         fl = QFormLayout(layer_box)
         self.keep_glare = spin(0.0, 1.0, 0.05, 0.1)
         fl.addRow("Keep glare (glow):", self.keep_glare)
         self.limb_soften = spin(0.0, 6.0, 0.5, 0.0, " px")
         fl.addRow("Soften the limb:", self.limb_soften)
-        note = QLabel("Only for the earthshine stack file (…_earthshine_stack.tif), the old way of pasting the Moon "
-                      "in Photoshop. The final image and Write Moon layer above do not use these settings.")
+        note = QLabel("Only for the picture Stack earthshine writes (…_earthshine_stack.tif): the Moon on its "
+                      "own, drawn from the earthshine stack, for layering by hand. Write final image and Write Moon "
+                      "layer below do not use these settings; re-run Stack earthshine after changing them.")
         note.setWordWrap(True)  # wrap to the panel's width instead of running off to the side
         note.setTextFormat(Qt.TextFormat.PlainText)
         fl.addRow(note)
@@ -2092,14 +2093,17 @@ class EarthshineTab(StepTab):
         run = QPushButton("Stack earthshine (makes the Moon and its surface)")
         run.clicked.connect(self.run)
         _tip(run, "Stacks the longer exposures aligned on the Moon instead of the corona, removes the glare, and "
-             "writes the earthshine layer and the lunar surface used by the final image. Needs Stack first. "
+             "writes the earthshine stack picture (…_earthshine_stack.tif) and the lunar surface used by the final image. "
+             "Needs Stack first. "
              "Re-run it after changing any setting above.")
         self.run_buttons.append(run)
         self.settings_layout.addWidget(run)
-        self.open_btn = QPushButton("Open earthshine layer in Siril")
+        self.open_btn = QPushButton("Open earthshine stack picture in Siril")
         self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.layer_path))
-        _tip(self.open_btn, "Loads the earthshine layer just written into Siril's main window.")
+        _tip(self.open_btn, "Loads the earthshine stack picture just written (…_earthshine_stack.tif) into Siril's "
+             "main window.")
         self.settings_layout.addWidget(self.open_btn)
+        self.settings_layout.addWidget(self.layer_box)
 
         final = QGroupBox("3  Final image: Moon and corona together")
         ff = QFormLayout(final)
@@ -2161,7 +2165,6 @@ class EarthshineTab(StepTab):
         _tip(self.open_final_btn, "Loads the final image just written into Siril's main window.")
         ff.addRow(self.open_final_btn)
         self.settings_layout.addWidget(final)
-        self.settings_layout.addWidget(self.layer_box)
         self.run_buttons += [self.final_preview_btn, self.final_btn, self.moon_btn]
         self.final_path = ""
         self.final_timer = QTimer(self)
@@ -2228,12 +2231,12 @@ class EarthshineTab(StepTab):
              "smaller pixels, raise them in proportion; with a shorter lens, lower them.", f)
         _tip(self.keep_glare, "How much of the glare that was taken away is put back as a soft glow just inside "
              "the edge of the Moon, fading inward: the inner corona's light spilling over the dark Moon, as the eye "
-             "sees it at totality. 0 = none, 0.1 = a faint glow (default: blends best when pasting), 0.5 = a soft "
+             "sees it at totality. Only in the earthshine stack picture. 0 = none, 0.1 = a faint glow (default), 0.5 = a soft "
              "glow, 1 = all of it (compressed so it cannot clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
              "softness, not a drawn circle.", fl)
         _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "
-             "has in your frames. Default 0 (none): the edge as your frames have it, which blends best when "
-             "pasting."
+             "has in your frames. Only in the earthshine stack picture. Default 0 (none): the edge as your frames "
+             "have it."
              "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
              "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
              "smaller pixels, raise them in proportion; with a shorter lens, lower them.", fl)
@@ -2391,7 +2394,7 @@ class EarthshineTab(StepTab):
             self.log.appendPlainText("Showing the Moon as the final image draws it (Preview of the final image).")
             QTimer.singleShot(0, self.preview_final)
         else:
-            self.log.appendPlainText("This is the earthshine layer itself. To see the Moon as the final image draws "
+            self.log.appendPlainText("This is the earthshine stack picture itself. To see the Moon as the final image draws "
                                      "it, run 'Write full-size layers' on the Enhance tab once, then Preview.")
 
 
