@@ -60,6 +60,7 @@ def _load_raw(path: str, calib: Optional[FrameCalibration], image_crop: float) -
         desc = raw.color_desc.decode("ascii", "replace")
         black = np.asarray(raw.black_level_per_channel, dtype=np.float32)
         white = float(raw.white_level)
+    bayer_pattern(colors, desc, path)  # refuse a sensor without a 2x2 Bayer pattern
     return superpixel(bayer, colors, desc, black, white, calib, image_crop)
 
 
@@ -160,6 +161,23 @@ def _part(master: Optional[np.ndarray], mosaic: RawMosaic, what: str, x0: int, y
     return master[y0 : y0 + h, x0 : x0 + w]
 
 
+def bayer_pattern(colors: np.ndarray, desc: str, path: str = "") -> str:
+    """The 2x2 Bayer pattern at (0, 0) ("RGGB", "GBRG", ...) from LibRaw's colour index per pixel.
+    The whole toolkit (superpixels, demosaicing, saturation per photosite) needs a 2x2 Bayer
+    sensor; any other layout, such as Fujifilm's X-Trans (6x6), is refused here rather than misread."""
+    c = np.asarray(colors)
+    block = c[: min(12, c.shape[0]), : min(12, c.shape[1])]
+    two = block[:2, :2]
+    tiled = np.tile(two, ((block.shape[0] + 1) // 2, (block.shape[1] + 1) // 2))[: block.shape[0], : block.shape[1]]
+    names = [desc[int(i)] if int(i) < len(desc) else "?" for i in two.flatten()]
+    names = [n if n in "RGB" else ("G" if n == "G" or n == "?" else n) for n in names]
+    if not np.array_equal(block, tiled) or sorted(set(names)) != ["B", "G", "R"] or names.count("G") != 2:
+        where = f" ({path})" if path else ""
+        raise ValueError(f"this camera's sensor does not use a 2x2 Bayer colour pattern{where}, which the toolkit "
+                         "needs (Fujifilm X-Trans and Sigma Foveon sensors are not supported)")
+    return "".join(names)
+
+
 def read_mosaic(path: str) -> RawMosaic:
     try:
         import rawpy
@@ -175,14 +193,10 @@ def read_mosaic(path: str) -> RawMosaic:
             wb_raw = [float(v) for v in raw.camera_whitebalance]
         except Exception:
             wb_raw = [1.0, 1.0, 1.0, 1.0]
-    pattern = ""
+    pattern = bayer_pattern(colors, desc, path)
     black: dict = {}
-    for dy in (0, 1):
-        for dx in (0, 1):
-            idx = int(colors[dy, dx])
-            name = desc[idx] if idx < len(desc) else "G"
-            pattern += name if name in "RGB" else "G"
-            black.setdefault(pattern[-1], []).append(float(black_c[idx]))
+    for k, (dy, dx) in enumerate(((0, 0), (0, 1), (1, 0), (1, 1))):
+        black.setdefault(pattern[k], []).append(float(black_c[int(colors[dy, dx])]))
     black = {k: sum(v) / len(v) for k, v in black.items()}
     g = wb_raw[1] or 1.0
     wb = (wb_raw[0] / g if wb_raw[0] else 1.0, 1.0, wb_raw[2] / g if wb_raw[2] else 1.0)

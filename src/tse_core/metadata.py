@@ -6,8 +6,10 @@ left empty:
 1. **exiftool** (if installed): reads every format, including Canon CR3, and
    decodes maker notes, so it gives the full lens name and the black and
    white levels. Set ``TSE_EXIFTOOL`` to its path if it is not on ``PATH``.
-2. **exifread** (pure Python, always available): reads NEF, NRW, CR2, ARW and
-   DNG, plus CR3 through a small box parser in this module.
+2. **exifread** (pure Python, always available): reads NEF, NRW, CR2, ARW,
+   DNG and most other TIFF-based RAW formats (ORF, RW2, PEF, ...), plus CR3
+   through a small box parser in this module. For other formats install
+   exiftool.
 3. **rawpy** (LibRaw, optional): the authoritative source for black level,
    white level, image size and CFA pattern, the same library Siril uses.
 
@@ -107,6 +109,9 @@ def _finalise(frame: FrameMeta) -> None:
         )
     elif "rawpy" not in frame.sources:
         frame.warnings.append("white level is nominal (from bit depth); install rawpy for the exact value")
+    if frame.cfa_pattern and len(frame.cfa_pattern) != 4:
+        frame.warnings.append("this sensor does not use a 2x2 Bayer colour pattern (for example Fujifilm "
+                              "X-Trans), which the toolkit needs: these frames cannot be aligned or stacked")
 
 
 # ---------------------------------------------------------------------------

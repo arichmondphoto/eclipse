@@ -51,8 +51,19 @@ Then finish in Photoshop (or not: step 5 writes a finished picture).
 
 ## Supported files
 
-Nikon NEF and NRW, Canon CR2 and CR3, Sony ARW, and DNG. Sony users should
-shoot uncompressed or lossless RAW.
+RAW files from any camera with a Bayer sensor (the usual 2x2 red, green and
+blue colour filter pattern), read through LibRaw: Nikon (NEF, NRW), Canon
+(CR2, CR3, CRW), Sony (ARW, SRF, SR2), Fujifilm GFX (RAF), Olympus and OM
+System (ORF), Panasonic (RW2), Leica (RWL, DNG), Pentax (PEF, DNG), Samsung
+(SRW), Hasselblad (3FR, FFF), Phase One (IIQ), Leaf (MOS), Mamiya (MEF),
+Epson (ERF), Minolta (MRW), Kodak (KDC, DCR), GoPro (GPR), and DNG from any
+camera or from Adobe's DNG Converter. Sony users should shoot uncompressed
+or lossless RAW.
+
+Sensors without a 2x2 Bayer pattern cannot be used: Fujifilm's X-Trans
+sensors (most X-series cameras) and Sigma's Foveon sensors. The Frames tab
+warns about such files when the folder is read, and Align and Stack refuse
+them with a clear message.
 
 Metadata readers, used in this order and each filling gaps left by the one
 before:
@@ -60,7 +71,9 @@ before:
 1. **exiftool**, if installed (optional). Gives full lens names for every
    brand. Set `TSE_EXIFTOOL` if it is not on your `PATH`.
 2. **exifread** (required, pure Python). Reads everything the pipeline
-   needs from NEF, CR2, CR3, ARW and DNG.
+   needs from NEF, CR2, CR3, ARW and DNG, and from most other TIFF-based
+   RAW formats (ORF, RW2, PEF and others). For other formats, install
+   exiftool.
 3. **rawpy** (strongly recommended). Exact black level, white level, image
    size and CFA pattern from LibRaw, the same library Siril uses.
 

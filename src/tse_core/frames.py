@@ -8,15 +8,36 @@ from datetime import datetime, timedelta, timezone
 from fractions import Fraction
 from typing import Any, Iterable, Optional
 
+# RAW formats read through LibRaw. Any camera with a 2x2 Bayer sensor works; sensors without one
+# (Fujifilm X-Trans, most X-series .raf files) are refused when read, with a clear message, and
+# Sigma's Foveon (.x3f), which has no colour filter pattern at all, is not listed.
 RAW_EXTENSIONS = {
     ".nef": "Nikon",
     ".nrw": "Nikon",
     ".cr2": "Canon",
     ".cr3": "Canon",
+    ".crw": "Canon",
     ".arw": "Sony",
     ".srf": "Sony",
     ".sr2": "Sony",
     ".dng": "DNG",
+    ".raf": "Fujifilm",
+    ".orf": "Olympus / OM System",
+    ".ori": "Olympus / OM System",
+    ".rw2": "Panasonic",
+    ".rwl": "Leica",
+    ".pef": "Pentax",
+    ".srw": "Samsung",
+    ".3fr": "Hasselblad",
+    ".fff": "Hasselblad",
+    ".iiq": "Phase One",
+    ".mos": "Leaf",
+    ".mef": "Mamiya",
+    ".erf": "Epson",
+    ".mrw": "Minolta",
+    ".kdc": "Kodak",
+    ".dcr": "Kodak",
+    ".gpr": "GoPro",
 }
 
 
