@@ -2074,14 +2074,15 @@ class EarthshineTab(StepTab):
         f.addRow(self.colour)
 
         # Only for the picture Stack earthshine writes (…_earthshine_stack.tif), for layering by hand.
-        layer_box = QGroupBox("Earthshine stack picture (for Photoshop)")
+        layer_box = QGroupBox("Earthshine Stack Result")
         fl = QFormLayout(layer_box)
         self.keep_glare = spin(0.0, 1.0, 0.05, 0.1)
         fl.addRow("Keep glare (glow):", self.keep_glare)
         self.limb_soften = spin(0.0, 6.0, 0.5, 0.0, " px")
         fl.addRow("Soften the limb:", self.limb_soften)
-        note = QLabel("Only for the picture Stack earthshine writes (…_earthshine_stack.tif): the Moon on its "
-                      "own, drawn from the earthshine stack, for layering by hand. Write final image and Write Moon "
+        note = QLabel("Only for the Earthshine Stack Result (…_earthshine_stack.tif), the picture shown after "
+                      "Stack earthshine: the Moon on its own, drawn from the earthshine stack, for checking the "
+                      "settings above or layering by hand. Write final image and Write Moon "
                       "layer below do not use these settings; re-run Stack earthshine after changing them.")
         note.setWordWrap(True)  # wrap to the panel's width instead of running off to the side
         note.setTextFormat(Qt.TextFormat.PlainText)
@@ -2093,14 +2094,14 @@ class EarthshineTab(StepTab):
         run = QPushButton("Stack earthshine (makes the Moon and its surface)")
         run.clicked.connect(self.run)
         _tip(run, "Stacks the longer exposures aligned on the Moon instead of the corona, removes the glare, and "
-             "writes the earthshine stack picture (…_earthshine_stack.tif) and the lunar surface used by the final image. "
+             "writes the Earthshine Stack Result (…_earthshine_stack.tif, shown here afterwards) and the lunar surface used by the final image. "
              "Needs Stack first. "
              "Re-run it after changing any setting above.")
         self.run_buttons.append(run)
         self.settings_layout.addWidget(run)
-        self.open_btn = QPushButton("Open earthshine stack picture in Siril")
+        self.open_btn = QPushButton("Open Earthshine Stack Result in Siril")
         self.open_btn.clicked.connect(lambda: self.main.open_in_siril(self.layer_path))
-        _tip(self.open_btn, "Loads the earthshine stack picture just written (…_earthshine_stack.tif) into Siril's "
+        _tip(self.open_btn, "Loads the Earthshine Stack Result just written (…_earthshine_stack.tif) into Siril's "
              "main window.")
         self.settings_layout.addWidget(self.open_btn)
         self.settings_layout.addWidget(self.layer_box)
@@ -2231,11 +2232,11 @@ class EarthshineTab(StepTab):
              "smaller pixels, raise them in proportion; with a shorter lens, lower them.", f)
         _tip(self.keep_glare, "How much of the glare that was taken away is put back as a soft glow just inside "
              "the edge of the Moon, fading inward: the inner corona's light spilling over the dark Moon, as the eye "
-             "sees it at totality. Only in the earthshine stack picture. 0 = none, 0.1 = a faint glow (default), 0.5 = a soft "
+             "sees it at totality. Only in the Earthshine Stack Result. 0 = none, 0.1 = a faint glow (default), 0.5 = a soft "
              "glow, 1 = all of it (compressed so it cannot clip). The edge itself always comes from your data: the Moon's own outline, with its mountains and "
              "softness, not a drawn circle.", fl)
         _tip(self.limb_soften, "Extra softening of the Moon's edge, in pixels, on top of the softness it already "
-             "has in your frames. Only in the earthshine stack picture. Default 0 (none): the edge as your frames "
+             "has in your frames. Only in the Earthshine Stack Result. Default 0 (none): the edge as your frames "
              "have it."
              "\n\nPixel defaults on this tab were chosen for a 400 mm lens on a 45-megapixel full-frame camera, where the "
              "Sun is about 410 px in radius (the Align log's 'Sun centre' line gives yours): with a longer lens or "
@@ -2269,7 +2270,8 @@ class EarthshineTab(StepTab):
              "they would blur the lunar surface.")
 
     def _final_changed(self, *_a) -> None:
-        if self._final_shown:
+        # Redraw the merged preview, or switch to it from the Earthshine Stack Result.
+        if self._final_shown or getattr(self, "_es_ready", False):
             self.final_timer.start()
 
     def preview_final(self) -> None:
@@ -2330,6 +2332,7 @@ class EarthshineTab(StepTab):
         QMessageBox.information(self, "Final image", f"Wrote\n{path}")
 
     def load_project(self, project: EventProject, path: Path) -> None:
+        self._es_ready = False  # no preview while the settings are filled in
         fin = project.parameters.get("final", {})
         self.final_path = W.resolve(path, fin.get("file"))
         self.open_final_btn.setEnabled(bool(self.final_path))
@@ -2348,7 +2351,8 @@ class EarthshineTab(StepTab):
         self.open_btn.setEnabled(bool(self.layer_path))
         crop = W.resolve(path, e.get("crop"))
         if crop:
-            self.view.show_file(crop)
+            self.view.show_file(crop)  # the Earthshine Stack Result, until Preview
+        self._es_ready = bool(crop)
 
     def run(self) -> None:
         from tse_core.earthshine import EarthshineParams
@@ -2387,15 +2391,13 @@ class EarthshineTab(StepTab):
         self.log.appendPlainText(result.describe())
         self.layer_path = result.outputs.get("earthshine", "")
         self.open_btn.setEnabled(bool(self.layer_path))
+        # The stack result stays on show while the stacking and lunar-surface settings are tried; the
+        # merged picture replaces it on Preview or a change to the final-image settings (Andy, Nov 2026).
         self.view.show_file(result.outputs.get("crop", ""))
-        # Then the Moon as the final image draws it (with the Enhance settings), so what is set here
-        # is what Blend and Natural give.
-        if self.main.frames_tab.project.parameters.get("enhance", {}).get("info"):
-            self.log.appendPlainText("Showing the Moon as the final image draws it (Preview of the final image).")
-            QTimer.singleShot(0, self.preview_final)
-        else:
-            self.log.appendPlainText("This is the earthshine stack picture itself. To see the Moon as the final image draws "
-                                     "it, run 'Write full-size layers' on the Enhance tab once, then Preview.")
+        self._final_shown = False
+        self._es_ready = True
+        self.log.appendPlainText("Showing the Earthshine Stack Result. Press Preview, or change Lunar surface "
+                                 "strength, to see it merged into the Natural or Blend image.")
 
 
 # ---------------------------------------------------------------------------

@@ -283,13 +283,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--brightness", type=float, default=1.0,
                    help="brightest lunar surface in the layer, 0-1 (default 1)")
     p.add_argument("--keep-glare", type=float, default=0.1,
-                   help="earthshine stack picture for Photoshop (<name>_earthshine_stack.tif): how much of the removed glare "
+                   help="Earthshine Stack Result (<name>_earthshine_stack.tif): how much of the removed glare "
                         "to keep as a glow inside the limb, 0-1 (default 0.1)")
     p.add_argument("--limb-soften", type=float, default=0.0,
-                   help="earthshine stack picture for Photoshop: extra softening of the limb in px, on top of the real "
+                   help="Earthshine Stack Result: extra softening of the limb in px, on top of the real "
                         "one (default 0 = none)")
     p.add_argument("--no-colour", action="store_true",
-                   help="make the earthshine stack picture grey (default: natural colour, so a prominence at the limb "
+                   help="make the Earthshine Stack Result grey (default: natural colour, so a prominence at the limb "
                         "stays red on the Moon side too)")
     p.add_argument("--limb-colour", default="recorded", choices=["recorded", "no-red", "neutral"],
                    help="colour of the glare just inside the limb: recorded (red from the chromosphere, as the "

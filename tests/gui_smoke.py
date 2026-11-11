@@ -283,6 +283,27 @@ pp.save(path)
 win.reload_project()
 os.environ["STUB_SAVE"] = str(T / "out" / "final.jpg")
 es.write_final()
+# After Stack earthshine the Earthshine Stack Result stays on show (no preview started by itself);
+# a change to Lunar surface strength then switches to the merged preview (Andy, Nov 2026).
+class _R:
+    outputs = {"earthshine": "", "crop": ""}
+
+    def describe(self):
+        return "stacked"
+
+
+started = []
+es.final_timer.start = lambda *a: started.append(1)
+es._done(_R())
+assert not es._final_shown and not started and "Showing the Earthshine Stack Result" in es.log.toPlainText()
+es.strength.setValue(es.strength.value() + 0.1)
+assert started, "a strength change should switch to the merged preview"
+assert "Earthshine Stack Result" in es.keep_glare.toolTip() and "Earthshine Stack Result" in es.open_btn.toolTip()
+win.reload_project()  # loading a project draws nothing by itself
+started.clear()
+es.load_project(EventProject.load(path), Path(path))
+assert not started
+
 # Settings panels open as wide as their rows (list item 6); with the stub's 470 px column: 470 + bar + frame.
 for tab in (win.align_tab, et, es):
     tab._fit_settings()
