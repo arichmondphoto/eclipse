@@ -14,8 +14,10 @@ Druckmüller (2014, multi-scale Gaussian normalization), H. Druckmüllerová's
 PhD thesis (2013, the adaptive circular high-pass filter) and Auchère,
 Soubrié, Pelouze & Buchlin (2023, wavelet-optimized whitening, A&A 670, A66).
 
-Works on any total solar eclipse. Eclipse geometry comes from NASA's Besselian
-elements for any eclipse from 1600 to 2400.
+Works on any total solar eclipse from 1600 to 2400. Eclipse geometry comes
+from NASA's Besselian elements: four eclipses are built in, and NASA's
+catalogue of all the others is downloaded once, automatically, the first
+time it is needed (see [Any eclipse, any site](#alignment-phase-2)).
 
 ## Status
 
@@ -211,9 +213,9 @@ matched, and the corner falloff. What Stack actually applies is set in its
 **Calibration** box (see [Calibration](#calibration)).
 
 **Contact times** are computed for your site from NASA's Besselian elements
-(bundled for recent eclipses; NASA's catalogue of every eclipse from 1600 to
-2400 is downloaded once when needed) and kept in the camera's own clock, the
-one the RAW files record:
+(see **Any eclipse, any site** under [Alignment](#alignment-phase-2) for
+where they come from) and kept in the camera's own clock, the one the RAW
+files record:
 
     camera clock = UT + camera time zone - clock error
 
@@ -299,10 +301,14 @@ frame up to four stops apart, and 0.1 px on synthetic brackets spanning 8
 stops with a moving Moon. A 37-frame bracket takes a few minutes; frames
 are read several at a time (see [Speed and memory](#speed-and-memory)).
 
-**Any eclipse, any site.** Elements from NASA's eclipse bulletins are
-bundled for 2017, 2024, 2026 and 2027. For every other eclipse from 1600 to
-2400, the tool downloads NASA's Five Millennium Canon once (about 6 MB) the
-first time it needs it, or on request:
+**Any eclipse, any site.** The toolkit works with every solar eclipse from
+1600 to 2400. Four are built in and need no download: 2017, 2024, 2026 and
+2027, with elements from NASA's individual eclipse bulletins. For any other
+eclipse, the toolkit downloads NASA's Five Millennium Canon (about 6 MB)
+automatically the first time it is needed and keeps it on your computer
+(in `~/.cache/solar-eclipse-toolkit`, or `TSE_CACHE_DIR`), so it is
+downloaded only once. You can also fetch it ahead of time, for example
+before travelling somewhere without internet access:
 
 ```bash
 totality elements-update                    # download NASA's catalogue now
