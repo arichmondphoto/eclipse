@@ -86,9 +86,6 @@ carefully against the PyQt6 API. Say so when handing it over.
 
 ## Work in progress
 
-- `docs/PLAN_bray_falls_look.md`: the plan to make the final image look like Bray Falls' blended
-  2024 image (corona tone, fine structure, the Moon, a crisp limb). Read it first when the user
-  asks to continue, and tick items off as they are done.
 - **The Moon's edge in the final image** (paused 7 Nov 2026 at 386d9b3; the user: "better but not
   perfect"): a 1 px step where the Moon meets the corona, at the filter layers' black disc (on his
   stack 0.757 to 0.858 at 1.5 px, MGN 45 % Weighted Average). His test case, a 3000 px crop of his
