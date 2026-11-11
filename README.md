@@ -102,7 +102,7 @@ The script finds the core package in `../src`, so keep the folders together.
 
 To update, pull the repository (`git pull`) and run the script again. The
 window title shows the version and the commit it is running (for example
-`Totality - A Solar Eclipse Toolkit 0.1.0 (8e54fa8)`), so you can check an
+`Totality - A Solar Eclipse Toolkit 0.1.0 (0f9499a)`), so you can check an
 update took effect.
 
 The window has one tab per step, and each step saves into the project file:
