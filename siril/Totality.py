@@ -745,8 +745,9 @@ class Worker(QThread):
         self._cancel = True
 
     def run(self) -> None:  # noqa: D401 - Qt override
+        say, total = W.timed(self.progress.emit)  # each log line with the time since the step began
         try:
-            result = self.fn(self.progress.emit, lambda: self._cancel)
+            result = self.fn(say, lambda: self._cancel)
         except W.Cancelled:
             self.failed.emit("Cancelled.")
         except W.WorkflowError as exc:
@@ -756,6 +757,7 @@ class Worker(QThread):
         except Exception:  # anything else: show the details so it can be reported
             self.failed.emit("Unexpected error:\n" + traceback.format_exc())
         else:
+            self.progress.emit(f"Finished in {total()} (m:ss).")
             self.succeeded.emit(result)
 
 

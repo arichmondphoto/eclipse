@@ -17,6 +17,7 @@ from typing import Callable, Optional, Sequence
 
 import numpy as np
 
+from . import parallel
 from .align import AlignFrame, AlignParams, FrameAlignment, Transform, align_sequence, auto_window
 from .calibration import CalibrationPlan, FrameCalibration
 from .eclipse import LocalEclipse, Site, elements_for
@@ -109,12 +110,17 @@ def run_alignment(
     loaded: list[LoadedFrame] = []
     moons: list[MoonFit] = []
     expected = None
-    for k, f in enumerate(frames):
-        lf = loader(f, None)
-        lum = lf.luminance
-        if expected is None:
-            expected = _expected_radius(f, lum.shape, lf.binning, crop_factor)
-        moons.append(find_moon(lum, expected))
+    say("reading frames with " + parallel.describe())
+    first = loader(frames[0], None)
+    expected = _expected_radius(frames[0], first.luminance.shape, first.binning, crop_factor)
+
+    def read(f):
+        """One frame read and its Moon found (frames are read side by side, kept in order)."""
+        lf = first if f is frames[0] else loader(f, None)
+        return f, lf, find_moon(lf.luminance, expected)
+
+    for f, lf, moon in parallel.ahead(frames, read, int(first.luminance.nbytes) * 6):
+        moons.append(moon)
         loaded.append(lf)
         say(f"loaded {f.file_name}: Moon at ({moons[-1].x:.1f}, {moons[-1].y:.1f}) r={moons[-1].radius:.1f}")
     b = loaded[0].binning

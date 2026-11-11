@@ -44,6 +44,25 @@ def reporter(say: Optional[Say] = None, cancel: Optional[Callable[[], bool]] = N
     return _say
 
 
+def elapsed_text(seconds: float) -> str:
+    """0:07.4 or 12:31.0: minutes and seconds, for the log."""
+    m, sec = divmod(max(float(seconds), 0.0), 60.0)
+    return f"{int(m)}:{sec:04.1f}"
+
+
+def timed(say: Say) -> tuple[Say, Callable[[], str]]:
+    """``say`` with each message preceded by the time since the step began ("[0:07.4] ..."), so the
+    log shows where a step spends its time; and a function giving the total, for "Finished in"."""
+    import time
+
+    t0 = time.perf_counter()
+
+    def _say(msg: str) -> None:
+        say(f"[{elapsed_text(time.perf_counter() - t0)}] {msg}")
+
+    return _say, lambda: elapsed_text(time.perf_counter() - t0)
+
+
 def data_dirs(project_path) -> tuple[Path, Path]:
     """Where the steps put their data files: (.fit files, .json files) in their own folders inside the
     project folder, ``fits`` and ``json``. The project file and the pictures stay beside them."""

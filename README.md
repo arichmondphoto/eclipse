@@ -978,6 +978,25 @@ below shows them as TIFF.
 The final image needs `_earthshine_rgb.fit` and `_moon_surface.fit`; if they
 are missing it asks you to stack the earthshine again.
 
+## Speed and memory
+
+The steps use every processor core: Align and Stack read, calibrate and warp several frames at
+once (they are still added up in order), Stack earthshine does the same with the Moon-aligned
+frames, and Enhance makes its layers side by side (and Adaptive (ACHF) its rings of radii). The
+results are exactly the same as working one thing at a time. Work done side by side is held to
+half the computer's memory: each frame or layer reserves its share before it starts (a layer
+about 70 bytes per pixel, WOW 130, Adaptive (ACHF) 200: on a 45-megapixel frame 3, 6 and 9 GB),
+and waits while the rest is in use. The log says how many threads and how much memory it uses.
+
+Every line of the log starts with the time since the step began (`[1:07.4]`, minutes and
+seconds), each Enhance layer ends with "done in N s", and each step ends with "Finished in".
+On the 3000 px crop of the 2024 stack on 2 cores, the five default Enhance layers and the
+blend took 9.3 s instead of 12.7 s, and Adaptive (ACHF) 108 s instead of 189 s; computers with
+more cores gain more.
+
+To compare, or to leave cores free for other work, set `TOTALITY_THREADS` in the environment
+(1 works one thing at a time, as before).
+
 ## Picture formats
 
 Every picture (layers, earthshine, prominences, final images) can be

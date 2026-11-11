@@ -32,6 +32,7 @@ from typing import Callable, Optional, Sequence
 import numpy as np
 from scipy import ndimage
 
+from . import parallel
 from .fits import write_fits
 from .rawio import RawMosaic, region
 from .stack import FrameInfo, Match, source_box, warp_region
@@ -778,18 +779,24 @@ def stack_earthshine(
     band = stacked & (rr > moon_r - p.robust_zone / 100.0 * moon_r) if robust else np.zeros_like(stacked)
     band_idx = np.nonzero(band)
     band_v, band_c, band_w = [], [], []
-    for f in use:
-        m = matches[f.index]
+    def aligned(f):
+        """One frame read, calibrated and warped onto the Moon (frames are done side by side; they
+        are added up in order below)."""
         mat = moon_aligned(f.matrix, (f.moon_x, f.moon_y), moon_xy)
-        shifts[f.index] = (cx0 - f.moon_x, cy0 - f.moon_y)
         mos = load(f)
         bx, by, bw, bh = source_box(mat, crop)
         fr = region(mos, bx, by, bw, bh, calibs.get(f.index), image_crop, hot_pixels=p.hot_pixels)
         del mos
         vc = [warp_region(fr.rgb[..., c], mat, crop, (fr.x0, fr.y0), order=3) for c in range(3)]
-        v = (vc[0] + vc[1] + vc[2]) / 3.0
         vmax = warp_region(fr.rgb.max(axis=2), mat, crop, (fr.x0, fr.y0), order=1)
         sat = warp_region(fr.saturated.astype(np.float32), mat, crop, (fr.x0, fr.y0), order=1, cval=1.0)
+        return f, vc, vmax, sat
+
+    say("earthshine: reading frames with " + parallel.describe())
+    for f, vc, vmax, sat in parallel.ahead(use, aligned, int(total.size) * 4 * 12 + 200 * 1024**2):
+        m = matches[f.index]
+        shifts[f.index] = (cx0 - f.moon_x, cy0 - f.moon_y)
+        v = (vc[0] + vc[1] + vc[2]) / 3.0
         w = frame_weight(v, vmax, sat, m.gain, p, moon_r) * factors.get(f.index, 1.0)
         w = np.where(np.isfinite(v) & stacked, w, 0.0)
         off = m.colour_offsets()

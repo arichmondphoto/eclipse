@@ -38,6 +38,7 @@ from typing import Callable, Optional, Sequence
 import numpy as np
 from scipy import ndimage
 
+from . import parallel
 from .fits import write_fits
 from .rawio import RawMosaic, region
 
@@ -403,14 +404,20 @@ def stack_frames(
     # Pass 1: reduced, aligned copies for brightness matching.
     sc = params.match_scale
     reduced: dict[int, tuple[np.ndarray, np.ndarray]] = {}
-    cache: dict[int, RawMosaic] = {}
     wb = None
     given = matches
-    for f in (infos if given is None else ()):
+    # A frame read, calibrated and warped: about this much memory while it is worked on (the
+    # mosaic, the calibrated region, the warped copy and the saturation map).
+    frame_bytes = int(cw * ch * 4 * 9)
+    say("stacking with " + parallel.describe())
+
+    def matching_copy(f):
+        """Pass 1 for one frame: its reduced, aligned copy (frames are done side by side)."""
         mos = load(f)
-        wb = wb or mos.wb
         bx, by, bw, bh = source_box(f.matrix, crop)
         fr = region(mos, bx, by, bw, bh, calibs.get(f.index), image_crop, hot_pixels=False)
+        mwb = mos.wb
+        del mos
         # Each colour (the offsets are fitted per colour; the gain on their mean).
         v = np.stack([warp_region(fr.rgb[..., c], f.matrix, crop, (fr.x0, fr.y0), order=1, scale=1)
                       for c in range(3)], axis=-1)
@@ -420,9 +427,11 @@ def stack_frames(
         v = np.nan_to_num(v[: ny * sc, : nx * sc], nan=0.0).reshape(ny, sc, nx, sc, 3).mean(axis=(1, 3))
         bad = ((sat[: ny * sc, : nx * sc] > 0.01) | nan).reshape(ny, sc, nx, sc).any(axis=(1, 3))
         ok = ~bad & ~moon_mask(crop, f, margin + 2 * sc, sc)
-        reduced[f.index] = (v.astype(np.float32), ok)
-        if len(cache) < 2:
-            cache[f.index] = mos  # keep a couple to save one read; the rest are reloaded
+        return f, mwb, v.astype(np.float32), ok
+
+    for f, mwb, v, ok in parallel.ahead(infos if given is None else (), matching_copy, frame_bytes):
+        wb = wb or mwb
+        reduced[f.index] = (v, ok)
         say(f"matching: read {f.file_name}")
     if given is None:
         matches = match_exposures(reduced, by_index, ref_index, params, say)
@@ -447,16 +456,21 @@ def stack_frames(
     fallback = np.zeros((ch, cw, 3), np.float32)
     have_fallback = np.zeros((ch, cw), bool)
     infos = sorted(infos, key=lambda f: -matches[f.index].gain)
-    for f in infos:
-        mos = cache.pop(f.index, None) or load(f)
-        wb = wb or mos.wb
+
+    def aligned(f):
+        """Pass 2 for one frame: read, calibrated and warped onto the output grid (frames are done
+        side by side; they are added up in order below)."""
+        mos = load(f)
         bx, by, bw, bh = source_box(f.matrix, crop)
         fr = region(mos, bx, by, bw, bh, calibs.get(f.index), image_crop, hot_pixels=params.hot_pixels)
+        mwb = mos.wb
         del mos
         v = warp_region(fr.rgb, f.matrix, crop, (fr.x0, fr.y0), order=3)
         sat = warp_region(fr.saturated.astype(np.float32), f.matrix, crop, (fr.x0, fr.y0), order=1, cval=1.0)
-        hot = fr.hot_pixels
-        del fr
+        return f, mwb, v, sat, fr.hot_pixels
+
+    for f, mwb, v, sat, hot in parallel.ahead(infos, aligned, frame_bytes):
+        wb = wb or mwb
         m = matches[f.index]
         with warnings.catch_warnings():  # NaN = outside this frame after alignment; weight 0 below
             warnings.simplefilter("ignore", RuntimeWarning)

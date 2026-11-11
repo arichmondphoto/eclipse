@@ -683,8 +683,14 @@ def _run(step, *a, quiet=False, **k):
     """Run a workflow step with printed progress; WorkflowError -> message and exit code 1."""
     from .workflow import WorkflowError
 
+    from .workflow import timed
+
+    say, total = timed(print)  # each line with the time since the step began
     try:
-        return step(*a, say=None if quiet else print, **k), 0
+        out = step(*a, say=None if quiet else say, **k), 0
+        if not quiet:
+            print(f"Finished in {total()} (m:ss).")
+        return out
     except WorkflowError as exc:
         print(exc)
         return None, 1

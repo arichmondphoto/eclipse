@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -42,6 +43,8 @@ from typing import Callable, Optional, Sequence
 
 import numpy as np
 from scipy import ndimage
+
+from . import parallel
 
 Say = Callable[[str], None]
 
@@ -987,7 +990,8 @@ def _gauss_rows(a: np.ndarray, sigma: float) -> np.ndarray:
     n = next_fast_len(ap.shape[0])
     k = np.arange(n // 2 + 1, dtype=np.float64)[:, None]
     tf = np.exp(-0.5 * (2 * math.pi * sigma * k / n) ** 2)
-    out = irfft(rfft(ap, n=n, axis=0) * tf, n=n, axis=0)
+    nw = parallel.threads()
+    out = irfft(rfft(ap, n=n, axis=0, workers=nw) * tf, n=n, axis=0, workers=nw)
     # The FFT wraps round: the padded edges (4 sigma) keep the far end out of the kept rows.
     return out[pad:pad + a.shape[0]]
 
@@ -1037,11 +1041,13 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
     cw = ndimage.spline_filter(w, order=3, mode="constant")
     margin = int(math.ceil(4 * sr)) + 2
     r_max = float(r.max())
-    for r0 in range(0, int(math.ceil(r_max)) + 1, band):
+
+    def ring(r0):
+        """One ring of radii (rings are independent: worked on side by side)."""
         r1 = r0 + band
         sel = (r >= r0) & (r < r1)
         if not sel.any():
-            continue
+            return None
         rows = np.arange(max(0, r0 - margin), r1 + margin + 1, dtype=np.float64)
         n_phi = next_fast_len(max(64, int(math.ceil(2 * math.pi * rows[-1]))))
         ang = np.arange(n_phi) * (2 * math.pi / n_phi)
@@ -1069,8 +1075,14 @@ def achf_mean(f: np.ndarray, w: np.ndarray, cx: float, cy: float, sigma: float,
         pj = phi[sel] * (n_phi / (2 * math.pi))
         m = ndimage.map_coordinates(mean, [ri, pj], order=3, mode="grid-wrap")
         ok = ndimage.map_coordinates(pw, [ri, pj], order=1, mode="grid-wrap") > 1e-9
-        out[sel] = np.where(ok, m, f[sel])
-        del mean, pw
+        return sel, np.where(ok, m, f[sel])
+
+    starts = list(range(0, int(math.ceil(r_max)) + 1, band))
+    # Memory of one ring: its polar grids (rows x circumference, several float64 copies).
+    need = [int((band + 2 * margin) * 2 * math.pi * (r0 + band + margin) * 8 * 8) for r0 in starts]
+    for res in parallel.run_all([(lambda r0=r0: ring(r0), n) for r0, n in zip(starts, need)]):
+        if res is not None:
+            out[res[0]] = res[1]
     return out
 
 
@@ -1732,6 +1744,12 @@ def _gated_cache(frame: Frame) -> dict:
     return frame.cache["gated"]
 
 
+# Memory each layer takes while it is made, bytes per pixel (measured on the 2024 stack, rounded up),
+# so layers made side by side stay within the memory budget (see parallel.run_all).
+LAYER_BYTES_PER_PX = {"natural": 70, "nrgf": 70, "fnrgf": 70, "fnrgf_n": 70, "adaptive": 70, "wow": 130,
+                      "achf": 200}
+
+
 # The settings each layer depends on (besides the prepared frame); see render(cache=True).
 LAYER_SETTINGS = {
     "natural": ("flatten", "even", "shoulder", "midtone", "natural_stretch", "gamma", "gamma_black", "gamma_white"),
@@ -1852,6 +1870,7 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
         return y
 
     layers: dict[str, np.ndarray] = {}
+    todo = []
     for name_l in LAYERS:
         if name_l not in need:
             continue
@@ -1861,10 +1880,34 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
             say(f"layer {name_l} (unchanged)" if name_l != "achf" else "layer achf (unchanged; Contrast applied)")
             layers[name_l] = hit[1]
             continue
-        say(f"layer {name_l}")
-        layers[name_l] = compute(name_l)
-        if store is not None:
-            store[(name_l, inner_box)] = (key, layers[name_l])
+        todo.append((name_l, key))
+    if todo:
+        # The statistics several layers share, made once before the layers run side by side.
+        names = {n for n, _k in todo}
+        if "natural" in names:
+            _natural_cache(frame, p)
+        if names & {"nrgf", "fnrgf", "fnrgf_n"}:
+            _ring_cache(frame, p)
+        if "adaptive" in names and p.noise_gate > 0:
+            _gated_cache(frame)
+        if len(todo) > 1:
+            say("layers " + ", ".join(n for n, _k in todo) + " side by side (" + parallel.describe() + ")")
+        npx = (H if whole else (y1 - y0) + 2 * 64) * (W if whole else (x1 - x0) + 2 * 64)
+        if "wow" in names or "achf" in names:
+            npx = max(npx, H * W)  # these work on the whole image
+
+        def timed(name_l):
+            t0 = time.perf_counter()
+            say(f"layer {name_l}")
+            y = compute(name_l)
+            say(f"layer {name_l} done in {time.perf_counter() - t0:.1f} s")
+            return y
+
+        results = parallel.run_all([(lambda n=n: timed(n), LAYER_BYTES_PER_PX.get(n, 70) * npx) for n, _k in todo])
+        for (name_l, key), y in zip(todo, results):
+            layers[name_l] = y
+            if store is not None:
+                store[(name_l, inner_box)] = (key, y)
     achf_g = None  # the thesis form's g (linear), for the blend
     if "achf" in layers:
         if achf_form(p) == "linear":

@@ -37,6 +37,7 @@ step saves its results into one project file (`<event>/<event>.json`).
 | `src/tse_core/stack.py` | Moon-aware HDR stacking with measured brightness matching |
 | `src/tse_core/enhance.py` | Stretch and filter layers; `MoonInput` lets the Moon be drawn with the same curve |
 | `src/tse_core/earthshine.py` | Moon-aligned stack, glare removal (limb terms, prominence fan), lunar surface, `merge_moon` (Moon into the HDR stack) |
+| `src/tse_core/parallel.py` | Threads within half the memory: `run_all` (tasks with a byte cost), `ahead` (frames prepared in the background, used in order); `TOTALITY_THREADS` |
 | `src/tse_core/viewzoom.py` | Zoom and pan arithmetic for the GUI's picture views (no Qt) |
 | `siril/Totality.py` | The Siril window, one tab per step |
 | `tools/cli_reference.py` | Generates README's command-line reference from the parser |
@@ -118,8 +119,14 @@ carefully against the PyQt6 API. Say so when handing it over.
      Moon's disc filled by odd reflection through the limb (`wow_disc_fill`; no white band).
   8. Done (10 Nov 2026): the Prominences tab removed on Andy's go-ahead (tab, `prominences.py`, the
      prominence commands, the hook in Write final image). Red-weight brightness: `docs/FUTURE.md`.
-  9. Investigate GPU and multi-core speed-ups for registration, stacking, enhancement (ACHF most)
-     and previews, aiming at real-time work at high resolution.
+  9. In progress (10 Nov 2026). Recommended order: 4 log timings, 1 ACHF polar resampling once for all
+     scales and parts (same pixels; about half its time), 2 multi-core, 3 keep whole-image measurements
+     between Earthshine previews, 5 GPU only if needed. Andy chose 4 and 2 first and wants their gain
+     measured before any bigger change (he tests on an M5 MacBook Air, 24 GB, and an M1 Ultra Mac
+     Studio, 64 GB). Done: 4 (elapsed time on every log line, "Finished in") and 2 (`parallel.py`:
+     frames in Align/Stack/Stack earthshine, Enhance layers, ACHF rings, FFT workers; results identical,
+     test_parallel.py). On 2 cores, frame 9 crop: layers 12.7 -> 9.3 s, ACHF 189 -> 108 s. Next: his
+     timings from the Macs, then decide on 1 and 3.
 - `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
   FITS and SER frames, gain, mono; prominence brightness by red weight while stacking). Not to be
   started unless the user asks; read it when they do.
