@@ -20,6 +20,7 @@ apart, where S and M are the apparent radii. Hence
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import os
@@ -29,11 +30,13 @@ from pathlib import Path
 from typing import Optional
 
 DATA_FILE = Path(__file__).resolve().parent / "data" / "besselian.json"
+# NASA's catalogue for CANON_YEARS, shipped with the toolkit so no eclipse in that range needs a download.
+BUNDLED_CANON = Path(__file__).resolve().parent / "data" / "besselian_canon.json"
 CACHE_DIR = Path(os.environ.get("TSE_CACHE_DIR", Path.home() / ".cache" / "solar-eclipse-toolkit"))
 CANON_CACHE = CACHE_DIR / "besselian_canon.json"
 # NASA's Five Millennium Canon of Solar Eclipses, Besselian elements for every eclipse -1999..3000.
 CANON_URL = "https://eclipse.gsfc.nasa.gov/eclipse_besselian_from_mysqldump2.csv"
-CANON_YEARS = (1600, 2400)  # range kept in the cache
+CANON_YEARS = (1600, 2400)  # range shipped with the toolkit, and kept from a download
 EARTH_EQUATORIAL_M = 6378137.0
 B_OVER_A = 0.99664719  # Earth's polar/equatorial axis ratio
 SUN_SEMIDIAMETER_1AU = 959.63  # arcsec
@@ -81,18 +84,26 @@ def load_elements(path: Optional[str | os.PathLike] = None) -> dict[str, Besseli
     return out
 
 
-def all_elements(path: Optional[str | os.PathLike] = None) -> dict[str, BesselianElements]:
-    """Every eclipse we know: NASA canon cache, then bundled bulletins, then a user file (later wins).
+@functools.lru_cache(maxsize=4)
+def _load_cached(path: str, _mtime_ns: int) -> dict[str, BesselianElements]:
+    """A catalogue file read once (about 1900 eclipses), again only when the file changes."""
+    return load_elements(path)
 
-    The bundled values come from NASA's individual eclipse bulletins and take
-    precedence over the canon for the same eclipse.
+
+def all_elements(path: Optional[str | os.PathLike] = None) -> dict[str, BesselianElements]:
+    """Every eclipse we know: NASA's catalogue as shipped, then a copy downloaded since
+    ('totality elements-update'), then the bundled bulletins, then a user file (later wins).
+
+    The bulletin values come from NASA's individual eclipse bulletins and take
+    precedence over the catalogue for the same eclipse.
     """
     table: dict[str, BesselianElements] = {}
-    if CANON_CACHE.is_file():
-        try:
-            table.update(load_elements(CANON_CACHE))
-        except (ValueError, KeyError, TypeError):
-            pass
+    for canon in (BUNDLED_CANON, CANON_CACHE):
+        if canon.is_file():
+            try:
+                table.update(_load_cached(str(canon), canon.stat().st_mtime_ns))
+            except (ValueError, KeyError, TypeError, OSError):
+                pass
     table.update(load_elements(DATA_FILE))
     if path:
         table.update(load_elements(path))
@@ -110,7 +121,10 @@ def elements_for(day: date | datetime | str, path: Optional[str | os.PathLike] =
         key = (day + timedelta(days=offset)).isoformat()
         if key in table:
             return table[key]
-    hint = "" if CANON_CACHE.is_file() else " Run 'totality elements-update' to download NASA's catalogue of every eclipse."
+    if BUNDLED_CANON.is_file() or CANON_CACHE.is_file():
+        hint = f" The catalogue covers solar eclipses from {CANON_YEARS[0]} to {CANON_YEARS[1]}."
+    else:
+        hint = " Run 'totality elements-update' to download NASA's catalogue of every eclipse."
     raise KeyError(f"no Besselian elements for {day}.{hint}")
 
 

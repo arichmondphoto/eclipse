@@ -251,12 +251,37 @@ def test_canon_and_bulletin_agree_for_2024(tmp_path, monkeypatch):
     assert ecl_mod.elements_for("2025-03-29").type == "P"
 
 
-def test_missing_eclipse_suggests_update(tmp_path, monkeypatch):
+def test_every_eclipse_from_1600_to_2400_comes_with_the_toolkit(tmp_path, monkeypatch):
+    """Nov 2026: only four eclipses shipped with the toolkit; any other needed a download of NASA's
+    catalogue the first time. The catalogue for 1600-2400 now ships with it, so no eclipse in that
+    range needs the network (here: no downloaded copy, and a download would fail the test)."""
+    from tse_core import eclipse as ecl_mod
+    from tse_core import event
+
+    monkeypatch.setattr(ecl_mod, "CANON_CACHE", tmp_path / "none.json")
+    monkeypatch.setattr(ecl_mod, "update_canon", lambda *a, **k: pytest.fail("no download should be needed"))
+    for day, kind in (("1999-08-11", "T"), ("2045-08-12", "T"), ("1919-05-29", "T"), ("2023-10-14", "A"),
+                      ("1605-10-12", "T"), ("2399-08-02", "T")):
+        assert ecl_mod.elements_for(day).type[:1] == kind, day
+        assert event.ensure_elements(day).date == day
+    table = ecl_mod.all_elements()
+    years = [int(k[:4]) for k in table]
+    assert min(years) == 1600 and max(years) == 2400 and 1850 < len(table) < 1950  # about 2.38 a year
+    # The four eclipses from NASA's bulletins still take precedence over the catalogue.
+    assert ecl_mod.elements_for("2024-04-08").source.startswith("NASA GSFC, Besselian")
+    # 1999-08-11 from the catalogue: totality at Stuttgart was about 2 min 17 s, mid-eclipse 10:33:40 UT.
+    c = LocalEclipse(ecl_mod.elements_for("1999-08-11"), Site(48.7758, 9.1829, 250.0)).circumstances()
+    assert 125 < (c.c3 - c.c2).total_seconds() < 145
+    mid = c.c2 + (c.c3 - c.c2) / 2
+    assert (mid.hour, mid.minute) in ((10, 33), (10, 34))
+
+
+def test_eclipse_outside_the_catalogue_says_so(tmp_path, monkeypatch):
     from tse_core import eclipse as ecl_mod
 
     monkeypatch.setattr(ecl_mod, "CANON_CACHE", tmp_path / "none.json")
-    with pytest.raises(KeyError, match="elements-update"):
-        ecl_mod.elements_for("2045-08-12")
+    with pytest.raises(KeyError, match="1600 to 2400"):
+        ecl_mod.elements_for("2500-06-01")
 
 
 # ------------------------------------------------------- scale-aware defaults

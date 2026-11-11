@@ -15,9 +15,8 @@ PhD thesis (2013, the adaptive circular high-pass filter) and Auchère,
 Soubrié, Pelouze & Buchlin (2023, wavelet-optimized whitening, A&A 670, A66).
 
 Works on any total solar eclipse from 1600 to 2400. Eclipse geometry comes
-from NASA's Besselian elements: four eclipses are built in, and NASA's
-catalogue of all the others is downloaded once, automatically, the first
-time it is needed (see [Any eclipse, any site](#alignment-phase-2)).
+from NASA's Besselian elements for every eclipse in that range, which are
+included with the toolkit, so no download is needed.
 
 ## Status
 
@@ -301,17 +300,17 @@ frame up to four stops apart, and 0.1 px on synthetic brackets spanning 8
 stops with a moving Moon. A 37-frame bracket takes a few minutes; frames
 are read several at a time (see [Speed and memory](#speed-and-memory)).
 
-**Any eclipse, any site.** The toolkit works with every solar eclipse from
-1600 to 2400. Four are built in and need no download: 2017, 2024, 2026 and
-2027, with elements from NASA's individual eclipse bulletins. For any other
-eclipse, the toolkit downloads NASA's Five Millennium Canon (about 6 MB)
-automatically the first time it is needed and keeps it on your computer
-(in `~/.cache/solar-eclipse-toolkit`, or `TSE_CACHE_DIR`), so it is
-downloaded only once. You can also fetch it ahead of time, for example
-before travelling somewhere without internet access:
+**Any eclipse, any site.** The toolkit includes NASA's Besselian elements
+for every solar eclipse from 1600 to 2400 (1,926 of them, from the Five
+Millennium Canon of Solar Eclipses), so it works without an internet
+connection. For 2017, 2024, 2026 and 2027 it uses the elements from NASA's
+individual eclipse bulletins instead, which are more precise. A download is
+only needed to pick up a newer catalogue from NASA; the downloaded copy is
+kept in `~/.cache/solar-eclipse-toolkit` (or `TSE_CACHE_DIR`) and then takes
+the place of the included one:
 
 ```bash
-totality elements-update                    # download NASA's catalogue now
+totality elements-update                    # fetch NASA's current catalogue
 totality elements-update --from canon.csv   # or install a copy downloaded in a browser
 ```
 
@@ -1268,7 +1267,7 @@ list a project's frames, or exclude / include some.
 
 ### `totality elements-update`
 
-download NASA's Besselian elements for every eclipse (1600-2400).
+refresh NASA's Besselian elements for every eclipse (1600-2400) from NASA's site; the toolkit already includes them, so this is only needed to pick up a newer catalogue.
 
 | Option | What it does |
 | --- | --- |
@@ -1442,6 +1441,11 @@ running it in Siril.
 ## Licence
 
 MIT, see `LICENSE`.
+
+The eclipse catalogue included with the toolkit
+(`src/tse_core/data/besselian_canon.json`) is converted from NASA's Five
+Millennium Canon of Solar Eclipses: Eclipse Predictions by Fred Espenak and
+Jean Meeus, NASA's GSFC.
 
 The lensfun database is not bundled; it is downloaded from the lensfun
 project (CC BY-SA 3.0). `tests/data/lensfun_subset.xml` is a short excerpt

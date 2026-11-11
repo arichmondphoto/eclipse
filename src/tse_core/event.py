@@ -24,17 +24,18 @@ Say = Callable[[str], None]
 
 
 def ensure_elements(day: str, say: Optional[Say] = None):
-    """Besselian elements for this date, fetching NASA's catalogue once if the eclipse is not bundled."""
-    from .eclipse import CANON_CACHE, elements_for, update_canon
+    """Besselian elements for this date. NASA's catalogue ships with the toolkit; it is fetched
+    only if that file is missing (a damaged installation) and no downloaded copy exists."""
+    from . import eclipse as E
 
     try:
-        return elements_for(day)
+        return E.elements_for(day)
     except KeyError:
-        if CANON_CACHE.is_file():
+        if E.BUNDLED_CANON.is_file() or E.CANON_CACHE.is_file():
             raise
-    (say or (lambda _m: None))("This eclipse is not in the bundled set; fetching NASA's full catalogue once.")
-    update_canon()
-    return elements_for(day)
+    (say or (lambda _m: None))("NASA's eclipse catalogue is missing from this installation; fetching it once.")
+    E.update_canon()
+    return E.elements_for(day)
 
 
 def known_eclipses(kinds: tuple[str, ...] = ("T", "H")) -> list[tuple[str, str]]:

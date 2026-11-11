@@ -100,7 +100,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--exclude", nargs="+", metavar="FILE", help="leave these frames out (file names)")
     p.add_argument("--include", nargs="+", metavar="FILE", help="use these frames again")
 
-    p = sub.add_parser("elements-update", help="download NASA's Besselian elements for every eclipse (1600-2400)")
+    p = sub.add_parser("elements-update", help="refresh NASA's Besselian elements for every eclipse (1600-2400) from NASA's site; the "
+                                               "toolkit already includes them, so this is only needed to pick up a "
+                                               "newer catalogue")
     p.add_argument("--from", dest="source", help="use a downloaded copy of NASA's canon CSV instead")
 
     p = sub.add_parser("align", help="align the light frames of a project on the corona and find the Sun's centre")
