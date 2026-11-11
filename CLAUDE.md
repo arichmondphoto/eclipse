@@ -125,8 +125,10 @@ carefully against the PyQt6 API. Say so when handing it over.
      measured before any bigger change (he tests on an M5 MacBook Air, 24 GB, and an M1 Ultra Mac
      Studio, 64 GB). Done: 4 (elapsed time on every log line, "Finished in") and 2 (`parallel.py`:
      frames in Align/Stack/Stack earthshine, Enhance layers, ACHF rings, FFT workers; results identical,
-     test_parallel.py). On 2 cores, frame 9 crop: layers 12.7 -> 9.3 s, ACHF 189 -> 108 s. Next: his
-     timings from the Macs, then decide on 1 and 3.
+     test_parallel.py). On 2 cores, frame 9 crop: layers 12.7 -> 9.3 s, ACHF 189 -> 108 s. Andy (M5 Air):
+     stacking at least 5x faster, ACHF "fast enough now". Step 1 declined (10 Nov 2026): sharing the
+     polar resampling would only work per part and needs one grid for all scales, so not bit-identical;
+     do not propose it again. Step 3 (Earthshine preview) still open if previews feel slow.
 - `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
   FITS and SER frames, gain, mono; prominence brightness by red weight while stacking). Not to be
   started unless the user asks; read it when they do.
