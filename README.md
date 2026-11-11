@@ -2,9 +2,9 @@
 
 Processing for DSLR photographs of total solar eclipses, from the RAW
 files to finished pictures: alignment on the corona, linear HDR stacking,
-coronal enhancement and an earthshine Moon. It runs as a script with its own window inside
-[Siril](https://siril.org) 1.4 or later, or from the command line as
-`totality`.
+coronal enhancement and an earthshine Moon. It runs as a script with its
+own window inside [Siril](https://siril.org) 1.4 or later, or from the
+command line as `totality`.
 
 The methods come from Druckmüller (2009, phase correlation alignment),
 Druckmüller, Rušin & Minarovjech (2006, Moon-aware HDR composition),
@@ -21,9 +21,9 @@ elements for any eclipse from 1600 to 2400.
 
 | Step | Scope | State |
 | --- | --- | --- |
-| 1 Frames | RAW inventory, bracket detection, lensfun or own-flats vignetting, calibration planning, project folders | done |
+| 1 Frames | RAW inventory, bracket detection, contacts, the calibration frames found, project folders | done |
 | 2 Align | Lunar limb, phase correlation alignment, field rotation, the Sun's centre | done |
-| 3 Stack | Moon-aware linear HDR stacking with measured brightness matching | done |
+| 3 Stack | Moon-aware linear HDR stacking with measured brightness matching; calibration (vignetting from flats, lensfun or own-flats profiles; darks; bias) | done |
 | 4 Enhance | Natural, NRGF, FNRGF, FNRGF-N, Adaptive (MGN), WOW and Adaptive (ACHF) layers; Soft Light / Overlay / Linear / Weighted average blend (Linear as each method's own publication combines it); full-resolution detail box; settings files | done |
 | 5 Earthshine | Moon-aligned stack of the long exposures; glare removed; the Moon put into the HDR stack and stretched with the corona | done |
 
@@ -114,7 +114,7 @@ The window has one tab per step, and each step saves into the project file:
 | 2 Align | Whether the optics mirror the image; the rotation model (drift, per-frame or none) and **Search any rotation and scale** (the event is shown, from the Frames tab) | Per-frame shift, rotation and peak strength; the Sun centre report |
 | 3 Stack | Full frame or a square around the Sun; which frame's Moon to keep; **Calibration:** vignetting (automatic, master flat, profile from the flats, master flat + compare, lensfun, none) and the lensfun lens, whether the light on the flats was uneven, darks (off by default) with the hot-pixel fix when they are off, and bias | The stacked preview and each frame's measured brightness |
 | 4 Enhance | **Save settings…** / **Load settings…**; **Layers to write** (all but WOW and Adaptive (ACHF) ticked: they are slow; only ticked layers and the Blend are written, and the Blend still uses unticked layers given a strength); **Blend:** each layer's strength (all 0 % by default) and mode, Soft Light, Overlay or Linear, and for Adaptive (MGN) and Adaptive (ACHF) also Weighted average; **Natural layer and colour:** Stretch (Log; or Gamma, the base of Morgan & Druckmüller 2014) with its Gamma (3.2) and black and white points (0 % and 100 %), Flatten, Highlight roll-off, Evenness, Midtone (all 0 by default), Saturation (1), White balance (corona), **Keep the sky** (off); **Adaptive layer (MGN):** Strength (0.7, as Morgan & Druckmüller 2014), Noise gate (off) and the size and strength of each of its six scales (1.25, 2.5, 5, 10, 20, 40 px at strength 1, as Morgan & Druckmüller 2014); **WOW:** Transform (Plain or Edge-aware) and Noise threshold of scales 1-3 (5, 2, 1, as Auchère et al. 2023); **Adaptive layer (ACHF):** the size and strength of each of its six scales (0.121%, 0.242%, 0.726% and 2.42% of the Sun's radius at strength 1; 10% and 20% at 0), **Separate parts at** (2x) and **Contrast** (1); **FNRGF:** Order (10), Segments (50), Noise compensation (0.7) | A live preview on a reduced copy (about 1400 px) that updates as you change settings; Shift-drag on it for a **detail box** shown at full resolution on its own tab, exactly as written; then **Write full-size layers**. **Save settings…** and **Load settings…** keep every setting of the tab in a file (see [Settings files](#settings-files)) |
-| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Earthshine Stack Result**: kept glare and limb softening, for the picture Stack earthshine writes and shows. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings), lunar surface strength, Moon's edge | The Moon close up, then the final picture round the Moon at full resolution; **Write final image**, **Write Moon layer (for Photoshop)** |
+| 5 Earthshine | 1 Stack the Moon: frames within N stops, colour channels, frames off the Moon's track. 2 Lunar surface: glare smoothness, limb glare, glare round a bright prominence, maria by the limb, smoothing (overall and by the limb), edge-preserving smoothing, filled edge width, edge grain, brightness, natural colour; **Earthshine Stack Result**: kept glare and limb softening, for the picture Stack earthshine writes and shows. 3 Final image: Blend or Natural (stretched with the Moon, using your Enhance settings), lunar surface strength, Moon's edge | The Earthshine Stack Result after **Stack earthshine**; on **Preview**, the final picture round the Moon at full resolution; **Write final image**, **Write Moon layer (for Photoshop)** |
 
 Every setting has hover help explaining what it does and when to change it.
 Every picture view zooms: scroll (or **+** / **-**) to zoom about the pointer,
@@ -162,9 +162,10 @@ Eclipse 2024/
 ```
 
 Files from an older project at the top of the folder are still found.
-Wherever a picture is written (enhanced layers, earthshine and prominence
-layers, final images), the GUI asks where to save, under what name and in
-which format, starting in the project folder.
+Wherever a picture is written (enhanced layers, the Earthshine Stack Result,
+the Moon layer, final images), the GUI asks where to save it, suggesting a
+name of its own for each step in the format you chose last (see the file
+table under [Earthshine](#3-final-image-moon-and-corona-together)).
 
 ## Command line
 
@@ -200,10 +201,38 @@ totality eclipse --date 2024-04-08 --lat 36.9422 --lon -90.3343 --utc-offset -5 
 totality align eclipse2024.json                    # align and find the Sun (site from the project)
 ```
 
+## Frames (Phase 1)
+
+**Project → New from folder…** on the Frames tab, or `totality inventory`,
+reads every RAW file's metadata (see [Project folders](#project-folders)).
+`inventory` prints the frame table, the detected brackets (step size, range,
+missing shutter speeds), and the calibration plan with the default choices:
+which vignetting source each frame would use, how darks and bias are
+matched, and the corner falloff. What Stack actually applies is set in its
+**Calibration** box (see [Calibration](#calibration)).
+
+**Contact times** are computed for your site from NASA's Besselian elements
+(bundled for recent eclipses; NASA's catalogue of every eclipse from 1600 to
+2400 is downloaded once when needed) and kept in the camera's own clock, the
+one the RAW files record:
+
+    camera clock = UT + camera time zone - clock error
+
+The camera time zone comes from the files when they record one, otherwise
+from the setting; an unknown clock error counts as 0. A wrong clock or time
+zone would mark frames taken in totality as partial, so before marking, the
+toolkit checks your exposure brackets against the contacts. A bracket is shot
+in one go, so if one is cut in two by a contact (or no frame falls inside
+totality), nothing is marked without asking, and it says which clock error
+would put every bracket inside. You can also type the contacts, in the
+camera's clock. Bracket detection and Moon tracking only use time differences, so a wrong
+clock never affects them.
+
 ## Alignment (Phase 2)
 
-`totality align` loads every light frame as 2x2 superpixels (no demosaicing),
-applies the calibration plan, and then:
+`totality align` loads every light frame as 2x2 superpixels (no demosaicing)
+with each file's own black level subtracted and no other calibration (see
+[What the log tells you](#what-the-log-tells-you) for why), and then:
 
 1. **Finds the Moon** in each frame: the limb is located along 720 radial
    profiles and fitted with a robust circle (prominences and valleys rejected).
@@ -268,7 +297,8 @@ frame, the Moon in each frame, and the Sun's centre and radius.
 
 Measured accuracy: about 0.1 px (full resolution) on copies of a real D850
 frame up to four stops apart, and 0.1 px on synthetic brackets spanning 8
-stops with a moving Moon. A 37-frame bracket takes several minutes.
+stops with a moving Moon. A 37-frame bracket takes a few minutes; frames
+are read several at a time (see [Speed and memory](#speed-and-memory)).
 
 **Any eclipse, any site.** Elements from NASA's eclipse bulletins are
 bundled for 2017, 2024, 2026 and 2027. For every other eclipse from 1600 to
@@ -292,27 +322,6 @@ pixels near the edge of the path. Tick **Optics mirror the image** on the
 Align tab (`--mirrored`) for mirrored optics; the tool reports both answers
 and warns when the difference matters.
 
-`inventory` prints the frame table, the detected brackets (step size, range,
-missing shutter speeds), and the calibration plan: which vignetting source
-each frame uses, how darks and bias are matched, and the corner falloff.
-
-**Contact times** are computed for your site from NASA's Besselian elements
-(bundled for recent eclipses; NASA's catalogue of every eclipse from 1600 to
-2400 is downloaded once when needed) and kept in the camera's own clock, the
-one the RAW files record:
-
-    camera clock = UT + camera time zone - clock error
-
-The camera time zone comes from the files when they record one, otherwise
-from the setting; an unknown clock error counts as 0. A wrong clock or time
-zone would mark frames taken in totality as partial, so before marking, the
-toolkit checks your exposure brackets against the contacts. A bracket is shot
-in one go, so if one is cut in two by a contact (or no frame falls inside
-totality), nothing is marked without asking, and it says which clock error
-would put every bracket inside. You can also type the contacts, in the
-camera's clock. Bracket detection and Moon tracking only use time differences, so a wrong
-clock never affects them.
-
 ## HDR stacking (Phase 3)
 
 Each frame leaves out the corona just round its own Moon (the limb is
@@ -325,12 +334,13 @@ totality stack eclipse2024.json            # uses the alignment saved by 'totali
 totality stack eclipse2024.json --square   # quicker: a square 10 solar radii wide
 ```
 
-Every frame is read again at full resolution and calibrated with the
-frames chosen on the Frames tab (see [Calibration](#calibration)):
-the matching master dark, else the master bias, else the RAW file's black
-level subtracted (negative values kept); the flat or vignetting profile
-divided out; isolated hot pixels replaced, demosaiced with the linear Malvar-He-Cutler method in
-32-bit floating point, and resampled onto the reference frame with the
+Every frame is read again at full resolution and calibrated as chosen in
+the **Calibration** box on the Stack tab (see [Calibration](#calibration)):
+the matching master dark if darks are used (off by default), else the master
+bias, else the RAW file's black level subtracted (negative values kept); the
+flat or vignetting profile divided out; isolated hot pixels replaced (when
+darks are not used); then demosaiced with the linear Malvar-He-Cutler method
+in 32-bit floating point and resampled onto the reference frame with the
 alignment transform (bicubic).
 
 **Brightness matching.** Shutter speeds are rarely exact. Each frame's
@@ -388,7 +398,9 @@ For a quicker run, `--square` outputs only a square 10 solar radii wide
 around the Sun (about a third of the pixels, so roughly three times faster
 and smaller); `--radii N` sets the half-width in solar radii.
 
-A full 45-megapixel frame needs about 3-5 GB of free memory at the peak.
+A full 45-megapixel frame needs about 3-5 GB of memory while it is worked
+on; several frames are worked on at once, within half the computer's memory
+(see [Speed and memory](#speed-and-memory)).
 
 | File | Contents |
 | --- | --- |
@@ -415,7 +427,7 @@ pixel, ready to stack as layers in Photoshop, plus a suggested blend:
 | `nrgf` | normalizing-radial-graded filter (Morgan et al. 2006): each circle around the Sun normalized to the same mean and spread |
 | `fnrgf` | Fourier NRGF (Druckmüllerová et al. 2011): mean and spread follow position angle too, so faint and bright regions at the same height get similar contrast |
 | `fnrgf_n` | FNRGF-N: the same with noise compensation (`--noise-m`, default 0.7); the noise is estimated automatically from the stack's weight map |
-| `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the linear image, as in Morgan & Druckmüller 2014 ("the original image normalised by exposure time"): fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
+| `adaptive` | multi-scale Gaussian normalization (Morgan & Druckmüller 2014) of the linear image ("the original image normalised by exposure time"): fine structure at all scales and orientations, the published successor to the adaptive circular high-pass filter |
 | `wow` | **WOW**, wavelet-optimized whitening (Auchère, Soubrié, Pelouze & Buchlin 2023): the linear image split into à trous wavelet planes at every scale up to the whole frame, each divided by its own local power and added back with equal weight; plain or edge-aware, with the paper's soft noise thresholds. Written only on request (`--layers ...,wow`): about a minute on a full frame, a few minutes edge-aware (below) |
 | `achf` | **Adaptive (ACHF)**: Druckmüller's adaptive circular high-pass filter (Druckmüller, Rušin & Minarovjech 2006; defined in Druckmüllerová 2013): the log image minus its local mean under a kernel that follows the circles round the Sun, at its own six scales (size and strength each), Moon left out. Written only on request (`--layers ...,achf`): a few minutes on a full frame |
 | `blend` | suggested mix: the natural layer as the base with the filter layers applied in Soft Light, Overlay or Linear at the given strengths; by default every filter layer is at 0 (`--blend natural=1`), so the blend is the natural layer until you add layers, e.g. `--blend natural=1,fnrgf_n=0.7,adaptive=0.5`; add `:overlay` to a layer for Overlay, e.g. `--blend natural=1,adaptive=0.1,fnrgf=0.05:overlay`, or `:linear` for the combination each method's own publication uses (below) (`--blend none` to skip); the same thing you would do with layers in Photoshop |
@@ -449,11 +461,12 @@ points:
 | ACHF as Druckmüllerová's thesis (2013) combines it | Stretch **Log**; **Adaptive (ACHF)** 2000-5000 % on **Linear**, **Contrast** 1 (about twice the strength with Gamma) |
 | Druckmüllerová, Morgan & Habbal (2011), Figure 9 | **FNRGF** 40 % on **Linear** and **Adaptive (ACHF)** 60 % on **Weighted average** |
 
-Use Adaptive (MGN) *or* Adaptive (ACHF), not both: they bring out the same
-fine detail in different ways. MGN evens contrast out everywhere (strong,
-graphic structure, flatter overall brightness); ACHF keeps bright structure
-brighter than faint structure (closer to the natural look, more noise in
-the faint corona).
+Use one of Adaptive (MGN), WOW and Adaptive (ACHF), not several: they bring
+out the same fine detail in different ways. MGN evens contrast out
+everywhere (strong, graphic structure, flatter overall brightness); WOW
+evens it out at every scale from 1 px to the whole frame, usually with more
+structure and less grain; ACHF keeps bright structure brighter than faint
+structure (closer to the natural look, more noise in the faint corona).
 
 The layers come out already stretched, so run Enhance on the linear HDR
 stack (never on a stretched copy) and use only gentle curves or levels on
@@ -488,6 +501,9 @@ What **Linear** does depends on the layer:
   about a third of the corona between 1.2 and 3 solar radii went black on the
   2024 stack; at 99.9 %, 7 %). With Stretch **Log** the same 43 % puts the
   structure on a brighter base.
+* **WOW** (Auchère et al. 2023, eq. 19): an average of the natural layer and
+  WOW, weighted by the strength, as for the NRGF family; 43 % gives WOW 30 %
+  of the picture. 30-70 %.
 * **Adaptive (ACHF)** (Druckmüllerová's thesis, 2013): the detail is added
   to the stack *before* it is stretched, so the corona keeps its brightness,
   the sky stays dark, and only the detail grows. It needs far higher
@@ -504,7 +520,7 @@ The natural layer (after any Soft Light or Overlay layers) is X with
 weight K1 = 1; each Linear or Weighted average layer is Y with its strength
 as K2.
 
-* NRGF family on Linear, and every Weighted average layer: Z = (K1 X + K2 Y)
+* NRGF family and WOW on Linear, and every Weighted average layer: Z = (K1 X + K2 Y)
   / (K1 + K2), both images on 0..1, as in Druckmüllerová's FNRGF software
   (thesis appendix: it "first normalizes both the original and the filtered
   image into the interval <0, 1>"; Druckmüllerová, Morgan & Habbal 2011:
@@ -666,9 +682,9 @@ thresholds if the outer corona looks mottled.
 | **Separate parts at** (`--achf-part-limit`) | Keeps prominences from leaving a dark halo: anything this many times brighter or darker than the corona at its height is filtered on its own. 0 turns it off (three times faster). | 2 | 2 |
 | **Contrast** (`--achf-contrast`) | How strongly the layer shows its detail on Soft Light, Overlay and Weighted average. On Linear it multiplies the strength: leave it at 1 there. | 1 | 1.5-3 if flat |
 
-ACHF is slow: on a 2530 px crop it took 28 s at the default settings (4 s
-for Adaptive (MGN)), and a full 45-megapixel frame has 7x the pixels. So it
-is only made when ticked under **Layers to write**, blended or shown
+ACHF is the slowest layer by far: minutes on a full 45-megapixel frame,
+less with more processor cores (see [Speed and memory](#speed-and-memory)).
+So it is only made when ticked under **Layers to write**, blended or shown
 (`--layers ...,achf` on the command line).
 
 <details>
@@ -761,6 +777,7 @@ method's own units, instead of being stretched to each picture's range:
 | FNRGF | white at +6.8 local deviations |
 | FNRGF-N | white at +20 local deviations (less the noise) |
 | Adaptive (MGN) | its own range, -pi/2 to pi/2, as Morgan & Druckmüller (2014) |
+| WOW | black and white at the 0.1 and 99.9 percentiles of the whole image (WOW is always made on the whole image) |
 | Adaptive (ACHF) | 82 % grey at 1.1 % brighter than the surroundings, at Contrast 1 |
 
 So a corona with little structure looks flatter than one with much, as it
@@ -898,30 +915,31 @@ data); K px by the limb with neither, left black"). On the 2024 stack with
 the Moon from frame 9, 280 px had neither, in a thin sliver at the base of the
 6 o'clock prominence and at 3 o'clock: no frame of either stack recorded them.
 
-**Corona blended into the Moon (older)** (`blended`), the older way:
-just outside the limb neither stack is good on its own: the earthshine
-stack's corona is smeared (it is aligned on the Moon) and the HDR stack
-holds few frames there (the Moon covered it part of the time). So the
-earthshine stack's limb hands over to the HDR corona from where the HDR
-stack is reliable, measured from its weights; the log says where ("the HDR
-stack's corona is used from N px outside the limb"; 3 px on the 2024
-stack). Just outside that, the HDR stack's corona is still darkened by the
-Moon's blurred edge in frames whose Moon was just past the stacking margin,
-mostly on one side of the Moon (on the 2024 stack up to a third at 3 px out,
-at 6-8 o'clock). Measured direction by direction against the corona's own
-trend further out, the darkening is taken off (linear; a prominence there
-keeps its shape), and the log says by how much ("the corona just outside the
-limb was darkened by the Moon's edge: brightened by up to N %"). The corona
-continued inwards to the limb follows that same trend. By a bright prominence, where the long earthshine frames saturate,
-the light inside the limb is taken from the last well-exposed earthshine
-pixel to the limb. The filter layers have no data on the Moon: they keep full strength wherever
-they have data (out to the corona layers' black disc), and on the Moon count
-as neutral, no detail, at full weight, over a 1 px soft edge. Between their
-black disc and where the HDR stack's corona is used, the natural layer draws
-the Moon's own blurred edge, but the filter layers see the corona continued to
-the limb: MGN in particular read the edge as a dark feature, a 1 px dark line
-round the limb. So just outside the limb the blend is the blend without the
-Moon, and on Linear the Moon gets the same overall treatment as the corona.
+**Corona blended into the Moon (older)** (`blended`), the older way: just
+outside the limb neither stack is good on its own: the earthshine stack's
+corona is smeared (it is aligned on the Moon) and the HDR stack holds few
+frames there (the Moon covered it part of the time). So the earthshine
+stack's limb hands over to the HDR corona from where the HDR stack is
+reliable, measured from its weights; the log says where ("the HDR stack's
+corona is used from N px outside the limb"; 3 px on the 2024 stack). Just
+outside that, the HDR stack's corona is still darkened by the Moon's blurred
+edge in frames whose Moon was just past the stacking margin, mostly on one
+side of the Moon (on the 2024 stack up to a third at 3 px out, at 6-8
+o'clock). Measured direction by direction against the corona's own trend
+further out, the darkening is taken off (linear; a prominence there keeps its
+shape), and the log says by how much ("the corona just outside the limb was
+darkened by the Moon's edge: brightened by up to N %"). The corona continued
+inwards to the limb follows that same trend. By a bright prominence, where
+the long earthshine frames saturate, the light inside the limb is taken from
+the last well-exposed earthshine pixel to the limb. The filter layers have no
+data on the Moon: they keep full strength wherever they have data (out to the
+corona layers' black disc), and on the Moon count as neutral, no detail, at
+full weight, over a 1 px soft edge. Between their black disc and where the
+HDR stack's corona is used, the natural layer draws the Moon's own blurred
+edge, but the filter layers see the corona continued to the limb: MGN in
+particular read the edge as a dark feature, a 1 px dark line round the limb.
+So just outside the limb the blend is the blend without the Moon, and on
+Linear the Moon gets the same overall treatment as the corona.
 
 **A Moon layer for Photoshop.** **Write Moon layer (for Photoshop)** on the
 tab (`totality final --moon-layer`) writes only the Moon, exactly as Blend (or
@@ -930,8 +948,7 @@ built in, transparent everywhere else (TIFF or PNG, 16-bit). Put it above the
 blend (or natural) layer you last wrote with **Write full-size layers**, in
 Normal mode at 100 %: the result is the final image, limb included. Besides
 the black disc it covers the band just outside the limb where the final image
-blends the Moon's stack into the corona (wherever the final image differs
-from that layer by more than half an 8-bit level), and its edge fades out over
+differs from that layer (by more than half an 8-bit level), and its edge fades out over
 1.15 % of the Moon's radius (5 px for a 400 mm lens on a 45-megapixel
 full-frame camera, at least 2 px), so the two edges meet without a line.
 To change the lunar
@@ -950,16 +967,17 @@ what Blend and Natural give. **Preview** shows a box round the Moon, 1.3 Moon ra
 each side of its centre (about 1135 px square on the 2024 stack), at full
 resolution: exactly the pixels **Write final image** writes there, so the
 limb can be judged at 100 % (double-click). White balance and sky are
-measured over the whole stack, as for the written image, so it takes longer
-than a reduced preview (7.5 s on a 3000 px crop of the 2024 stack, against
-3.5 s for the reduced one).
+measured over the whole stack, as for the written image, so the first
+preview takes longer than a reduced one; after that a change to **Lunar
+surface strength** alone redraws in a couple of seconds (see [Speed and
+memory](#speed-and-memory)).
 
-The earthshine stack file (`<name>_earthshine_stack.tif`, for Photoshop) is drawn
-on its own: the seas and highlands stretched by themselves, with **Keep
-glare (glow)** (`--keep-glare`, default 0.1) of the removed glare kept as a
-glow inside the limb and **Soften the limb** (`--limb-soften`, default 0).
-These two settings, under **Earthshine Stack Result**
-(below **Stack earthshine**), are used only for that file.
+The Earthshine Stack Result is drawn on its own: the seas and highlands
+stretched by themselves, with **Keep glare (glow)** (`--keep-glare`, default
+0.1) of the removed glare kept as a glow inside the limb and **Soften the
+limb** (`--limb-soften`, default 0). These two settings, in the **Earthshine
+Stack Result** box below **Stack earthshine**, are used only for that
+picture.
 
 Each save dialog suggests its own name, after the project's name, in the format
 (TIFF, PNG or JPG) you chose last, so no two outputs look alike: the table
@@ -968,7 +986,7 @@ below shows them as TIFF.
 | File | Contents |
 | --- | --- |
 | `<name>_earthshine_blend.tif`, `<name>_earthshine_natural.tif` | **Write final image**: the finished picture, by **Corona image** (or `-o`) |
-| `<name>_earthshine_stack.tif` | **Stack earthshine**: layer the size of the HDR stack: the lunar surface inside the disc, black outside, for Screen or Lighten in Photoshop |
+| `<name>_earthshine_stack.tif` | **Stack earthshine**, the Earthshine Stack Result: layer the size of the HDR stack: the lunar surface inside the disc, black outside, for Screen or Lighten in Photoshop |
 | `<name>_earthshine_stack_crop.tif` | the same, cropped to the Moon |
 | `<name>_earthshine.fit` | the Moon-aligned linear stack before glare removal |
 | `<name>_earthshine_rgb.fit` | the same, per colour channel (used by the final image) |
@@ -982,33 +1000,38 @@ are missing it asks you to stack the earthshine again.
 
 ## Speed and memory
 
-The steps use every processor core: Align and Stack read, calibrate and warp several frames at
-once (they are still added up in order), Stack earthshine does the same with the Moon-aligned
-frames, and Enhance makes its layers side by side (and Adaptive (ACHF) its rings of radii). The
-results are exactly the same as working one thing at a time. Work done side by side is held to
-half the computer's memory: each frame or layer reserves its share before it starts (a layer
-about 70 bytes per pixel, WOW 130, Adaptive (ACHF) 200: on a 45-megapixel frame 3, 6 and 9 GB),
-and waits while the rest is in use. The log says how many threads and how much memory it uses.
+The steps use every processor core: Align and Stack read, calibrate and warp
+several frames at once (they are still added up in order), Stack earthshine
+does the same with the Moon-aligned frames, and Enhance makes its layers side
+by side (and Adaptive (ACHF) its rings of radii). The results are exactly the
+same as working one thing at a time. Work done side by side is held to half
+the computer's memory: each frame or layer reserves its share before it
+starts (a layer about 70 bytes per pixel, WOW 130, Adaptive (ACHF) 200: on a
+45-megapixel frame 3, 6 and 9 GB), and waits while the rest is in use. The
+log says how many threads and how much memory it uses.
 
-Every line of the log starts with the time since the step began (`[1:07.4]`, minutes and
-seconds), each Enhance layer ends with "done in N s", and each step ends with "Finished in".
-On the 3000 px crop of the 2024 stack on 2 cores, the five default Enhance layers and the
-blend took 9.3 s instead of 12.7 s, and Adaptive (ACHF) 108 s instead of 189 s; computers with
-more cores gain more.
+Every line of the log starts with the time since the step began (`[1:07.4]`,
+minutes and seconds), each Enhance layer ends with "done in N s", and each
+step ends with "Finished in". On the 3000 px crop of the 2024 stack on 2
+cores, the five default Enhance layers and the blend took 9.3 s instead of
+12.7 s, and Adaptive (ACHF) 108 s instead of 189 s; computers with more cores
+gain more.
 
-The Earthshine tab's **Preview** keeps the Moon merged into the stack and the whole-image
-measurements from one preview to the next while only **Lunar surface strength** changes (the
-surface is added when the picture is drawn, so the pixels are the same as a fresh preview): on
-the 3000 px crop of the 2024 stack, 13.4 s for the first preview and 1.8 s for each strength after
-it. Any other change (Corona image, Moon's edge, an Enhance setting, a new stack) starts afresh.
+The Earthshine tab's **Preview** keeps the Moon merged into the stack and the
+whole-image measurements from one preview to the next while only **Lunar
+surface strength** changes (the surface is added when the picture is drawn,
+so the pixels are the same as a fresh preview): on the 3000 px crop of the
+2024 stack, 13.4 s for the first preview and 1.8 s for each strength after
+it. Any other change (Corona image, Moon's edge, an Enhance setting, a new
+stack) starts afresh.
 
-To compare, or to leave cores free for other work, set `TOTALITY_THREADS` in the environment
-(1 works one thing at a time, as before).
+To compare, or to leave cores free for other work, set `TOTALITY_THREADS` in
+the environment (1 works one thing at a time, as before).
 
 ## Picture formats
 
-Every picture (layers, earthshine, prominences, final images) can be
-written as:
+Every picture (layers, the Earthshine Stack Result, the Moon layer, final
+images) can be written as:
 
 | Format | Bits | Compression | |
 | --- | --- | --- | --- |
