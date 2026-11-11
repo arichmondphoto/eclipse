@@ -132,7 +132,8 @@ carefully against the PyQt6 API. Say so when handing it over.
      (`_FINAL_PREVIEW`) while only the strength changes; frame 9: 13.4 s, then 1.8 s per strength.
 - `docs/FUTURE.md`: future additions, if needed or requested (astronomy cameras such as ZWO:
   FITS and SER frames, gain, mono; prominence brightness by red weight while stacking). Not to be
-  started unless the user asks; read it when they do.
+  started unless the user asks; read it when they do. Astronomy cameras: route decided (FITS read
+  directly, Siril converts SER to FITS, not TIFF); waiting for real files from his future camera.
 
 ## Commits
 

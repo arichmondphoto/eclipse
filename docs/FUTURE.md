@@ -27,9 +27,22 @@ work (no f-number: the same for every frame; flats matched as the same optics).
 6. Mono cameras: grey output, with the colour steps (white balance, earthshine tint) switched
    off. Colour through filters would be a larger project.
 
-**Before starting:** ask whether the frames are FITS or SER, colour or mono, and for a few real
-test frames from the camera (any subject: a couple of lights at different exposures, a dark and
-a flat), since every capture program writes its headers a little differently.
+**Route decided (11 Nov 2026): read FITS directly; no TIFF.** The user asked whether Siril could
+convert astronomy-camera files to TIFF so the toolkit needs no support per manufacturer. Not
+recommended: capture programs (ASIAIR, N.I.N.A., SharpCap, FireCapture) already write FITS with
+the raw Bayer mosaic, like a camera RAW, and a TIFF keeps the pixels but loses the FITS header
+(exposure, time, gain, Bayer pattern), which would then have to come from somewhere else. The
+header names are largely standard across brands (`EXPTIME`, `DATE-OBS`, `BAYERPAT`, `GAIN`,
+`OFFSET`, `CCD-TEMP`, `XBINNING`), so reading FITS needs a few fallbacks for variants, not code
+per manufacturer. Siril's part: converting SER video into FITS sequences with their headers,
+so no SER reader of our own is needed (this replaces step 5's reader). RAW from any Bayer camera
+was added the same day (37be75c); this is the remaining part of "any camera".
+
+**Before starting:** the user had no astronomy camera on 11 Nov 2026, so there are no real
+files yet; do not start without them (no guessing at header variants or bit packing). Ask for a
+short test set from his camera, any subject (the Moon or a bright daytime target is enough):
+colour or mono lights at two or three exposures, a bias, a dark and a flat, and one short SER
+if the capture program records them; and which capture program wrote them.
 
 ## Prominence brightness by red weight, as Druckmüller does
 
