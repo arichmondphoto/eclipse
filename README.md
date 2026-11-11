@@ -6,6 +6,13 @@ coronal enhancement and an earthshine Moon. It runs as a script with its
 own window inside [Siril](https://siril.org) 1.4 or later, or from the
 command line as `totality`.
 
+![A total solar eclipse with the corona's streamers traced far from the Sun and the earthshine Moon in the middle](docs/images/example_2024.jpg)
+
+*A finished picture of the 2024 eclipse. It blends a 75 % edge-aware WOW
+layer and a 30 % FNRGF-N layer, with the earthshine Moon. Colour and tone
+were adjusted slightly, dust was removed by hand, and the picture was cropped
+in Photoshop.*
+
 The methods come from Druckmüller (2009, phase correlation alignment),
 Druckmüller, Rušin & Minarovjech (2006, Moon-aware HDR composition),
 Druckmüllerová, Morgan & Habbal (2011, the Fourier normalizing-radial-graded
@@ -434,6 +441,10 @@ on; several frames are worked on at once, within half the computer's memory
 totality enhance myeclipse.json          # uses the HDR stack saved by 'totality stack'
 ```
 
+![The Enhance tab: settings for each layer on the left, the detail box at full resolution on the right](docs/images/enhance_tab.jpg)
+
+*The Enhance tab, with the Blend shown in the detail box.*
+
 Writes one picture per layer (16-bit TIFF by default; `--format png|jpg`,
 `-o` folder, `--name` prefix), all the same size and lined up pixel for
 pixel, ready to stack as layers in Photoshop, plus a suggested blend:
@@ -638,6 +649,10 @@ stays flat.
 </details>
 
 ### WOW (wavelet-optimized whitening)
+
+![An edge-aware WOW layer: fine streamers around the black lunar disc, evenly bright from the limb to the frame's edge](docs/images/wow_edge_aware_crop.jpg)
+
+*A crop of an edge-aware WOW layer on its own, from a 2024 stack.*
 
 WOW follows Auchère, Soubrié, Pelouze & Buchlin (2023), "Image enhancement
 with wavelet-optimized whitening", A&A 670, A66 (equation numbers are
