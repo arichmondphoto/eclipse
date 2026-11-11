@@ -186,7 +186,7 @@ def test_earthshine_white_balance_without_written_enhance_layers(tmp_path):
 
 
 def test_each_written_image_gets_its_own_name(tmp_path):
-    """Andy, Nov 2026 (list item 5): Stack earthshine and Write Moon layer suggested look-alike names
+    """The user, Nov 2026 (list item 5): Stack earthshine and Write Moon layer suggested look-alike names
     (_earthshine.tif, _moon.tif) and every dialog suggested .tif whatever was chosen last. Each step
     now has its own name, with the extension asked for."""
     from tse_core import workflow as W

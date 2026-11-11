@@ -325,7 +325,7 @@ def match_exposures(reduced: dict[int, tuple[np.ndarray, np.ndarray]], infos: di
             idx += direction
     # The zero. The chain above measures each frame's offset against the reference frame, so the
     # stack's zero is the reference frame's black level, and an error of an ADU or two there (no bias
-    # frames, a black level from the file) shifts the whole sky: Andy's 2024 stack came out below
+    # frames, a black level from the file) shifts the whole sky: the user's 2024 stack came out below
     # zero by ~1e-4. In the longest exposures the same error, divided by their large gain, is
     # negligible: take the zero from them (the median of offset / gain over the frames within 3 stops
     # of the longest, which carry the sky).

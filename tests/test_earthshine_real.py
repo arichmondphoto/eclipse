@@ -167,7 +167,7 @@ def test_prominence_fan_is_taken_away(disc):
 def test_filled_edge_minimum_is_a_setting_in_percent_of_the_radius(disc):
     """The filled band by the limb is at least ``edge_fill`` % of the Moon's radius, so it scales with
     any lens and camera (2.5%: 10.9 px on the full-size 2024 Moon). At 0, the default since Nov 2026
-    (Andy), the noise rule alone decides: on the full-size 2024 stack that was the last 6 px (1.4%)."""
+    (the user), the noise rule alone decides: on the full-size 2024 stack that was the last 6 px (1.4%)."""
     lum, weight, good, cx, cy, r, rr, phi = disc
     keep = {}
     for pct in (0.0, 2.5, 5.0):

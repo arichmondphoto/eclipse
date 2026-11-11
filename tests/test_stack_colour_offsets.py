@@ -4,7 +4,7 @@ The matching between brackets finds one gain per frame (the exposure ratio, the 
 colour) and an offset for the light that does not scale with exposure: twilight that changes during
 totality, scattered light, small black-level differences. That light has a colour of its own (the
 eclipse sky is blue). Until Nov 2026 the offset was fitted on the mean of the three colours and
-taken off red, green and blue alike, so blue additive light left red over-corrected. On Andy's 2024
+taken off red, green and blue alike, so blue additive light left red over-corrected. On the user's 2024
 stack the red channel was below zero over 87% of the sky between 6 and 9 solar radii and 99.8%
 beyond (green and blue positive); with the sky removed this was hidden, with "Keep the sky" the
 sky turned cyan and the corners fell to black.

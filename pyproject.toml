@@ -9,7 +9,7 @@ description = "Alignment, HDR stacking and coronal enhancement for DSLR total so
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Andy" }]
+authors = [{ name = "Arichmondphoto" }]
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",

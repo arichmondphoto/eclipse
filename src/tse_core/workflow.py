@@ -945,7 +945,7 @@ def enhance_params_from_project(path, project):
 
 
 # The name each written picture is given, after the project's name: one per step and choice, so no
-# two outputs look alike (Andy, Nov 2026)
+# two outputs look alike (the user, Nov 2026)
 OUTPUT_SUFFIX = {"earthshine": "_earthshine_stack", "blend": "_earthshine_blend",
                  "natural": "_earthshine_natural", "moon": "_earthshine_photoshop"}
 

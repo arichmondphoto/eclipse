@@ -2392,7 +2392,7 @@ class EarthshineTab(StepTab):
         self.layer_path = result.outputs.get("earthshine", "")
         self.open_btn.setEnabled(bool(self.layer_path))
         # The stack result stays on show while the stacking and lunar-surface settings are tried; the
-        # merged picture replaces it on Preview or a change to the final-image settings (Andy, Nov 2026).
+        # merged picture replaces it on Preview or a change to the final-image settings (the user, Nov 2026).
         self.view.show_file(result.outputs.get("crop", ""))
         self._final_shown = False
         self._es_ready = True

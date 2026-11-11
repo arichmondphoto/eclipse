@@ -173,7 +173,7 @@ def test_workflow_and_cli(tmp_path, monkeypatch, run, capsys):
     saved = EventProject.load(tmp_path / "e.json").parameters["earthshine"]
     assert Path(saved["earthshine"]).exists() and sorted(saved["frames"]) == [0, 1, 2, 3]
     assert Path(saved["earthshine"]).name.endswith("_earthshine_stack.tif")  # its own name (list item 5)
-    # Andy, Nov 2026: data files in their own folders inside the project folder, pictures beside it;
+    # The user, Nov 2026: data files in their own folders inside the project folder, pictures beside it;
     # the align and stack files at the top (an existing project's layout) are still found.
     for k in ("linear", "rgb", "weight", "moon_surface"):
         assert Path(saved[k]).parent == tmp_path / "fits", (k, saved[k])
@@ -429,7 +429,7 @@ def test_composite_matches_the_limb_to_the_corona():
 
 def test_glare_far_above_the_surface_is_shown_as_recorded():
     """Glare far brighter than any lunar surface (by a big prominence, with its diffraction spikes)
-    is shown as the data has it, not replaced by a blur of its surroundings. Andy, Nov 2026, on the
+    is shown as the data has it, not replaced by a blur of its surroundings. The user, Nov 2026, on the
     2024 Moon: the blur made a faceted grey blob with a dark wedge where the glare and spikes are;
     he wants "that area represented as close to what the data holds as possible", nothing inferred.
     Here a patch of stripes 1.10 / 1.25 x the brightest surface (as the fan's spikes): it must stay
@@ -748,7 +748,7 @@ def test_no_step_where_the_stacks_hand_over_outside_the_limb(tmp_path):
 
 
 def test_corona_darkened_by_the_moons_edge_is_not_used(tmp_path):
-    """Andy, Nov 2026: a faint line round the limb in the final image. On the 2024 stack the corona
+    """The user, Nov 2026: a faint line round the limb in the final image. On the 2024 stack the corona
     just outside the limb is darkened by the Moon's blurred edge in frames whose Moon sat just past
     the stacking margin, mostly on one side: at 6-8 o'clock 30 % below the corona's own trend 3 px
     out, 5 % at 10 px; elsewhere a few % at 3 px. The weights do not show it, so the HDR stack was
@@ -865,8 +865,8 @@ def test_the_filled_edge_band_is_named_in_the_log(run):
     assert "% of the radius" in line[0] and ("minimum" in line[0] or "noise" in line[0]), line[0]
 
 
-def test_defaults_as_andy_uses_them():
-    """Nov 2026, from Andy's work on the 2024 Moon: a faint glow (0.10) and no extra softening are
+def test_defaults_as_the_user_uses_them():
+    """Nov 2026, from the user's work on the 2024 Moon: a faint glow (0.10) and no extra softening are
     what blend best when pasting, and the prominence glare is left as the data has it (removing it
     cannot bring back what is under it). Later in Nov: no smoothing of any kind by default (the
     surface as the stack has it), and full brightness. Glare smoothness 3.5 (7 Nov 2026, after
@@ -940,7 +940,7 @@ def _row_jumps(detail, crop, centre, r, lo=4.0, hi=15.0):
 def test_frames_fade_out_near_their_saturation_so_no_lines_follow_the_limb():
     """Each long exposure stops counting where it saturates, a few px inside the limb, at a depth of
     its own. Cut off at once, every frame whose glare differs a little from the rest leaves a step
-    there, and the steps show as thin lines parallel to the limb (Andy's 'beads', Nov 2026; on 22
+    there, and the steps show as thin lines parallel to the limb (the user's 'beads', Nov 2026; on 22
     of his 2024 frames the row-to-row jumps 6-15 px inside the limb fell from 2.6 to 1.1x the maria).
     Faded out over 1% of the Moon's radius instead, the steps go.
 
@@ -960,7 +960,7 @@ def test_frames_fade_out_near_their_saturation_so_no_lines_follow_the_limb():
 
 def test_frames_off_the_moons_track_count_less():
     """Camera shake puts a frame's Moon off the smooth track Align fits, and its limb is smeared. On
-    22 of Andy's 2024 frames the steadiest 10 alone gave 0.99x the maria in row-to-row jumps by the
+    22 of the user's 2024 frames the steadiest 10 alone gave 0.99x the maria in row-to-row jumps by the
     limb, the other 12 5.6x; weighting by distance from the track (on top of faded masks) took the
     whole stack from 0.99 to 0.69. A frame counts 1 / (1 + (off / s)^2), s twice the typical scatter."""
     from tse_core.earthshine import track_factors
@@ -1019,7 +1019,7 @@ def test_robust_factors_turn_down_a_frame_that_disagrees_only_where_it_does():
 
 
 def test_a_frame_with_ticks_by_the_limb_counts_less_there():
-    """On Andy's 2024 stack two frames (DSC_9132/9133) left a zipper of ticks 9-11 px inside the limb
+    """On the user's 2024 stack two frames (DSC_9132/9133) left a zipper of ticks 9-11 px inside the limb
     that no fade or track weighting removed. Near the limb a frame's pixel now counts less the further
     it lies from the other frames, in its own noise; there the ticks fell from 2.9 to 2.15x the
     disc's fine structure (1.93 with the two frames left out): what the two frames added beyond the
@@ -1053,7 +1053,7 @@ def test_a_frame_with_ticks_by_the_limb_counts_less_there():
 
 
 def test_moon_layer_over_the_blend_gives_the_blend_final_image(tmp_path):
-    """Andy, Nov 2026: to blend the Moon in Photoshop he needed the Moon as Blend draws it, with the
+    """The user, Nov 2026: to blend the Moon in Photoshop he needed the Moon as Blend draws it, with the
     Lunar surface strength in it (opacity in Photoshop changed the limb too). Write Moon layer:
     the Moon alone, transparent elsewhere, over exactly the pixels where the corona layers are
     black, and over the band outside the limb where the final image blends the Moon's stack into the
@@ -1087,7 +1087,7 @@ def test_moon_layer_over_the_blend_gives_the_blend_final_image(tmp_path):
     assert a[rr < r - 2].min() == 1 and a[rr > r + 1.6].sum() > 0    # the disc, and a band past its edge
     assert a[rr > r + 30].max() == 0                                                     # only the Moon
     # A soft edge grown outward over 1.15 % of the Moon's radius (5 px for a 400 mm lens on a
-    # 45-megapixel full-frame camera; Andy, Nov 2026: 2.5 px still left a faint line where the two
+    # 45-megapixel full-frame camera; the user, Nov 2026: 2.5 px still left a faint line where the two
     # edges meet in Photoshop): the edges then meet without a line.
     from scipy import ndimage
     core = a[..., 0] == 1
@@ -1101,7 +1101,7 @@ def test_moon_layer_over_the_blend_gives_the_blend_final_image(tmp_path):
 
 
 def test_half_steps_of_glare_smoothness_average_the_two_neighbouring_fits():
-    """Andy, Nov 2026: Glare smoothness in half steps, 0-6. A polynomial has whole orders only, so
+    """The user, Nov 2026: Glare smoothness in half steps, 0-6. A polynomial has whole orders only, so
     3.5 is the average of the order-3 and order-4 glare surfaces fitted to the data; whole numbers
     are exactly as before, and 0 (one even level) is allowed."""
     from tse_core.earthshine import glare_fit, glare_surface
@@ -1122,7 +1122,7 @@ def test_half_steps_of_glare_smoothness_average_the_two_neighbouring_fits():
 
 
 def test_filter_layers_do_not_see_the_moons_edge(tmp_path):
-    """Andy, Nov 2026: a dark 1 px line round the limb with MGN at 45 % on Weighted Average. The
+    """The user, Nov 2026: a dark 1 px line round the limb with MGN at 45 % on Weighted Average. The
     filter layers have data from the black disc out (1.5 px outside the limb), but the stack there
     still holds the Moon's blurred edge, where the earthshine stack hands over to the corona: on his
     2024 stack MGN's input rose from 0.77 at 1.5 px to the corona's 0.88 at 2.75 px, MGN read that
@@ -1132,7 +1132,7 @@ def test_filter_layers_do_not_see_the_moons_edge(tmp_path):
     from tse_core import workflow as W
     from tse_core.enhance import EnhanceParams
 
-    # The earthshine stack's limb as on Andy's: 10-90 % of the corona over 4.7 px (sigma 1.8 px).
+    # The earthshine stack's limb as on the user's: 10-90 % of the corona over 4.7 px (sigma 1.8 px).
     # The stack used from 4 px out, as his (the scene twice the usual size: at most 3 % of the radius).
     proj, rr, phi, r = _moon_project(tmp_path, holes=False, es_blur=1.8, cover=6.0, scale=2)
     p = EnhanceParams(layers=(), blend={"natural": 1.0, "adaptive": 0.45}, blend_modes={"adaptive": "average"})
@@ -1163,7 +1163,7 @@ def test_filter_layers_do_not_see_the_moons_edge(tmp_path):
 
 @pytest.mark.parametrize("layer, weight", [("adaptive", 0.43), ("fnrgf", 0.4)])
 def test_linear_layers_leave_no_bright_ring_round_the_moon(tmp_path, layer, weight):
-    """Andy, Nov 2026: with the Moon put in, a blend on Linear (MGN at 43 % with the Gamma stretch)
+    """The user, Nov 2026: with the Moon put in, a blend on Linear (MGN at 43 % with the Gamma stretch)
     had a white ring just outside the limb. The filter layers have no data on the Moon, so they fade
     out over the 4 px outside the limb; on Linear their weight faded, and with it the division by
     K1 + K2, so the corona there lost the Linear form's darkening (on the 2024 crop 0.876 grey at
@@ -1190,7 +1190,7 @@ def test_linear_layers_leave_no_bright_ring_round_the_moon(tmp_path, layer, weig
 
 
 def test_final_image_box_is_the_written_image(tmp_path):
-    """Andy, Nov 2026: the Prominences tab's preview did not look like the written image (it was the
+    """The user, Nov 2026: the Prominences tab's preview did not look like the written image (it was the
     linear stack with a quick stretch of its own). It now draws part of the final image, full size,
     exactly as Write final image does."""
     from tse_core import imageout as IO
@@ -1205,7 +1205,7 @@ def test_final_image_box_is_the_written_image(tmp_path):
 
 
 def test_earthshine_preview_is_the_moon_at_full_size(tmp_path):
-    """Andy, Nov 2026 (list item 3): the Earthshine tab's preview showed the whole frame reduced, too
+    """The user, Nov 2026 (list item 3): the Earthshine tab's preview showed the whole frame reduced, too
     small to judge the limb. It now shows a box round the Moon at full resolution, sized from the
     Moon's radius, exactly as Write final image draws it."""
     from tse_core import imageout as IO
@@ -1266,7 +1266,7 @@ def test_limb_colour_takes_the_red_glare_off_and_can_make_the_moon_neutral():
 
 
 def test_corona_first_keeps_the_blend_and_uses_the_earthshine_only_where_the_blend_is_black(tmp_path):
-    """Andy, Nov 2026: the Blend without the Moon looked right up to its black disc; with the Moon
+    """The user, Nov 2026: the Blend without the Moon looked right up to its black disc; with the Moon
     put in, the corona in the 4-6 px outside the limb was rebuilt (a red ring, a bigger pink
     prominence, a small prominence lost). The rule: the HDR stack wherever the Blend has it, the
     earthshine stack elsewhere in the disc, and black where neither has data."""
@@ -1300,7 +1300,7 @@ def test_corona_first_keeps_the_blend_and_uses_the_earthshine_only_where_the_ble
 
 
 def test_corona_first_uses_earthshine_pixels_from_few_frames(tmp_path):
-    """On Andy's frame-9 stack (Nov 2026) 1119 px by the limb were left black under the rule, most of
+    """On the user's frame-9 stack (Nov 2026) 1119 px by the limb were left black under the rule, most of
     them just inside the limb by the 6 o'clock prominence: the earthshine stack had data there, but
     from only 0.5-9.5 % of its usual frames (the longer ones saturated by the prominence's glare),
     and the rule used it only from 10 %. Those pixels hold the glare recorded by the short frames

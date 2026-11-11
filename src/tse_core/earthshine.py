@@ -48,7 +48,7 @@ class EarthshineParams:
     margin_px: Optional[float] = None
     # Glare smoothness: polynomial order of the glare surface, 0-6 in half steps (a half step is the
     # average of the two neighbouring orders' fits); lower = gentler (2 is a plain gradient). 3.5 from
-    # Andy's comparison of 3, 3.5 and 4 on the 2024 stack (Nov 2026).
+    # The user's comparison of 3, 3.5 and 4 on the 2024 stack (Nov 2026).
     glare_order: float = 3.5
     smooth: float = 0.0  # Gaussian smoothing of the shown layer, px (0 = none)
     brightness: float = 1.0  # brightest lunar surface in the layer, 0..1
@@ -1320,7 +1320,7 @@ def moon_surface(shown: np.ndarray, good: np.ndarray, glare: np.ndarray, cx: flo
     span = float(hi - lo) or 1.0
     xs = (shown - lo) / span
     # Glare far above the surface (by a big prominence) is shown as recorded, rolled off towards
-    # white by the shoulder: nothing is filled in or smoothed over (Andy, Nov 2026).
+    # white by the shoulder: nothing is filled in or smoothed over (the user, Nov 2026).
     surf = soft_shoulder(xs)
     # Over the noisy last pixels, carry the surface out to the limb (with matching grain).
     if p.surface_denoise > 0:
@@ -1576,7 +1576,7 @@ JOINS = ("corona first", "rebuilt")
 
 
 def _join_corona_first(hdr, weight, es_rgb, es_weight, shift, ys, xs, sy, sx, rr, mr, margin_px, origin, say):
-    """Where the Moon meets the corona, one rule per pixel, nothing rebuilt or blended (Andy, Nov 2026):
+    """Where the Moon meets the corona, one rule per pixel, nothing rebuilt or blended (the user, Nov 2026):
 
     1. the HDR stack wherever the corona layers have it (outside their black disc, ``margin_px``
        past the limb, with stack data): exactly as in the Blend without the Moon;

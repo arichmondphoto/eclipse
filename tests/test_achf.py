@@ -118,7 +118,7 @@ def test_scale_weights():
     assert np.abs(flat[valid] - 0.5).max() < 1e-6
 
 
-def test_default_scales_are_andys_pixels_on_the_2024_sun_and_scale_with_the_sun(tmp_path):
+def test_default_scales_are_the_users_pixels_on_the_2024_sun_and_scale_with_the_sun(tmp_path):
     """Defaults: 0.5, 1, 3 and 10 px on the 2024 frames (Sun radius 413.29 px, the stack's SUNR), then 10% and 20% of the radius
     switched off; kept as fractions of the Sun's radius, so a Sun twice the size gets twice the px."""
     from tse_core.enhance import ACHF_SCALES, ACHF_WEIGHTS, EnhanceParams

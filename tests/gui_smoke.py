@@ -44,7 +44,7 @@ print("align table rows:", win.align_tab.table.rowCount(), "| summary:", win.ali
 assert win.align_tab.table.rowCount() == 3
 print("stack moon-frame choices:", win.stack_tab.moon_frame.count(), "current", win.stack_tab.moon_frame.currentData())
 assert win.stack_tab.moon_frame.currentData() == 1
-# Calibration on the Stack tab (Andy, Nov 2026): darks off and hot pixels on by default; using darks
+# Calibration on the Stack tab (the user, Nov 2026): darks off and hot pixels on by default; using darks
 # unticks and greys out the hot-pixel box; not using them gives it back.
 stt = win.stack_tab
 assert stt.darks.currentData() == "none" and stt.hot.isChecked() and stt.hot.isEnabled()
@@ -64,7 +64,7 @@ et = win.enhance_tab
 et.preview()
 print("preview layers:", sorted(et.preview_layers), "binning", et.small.binning if et.small else None)
 assert {"natural", "fnrgf_n", "adaptive", "blend"} <= set(et.preview_layers)
-# Defaults (Andy, 4 Nov 2026): every option off; adaptive strength the paper's k = 0.7 in 0.01 steps.
+# Defaults (the user, 4 Nov 2026): every option off; adaptive strength the paper's k = 0.7 in 0.01 steps.
 d = et.params()
 assert (d.flatten, d.shoulder, d.even, d.midtone, d.noise_gate, d.mgn_k) == (0.0, 0.0, 0.0, 0.0, 0.0, 0.7), d
 assert d.blend == {"natural": 1.0}, d.blend  # every filter layer at 0 %
@@ -284,7 +284,7 @@ win.reload_project()
 os.environ["STUB_SAVE"] = str(T / "out" / "final.jpg")
 es.write_final()
 # After Stack earthshine the Earthshine Stack Result stays on show (no preview started by itself);
-# a change to Lunar surface strength then switches to the merged preview (Andy, Nov 2026).
+# a change to Lunar surface strength then switches to the merged preview (the user, Nov 2026).
 class _R:
     outputs = {"earthshine": "", "crop": ""}
 
@@ -310,7 +310,7 @@ for tab in (win.align_tab, et, es):
     assert tab.split.sizes()[0] >= 470 and sum(tab.split.sizes()) == 1200, tab.split.sizes()
 win.frames_tab._fit_settings()
 assert win.frames_tab.settings_scroll.min_w == 420  # the stub tab is 640 px: capped at 60 %, never below 420
-# Each step suggests its own name (Andy's list item 5), in the format chosen last (TIFF so far).
+# Each step suggests its own name (the user's list item 5), in the format chosen last (TIFF so far).
 assert Path(QFileDialog.last_save[1]).name == f"{Path(path).stem}_earthshine_blend.tif", QFileDialog.last_save
 assert "*.tif" in QFileDialog.last_save[3]
 # No RAW files here, so no earthshine stack: writing hands over to the Earthshine tab, which asks for it
@@ -332,7 +332,7 @@ es.base.setCurrentIndex(es.base.findData("blend"))
 es.run()
 assert Path(QFileDialog.last_save[1]).name == f"{Path(path).stem}_earthshine_stack.png"
 # Opening a project folder with Browse... on the Frames tab: every tab shows that project (the Align
-# tab's site came up blank because only the Frames tab was told; seen by Andy, Nov 2026).
+# tab's site came up blank because only the Frames tab was told; seen by the user, Nov 2026).
 root = T / "Folder project"
 (root / "lights").mkdir(parents=True)
 fp = EventProject(name="Folder project")

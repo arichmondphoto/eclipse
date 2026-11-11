@@ -1,4 +1,4 @@
-"""The filter layers as the papers define them, with no display curve of their own (Andy, 4 Nov
+"""The filter layers as the papers define them, with no display curve of their own (the user, 4 Nov
 2026: "as close to the way they were implemented in the papers as possible").
 
 * MGN (Morgan & Druckmueller 2014, eq. 5): the local part is the mean over the scales of
@@ -164,7 +164,7 @@ def test_linear_blend_adds_mgn_detail_as_the_paper_does():
 
 
 def test_weighted_average_keeps_the_previous_linear_look():
-    """Andy, 6 Nov 2026: the paper's form is much stronger; he liked the earlier look too. Weighted
+    """The user, 6 Nov 2026: the paper's form is much stronger; he liked the earlier look too. Weighted
     average puts the layer in as its 0..1 picture, (K1 B + K2 L) / (K1 + K2), for every layer, MGN
     included (as Linear did for MGN until 3552a26)."""
     rng = np.random.default_rng(3)

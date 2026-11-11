@@ -53,7 +53,7 @@ LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive", "wow", "achf")
 # whole image at every scale, so they are only on request.
 DEFAULT_LAYERS = ("natural", "nrgf", "fnrgf", "fnrgf_n", "adaptive")
 # Adaptive (ACHF) scales, finest first, as fractions of the Sun's radius (so they suit any lens):
-# Andy's choice (4 Nov 2026) of 0.5, 1, 3 and 10 px on his 2024 frames (Sun radius 413.29 px, from
+# The user's choice (4 Nov 2026) of 0.5, 1, 3 and 10 px on his 2024 frames (Sun radius 413.29 px, from
 # the stack's SUNR; not the Moon's 435.92), within the thesis's 0.5-64 px, plus 10% and 20% of the
 # radius switched off (strength 0).
 MGN_SCALES = (1.25, 2.5, 5.0, 10.0, 20.0, 40.0)
@@ -62,7 +62,7 @@ SUN_R_2024 = 413.29
 ACHF_SCALES = tuple(v / SUN_R_2024 for v in (0.5, 1.0, 3.0, 10.0)) + (0.1, 0.2)
 ACHF_WEIGHTS = (1.0, 1.0, 1.0, 1.0, 0.0, 0.0)
 # The natural layer is the base; the others are soft-light layers at these opacities. All filter
-# layers start at 0 (Andy, Nov 2026: every Enhance option off by default), so the blend starts as the
+# layers start at 0 (the user, Nov 2026: every Enhance option off by default), so the blend starts as the
 # natural layer and each layer is added by choice.
 DEFAULT_BLEND = {"natural": 1.0}
 WOW_DENOISE_DEFAULT = (5.0, 2.0, 1.0)  # the paper's n_s for the three finest scales (Fig. 3)
@@ -806,7 +806,7 @@ def soft_light_blend(layers: dict, weights: dict, valid: np.ndarray, modes: Opti
                 # By the Moon the layer has no data: it fades to its neutral value (no detail: 0 for
                 # MGN's detail, mid-grey for a 0..1 picture) at full weight, as Soft Light does. Fading
                 # the weight instead faded the division by K1 + K2, and the corona just outside the
-                # limb lost the Linear form's darkening: a bright ring (Andy, Nov 2026).
+                # limb lost the Linear form's darkening: a bright ring (the user, Nov 2026).
                 neutral = np.float32(0.0 if mgn else 0.5)
                 term = fade * term + (1 - fade) * neutral
             num = num + wk * term
@@ -1809,7 +1809,7 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
         # The filter layers have data out to the corona layers' black disc (moon_r + margin) and are at
         # full strength there; inside it, on the Moon, they go to their neutral value (see
         # soft_light_blend) over a 1 px soft edge. Fading them over 4 px outside left a ring there that
-        # the blend without the Moon does not have (Andy, Nov 2026).
+        # the blend without the Moon does not have (the user, Nov 2026).
         t = np.clip((np.sqrt(xx * xx + yy * yy) - g.moon_r - frame.moon_margin_px + 1.0) / 1.0, 0.0, 1.0)
         fade = (t * t * (3 - 2 * t)).astype(np.float32)
         del xx, yy, t
@@ -2009,7 +2009,7 @@ def enhance(hdr: np.ndarray, weight: np.ndarray, header: dict, params: Optional[
         out.mkdir(parents=True, exist_ok=True)
 
         # Only the layers asked for (Layers to write) and the Blend; the Blend's other layers are made
-        # but not written (Andy, Nov 2026: unticked layers were written when the Blend used them).
+        # but not written (the user, Nov 2026: unticked layers were written when the Blend used them).
         wanted = set(p.layers) | {"blend"}
         skipped = sorted(needed_layers(p) - wanted)
         if skipped:

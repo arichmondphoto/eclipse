@@ -1,6 +1,6 @@
 """Where the stack's zero comes from.
 
-On Andy's 2024 stack (Nov 2026, frame 35 the reference, no bias frames: the black level from each
+On the user's 2024 stack (Nov 2026, frame 35 the reference, no bias frames: the black level from each
 RAW file) every long exposure carried the same offset against the reference, in stack units
 R 6.3, G 9.5, B 8.3 x 1e-5 (from 1/4 s to 8 s): the reference frame's black level was about
 1.4 ADU in 15000 out. The stack took its zero from the reference, so its sky came out below zero

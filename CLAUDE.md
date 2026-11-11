@@ -89,13 +89,13 @@ carefully against the PyQt6 API. Say so when handing it over.
 - `docs/PLAN_bray_falls_look.md`: the plan to make the final image look like Bray Falls' blended
   2024 image (corona tone, fine structure, the Moon, a crisp limb). Read it first when the user
   asks to continue, and tick items off as they are done.
-- **The Moon's edge in the final image** (paused 7 Nov 2026 at d870fee; Andy: "better but not
+- **The Moon's edge in the final image** (paused 7 Nov 2026 at d870fee; the user: "better but not
   perfect"): a 1 px step where the Moon meets the corona, at the filter layers' black disc (on his
   stack 0.757 to 0.858 at 1.5 px, MGN 45 % Weighted Average). His test case, a 3000 px crop of his
   2024 stack with his earthshine files and settings, is on his computer in
   `~/Desktop/Eclipse 2024/limb_test_case` (README.txt, `limb_check.py`). Stage it from there when
   he asks to continue; never add it to the repository.
-- **Andy's list for the next session (8 Nov 2026, at c527ce0).** Done before it: Align no longer fails
+- **the user's list for the next session (8 Nov 2026, at c527ce0).** Done before it: Align no longer fails
   short frames for a small overlap (2a9af8f); **Colour by the limb** (a9a7300); **Moon meets corona**,
   the per-pixel rule "corona first" (c527ce0). His frame-9 files were staged as a 3000 px crop in
   `~/Desktop/Eclipse 2024/_claude_trial` (hdr.fit, weight.fit; origin 2466, 1292); the earthshine
@@ -117,15 +117,15 @@ carefully against the PyQt6 API. Say so when handing it over.
   7. Done (10 Nov 2026): **WOW** layer (Auchère et al. 2023; `enhance.wow`), plain/edge-aware, n_s 5,2,1.
      Departures, all in README: noise per scale measured on the stack (not white), no c_S (units), the
      Moon's disc filled by odd reflection through the limb (`wow_disc_fill`; no white band).
-  8. Done (10 Nov 2026): the Prominences tab removed on Andy's go-ahead (tab, `prominences.py`, the
+  8. Done (10 Nov 2026): the Prominences tab removed on the user's go-ahead (tab, `prominences.py`, the
      prominence commands, the hook in Write final image). Red-weight brightness: `docs/FUTURE.md`.
   9. In progress (10 Nov 2026). Recommended order: 4 log timings, 1 ACHF polar resampling once for all
      scales and parts (same pixels; about half its time), 2 multi-core, 3 keep whole-image measurements
-     between Earthshine previews, 5 GPU only if needed. Andy chose 4 and 2 first and wants their gain
+     between Earthshine previews, 5 GPU only if needed. The user chose 4 and 2 first and wants their gain
      measured before any bigger change (he tests on an M5 MacBook Air, 24 GB, and an M1 Ultra Mac
      Studio, 64 GB). Done: 4 (elapsed time on every log line, "Finished in") and 2 (`parallel.py`:
      frames in Align/Stack/Stack earthshine, Enhance layers, ACHF rings, FFT workers; results identical,
-     test_parallel.py). On 2 cores, frame 9 crop: layers 12.7 -> 9.3 s, ACHF 189 -> 108 s. Andy (M5 Air):
+     test_parallel.py). On 2 cores, frame 9 crop: layers 12.7 -> 9.3 s, ACHF 189 -> 108 s. The user (M5 Air):
      stacking at least 5x faster, ACHF "fast enough now". Step 1 declined (10 Nov 2026): sharing the
      polar resampling would only work per part and needs one grid for all scales, so not bit-identical;
      do not propose it again. Step 3 done: `final_with_moon` keeps the last preview's prepared frame

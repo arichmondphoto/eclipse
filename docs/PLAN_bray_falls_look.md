@@ -1,11 +1,11 @@
 # Plan: a final image like Bray Falls' blended eclipse
 
-Status: **steps 1-3 in the toolkit as options (not defaults); step 4 (crisp limb) next, after Andy tries the settings** (1 Nov 2026).
+Status: **steps 1-3 in the toolkit as options (not defaults); step 4 (crisp limb) next, after the user tries the settings** (1 Nov 2026).
 Code at the time of writing: commit `38830ba` on `main`. Tick items off here as they are done.
 
 ## Goal
 
-Andy wants the final image (corona with the earthshine Moon) to look like Bray Falls' blended
+The user wants the final image (corona with the earthshine Moon) to look like Bray Falls' blended
 2024 image (crop shared in the chat on 1 Nov 2026):
 
 - **Corona:** even mid-to-light grey everywhere, nothing clipped, fine continuous loops and
@@ -34,7 +34,7 @@ falls smoothly from ~40,000 to ~60,000 ADU (of 65,535).
 
 Pushing the existing settings harder does not get there: new processing is needed.
 
-## Data needed (Andy is preparing it)
+## Data needed (the user is preparing it)
 
 A **full-size crop of the HDR stack around the Sun**, about 2400 × 2400 px, 32-bit FITS (cropped
 and saved in Siril, e.g. `hdr_crop_2400.fit`, ~70 MB), plus **the crop's top-left corner**. That
@@ -46,7 +46,7 @@ Fine filaments cannot be judged at quarter size, so do not tune steps 1–2 with
 ## Steps
 
 Each step is a new **option** that can be switched on and compared in the zoomable preview, not a
-replacement for current behaviour. Show Andy results on his crop before changing any default.
+replacement for current behaviour. Show the user results on his crop before changing any default.
 Follow CLAUDE.md: real data first, a failing test before each fix, scale widths with the Sun's or
 Moon's radius, log what was measured, README and CLI reference kept current.
 
@@ -73,7 +73,7 @@ signal (data), not stretch. Dust spots show as dark rings in the corona (no dust
 
 ### 2. Fine structure without noise
 
-**4 Nov: Andy removed Smooth along strands (`strands`, `strand_orientation`, `smooth_along`) and
+**4 Nov: the user removed Smooth along strands (`strands`, `strand_orientation`, `smooth_along`) and
 Adaptive: skip finest scales (`mgn_skip_fine`) from the toolkit, and asked for every Enhance option
 to be off by default (Flatten now 0; Adaptive strength stays at the paper's k = 0.7, in steps of
 0.01). The notes below are the history; the step-2 recipes that used strands no longer apply.**
@@ -132,7 +132,7 @@ Still open:
 
 ### 3. The Moon in his style
 
-**Finding (1 Nov), on Andy's latest earthshine stack (`Eclipse 2024_earthshine_rgb/weight.fit`):**
+**Finding (1 Nov), on the user's latest earthshine stack (`Eclipse 2024_earthshine_rgb/weight.fit`):**
 the lunar surface is noise-dominated at every scale up to ~35 px. Structure/noise, measured with
 a noise model independent of the Moon's own detail (correlated like a demosaiced stack, level from
 the weights): 1.1 px 1.02, 2 px 1.10, 4 px 1.13, 9 px 1.17, 17 px 1.22, 35 px 1.36. Pixel noise
@@ -151,7 +151,7 @@ and rays like his are not in this data.
   (`moon_looks.png`), closer to his. It shows small beads at the limb with that smoothing; to
   look at.
 
-Andy's decision (1 Nov): **both**. Do the data-only look, and add map texture as an explicit,
+The user's decision (1 Nov): **both**. Do the data-only look, and add map texture as an explicit,
 labelled composite option.
 
 - [x] Edge-preserving smoothing: `surface_denoise` / `--surface-denoise` / **Edge-preserving
@@ -168,10 +168,10 @@ labelled composite option.
       orientation, scaled by the guide's k (your Moon's contrast) and added to `shown` after
       smoothing. Only when the match is ≥ `albedo_min_match`; the log says "albedo texture ADDED
       (composite, from the map, not your data)". Test: added detail correlates > 0.5 with the
-      map's fine detail; a non-matching map adds nothing. On Andy's stack with his map (match
+      map's fine detail; a non-matching map adds nothing. On the user's stack with his map (match
       0.63) it gives craters and rays close to his look (`moon_looks2.png`, bottom right).
-- [ ] Check in Siril on the full final image (Andy).
-- 5 Nov: at Andy's request the albedo map (guide and map texture) and the vignette
+- [ ] Check in Siril on the full final image (the user).
+- 5 Nov: at the user's request the albedo map (guide and map texture) and the vignette
   (`limb_darkening`, `vignette_shape`) were removed. The lunar surface is now only his data with
   the glare taken away, evenly lit; the recipe above without `--limb-darkening 0`.
 
@@ -185,7 +185,7 @@ labelled composite option.
   Deconvolving everywhere turns the faint corona to grain (the noise gate then flattens the
   streamers) and rings at the limb. Gated by that measure (full at >= 1.6, none at <= 1.0) and kept
   4 px off the limb: prominence and inner loops a little crisper, outer corona as before, no limb
-  ring (`deconv_compare.png`). A modest gain; to do as an option only if Andy wants it.
+  ring (`deconv_compare.png`). A modest gain; to do as an option only if the user wants it.
 
 ### 4. A crisp limb
 
@@ -211,7 +211,7 @@ parts of ours will show more grain. Say so where that is the limit.
 ## How to pick this up
 
 1. Read this file and CLAUDE.md.
-2. Get the HDR crop (and corner) from Andy if it is not already attached; check it against the
+2. Get the HDR crop (and corner) from the user if it is not already attached; check it against the
    Moon position above.
 3. Start at step 1. Render comparisons at full size on the crop and send them before changing
    defaults. After each step: tests, GUI smoke, README, commit, and tick the box here.

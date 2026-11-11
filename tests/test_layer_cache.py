@@ -1,4 +1,4 @@
-"""Previews redraw only the layers whose settings changed (Andy, Nov 2026: changing an ACHF setting
+"""Previews redraw only the layers whose settings changed (the user, Nov 2026: changing an ACHF setting
 while viewing the blend should redraw ACHF and the blend, not every filter).
 
 ``render(..., cache=True)`` keeps each layer's last result for the area drawn, keyed by that

@@ -220,7 +220,7 @@ def _calib_reads(reads, kind=""):
 
 
 def test_masters_are_built_once_and_reused_until_the_folder_changes(tmp_path, monkeypatch):
-    """Andy, Nov 2026: 300 darks were read again on every Stack and earthshine run (about 14 GB of
+    """The user, Nov 2026: 300 darks were read again on every Stack and earthshine run (about 14 GB of
     47 MB files). Each master is saved (FITS, in masters/ beside the project) with a fingerprint of
     its files, and read back while the files stay the same."""
     path = _project(tmp_path, monkeypatch)
@@ -252,7 +252,7 @@ def test_masters_are_built_once_and_reused_until_the_folder_changes(tmp_path, mo
 
 
 def test_data_files_go_in_fits_and_json_folders(tmp_path, monkeypatch):
-    """Andy, Nov 2026: every .fit file the steps write goes in fits/ inside the project folder and every
+    """The user, Nov 2026: every .fit file the steps write goes in fits/ inside the project folder and every
     .json file (but the project file) in json/; pictures stay beside the project. The alignment file
     here sits at the top, as in an existing project, and is still found."""
     path = _project(tmp_path, monkeypatch)
@@ -278,7 +278,7 @@ def test_an_off_centre_lens_is_corrected_out_to_the_corners(tmp_path, monkeypatc
     """A lens whose darkening is centred 25 px (8 % of the half-width) right of the frame's centre,
     as real lenses often are. Before Nov 2026 the master flat took the asymmetry for an uneven light
     and removed it, and the smooth profile (round, centred) could not follow it: the corners came
-    out 5 % too dark on average, 15 % in places (Andy: "the stack does not look right if I keep the
+    out 5 % too dark on average, 15 % in places (the user: "the stack does not look right if I keep the
     sky"). Now the sky is right to 1 % (median) and 3 % (5-95 %); the slope is reported, not taken
     out."""
     outer, corners = _rings()
@@ -291,7 +291,7 @@ def test_an_off_centre_lens_is_corrected_out_to_the_corners(tmp_path, monkeypatc
 
 
 def test_stack_can_leave_the_flats_out(tmp_path, monkeypatch):
-    """Andy, Nov 2026: there was no way to stack without the flats chosen on the Frames tab."""
+    """The user, Nov 2026: there was no way to stack without the flats chosen on the Frames tab."""
     path = _project(tmp_path, monkeypatch)
     got, log = _stack(path, tmp_path, vignetting="none")
     assert "master flat" not in log and "smooth profile" not in log, log
@@ -300,7 +300,7 @@ def test_stack_can_leave_the_flats_out(tmp_path, monkeypatch):
 
 
 def test_calibration_defaults_and_the_hot_pixel_rule(tmp_path, monkeypatch):
-    """Andy, Nov 2026: calibration is chosen on the Stack tab. Vignetting Automatic = the master flat
+    """The user, Nov 2026: calibration is chosen on the Stack tab. Vignetting Automatic = the master flat
     when flats are chosen; darks are not used unless asked (then the separate hot-pixel fix is off);
     bias frames are used when there are any."""
     from tse_core.workflow import StackOptions, stack
@@ -325,7 +325,7 @@ def test_calibration_defaults_and_the_hot_pixel_rule(tmp_path, monkeypatch):
 
 
 def test_none_ignores_saved_profiles_and_lensfun_uses_them(tmp_path, monkeypatch):
-    """Andy, Nov 2026: with 'None' Stack still used a profile fitted from his flats earlier (the
+    """The user, Nov 2026: with 'None' Stack still used a profile fitted from his flats earlier (the
     saved library is matched by lens and settings). Now only the lensfun choice uses it."""
     from tse_core import workflow
     from tse_core.vignetting_profile import VignettingProfile
@@ -344,7 +344,7 @@ def test_none_ignores_saved_profiles_and_lensfun_uses_them(tmp_path, monkeypatch
 
 
 def test_align_loads_the_frames_without_a_lens_correction(tmp_path, monkeypatch):
-    """Andy, Nov 2026: Align used the lens profile (and the last Stack's lens choice). It does not need
+    """The user, Nov 2026: Align used the lens profile (and the last Stack's lens choice). It does not need
     one: the darkening is the same in every frame and smooth, and phase correlation compares the
     corona's fine structure. On 12 of his 2024 frames a typical correction (corners at 59 %) moved the
     alignments by 0.4-1.2 px and put the Moons further off their straight track: rms 1.34 px with it,

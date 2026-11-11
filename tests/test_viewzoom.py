@@ -91,7 +91,7 @@ def test_dragged_box_in_image_pixels_and_back():
 
 
 def test_settings_panel_opens_wide_enough_for_its_content():
-    """Andy, Nov 2026 (list item 6): the settings panels opened at a fixed 360 px, narrower than
+    """The user, Nov 2026 (list item 6): the settings panels opened at a fixed 360 px, narrower than
     their rows, so they scrolled sideways. They open at their content's width plus the scroll bar."""
     from tse_core.viewzoom import settings_panel_width
 

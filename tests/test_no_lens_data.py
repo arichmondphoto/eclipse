@@ -92,7 +92,7 @@ def test_typed_focal_length_and_f_number_fill_only_what_the_files_lack():
 def test_align_visits_frames_in_the_same_order_whatever_the_exposure_scale():
     """Align visits frames outward from the middle exposure. Frames the same number of stops above and
     below it were ordered by rounding noise in the 16th digit, which changes when every exposure is
-    scaled (f/1 assumed without an f-number instead of f/8): on 27 of Andy's 2024 frames two pairs
+    scaled (f/1 assumed without an f-number instead of f/8): on 27 of the user's 2024 frames two pairs
     swapped, the reference grew differently, and the field rotation moved by 0.008 degrees (1.07 px at
     a frame corner). Ties now go to the shorter exposure, the same at any scale."""
     from tse_core.align import visit_order

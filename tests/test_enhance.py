@@ -343,7 +343,7 @@ def test_parse_linear_blend_mode():
 
 
 def test_write_full_size_layers_writes_only_the_ticked_layers(tmp_path):
-    """Andy, Nov 2026 (list item 4): Write full-size layers wrote every layer the Blend used even
+    """The user, Nov 2026 (list item 4): Write full-size layers wrote every layer the Blend used even
     when unticked under Layers to write (only ACHF, at 0 % in his blend, stayed out). Only the ticked
     layers, and the Blend itself, are written; the Blend still uses the unticked ones."""
     img, g = _scene(size=(300, 400), sun=(200.0, 150.0), r_sun=30.0, noise=0.0005)
