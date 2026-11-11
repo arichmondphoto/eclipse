@@ -1,7 +1,7 @@
 # Plan: a final image like Bray Falls' blended eclipse
 
 Status: **steps 1-3 in the toolkit as options (not defaults); step 4 (crisp limb) next, after the user tries the settings** (1 Nov 2026).
-Code at the time of writing: commit `5752c75` on `main`. Tick items off here as they are done.
+Code at the time of writing: commit `8ae631d` on `main`. Tick items off here as they are done.
 
 ## Goal
 
