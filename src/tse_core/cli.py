@@ -260,8 +260,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("earthshine", help="Moon-aligned stack of the long exposures: a layer for the black lunar disc")
     p.add_argument("project", help="project file (run 'totality stack' on it first)")
-    p.add_argument("--stops", type=float, default=6.0,
-                   help="use frames within this many stops of the longest exposure (default 6)")
+    p.add_argument("--stops", type=float, default=20.0,
+                   help="use frames within this many stops of the longest exposure (default 20: every frame "
+                        "of a real bracket)")
     p.add_argument("--no-limb-glare", action="store_true",
                    help="do not model the steep glare just inside the limb (shows as a bright rim)")
     p.add_argument("--prominence-glare", action="store_true",

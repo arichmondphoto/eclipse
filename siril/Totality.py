@@ -2023,7 +2023,7 @@ class EarthshineTab(StepTab):
         # 1. Which frames and channels make the Moon-aligned stack.
         stack_box = QGroupBox("1  Stack the Moon")
         fs = QFormLayout(stack_box)
-        self.stops = spin(0.5, 15.0, 0.5, 6.0, " stops")
+        self.stops = spin(0.5, 20.0, 0.5, 20.0, " stops")
         fs.addRow("Use frames within:", self.stops)
         self.channel = QComboBox()
         for label, key in (("Automatic", "auto"), ("Green", "green"), ("Green + blue", "green+blue"),
@@ -2191,8 +2191,12 @@ class EarthshineTab(StepTab):
              "corona, removes the glare from the bright inner corona, and writes a layer the same size as the "
              "corona layers: the lunar surface inside the disc, black outside. In Photoshop put it under the "
              "corona layers in Screen or Lighten mode, or paste it into the black disc.")
-        _tip(self.stops, "Only the longer exposures show earthshine; shorter ones add noise only. Frames more than "
-             "this many stops below the longest exposure are skipped. Default 6.", fs)
+        _tip(self.stops, "Frames more than this many stops below the longest exposure are left out of the "
+             "earthshine stack. Default 20: every frame of any real bracket.\n\nEach frame counts by how "
+             "clean its data is, so the short exposures add little where the long ones have good data, and "
+             "fill in where the long ones are saturated or have no data. Leaving them out can leave small "
+             "holes in the final image where neither stack has data. Lower it only to test the effect of the "
+             "short frames; the log says how many frames were used.", fs)
         _tip(self.limb_glare, "Close to the edge of the Moon, light scattered from the bright inner corona rises "
              "steeply, far faster than the glare surface above can follow. Left in, it shows as a bright ring "
              "inside the limb and leaves the middle of the Moon dark. Leave this on unless you want to see that "

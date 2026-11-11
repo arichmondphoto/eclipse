@@ -16,8 +16,9 @@ corona is only a few pixels away), far faster than any gentle surface can
 follow, so the fit also has terms that fall off with distance inside the
 limb, varying round it as the inner corona does.
 
-Only the longer exposures carry earthshine; frames more than ``stops``
-below the longest are skipped, as they would add read noise only.
+Frames are weighted by inverse variance, so the shorter exposures count little where the longer
+ones have good data and fill in where those are saturated or missing. By default every frame is
+used; frames more than ``stops`` below the longest can be left out.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ Say = Callable[[str], None]
 
 @dataclass
 class EarthshineParams:
-    stops: float = 6.0  # use frames within this many stops of the longest exposure
+    stops: float = 20.0  # use frames within this many stops of the longest (20: every frame of a real bracket)
     # Stay this far inside the lunar limb (limb glare, chromosphere), full-res px. None: scaled to
     # the Moon's size, 0.7% of its radius, at least 2 px (3 px for the 2024 D850 at 400 mm).
     margin_px: Optional[float] = None

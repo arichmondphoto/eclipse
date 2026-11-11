@@ -122,6 +122,19 @@ def test_short_exposures_skipped(run):
     assert sorted(res.frames) == [0, 1, 2]  # the 1 s frame is more than 1.5 stops below 4 s
 
 
+def test_every_frame_used_by_default(run):
+    """Nov 2026: the default kept only frames within 6 stops of the longest, so the short frames' data
+    never reached the earthshine stack and the final image had holes wherever both stacks lacked data.
+    Frames are weighted by inverse variance, so short frames count little where long ones have good
+    data and fill what the long ones lack. By default every frame of any real bracket is used
+    (20 stops: 1/8000 s to over 2 minutes)."""
+    mos, infos, tex, matches, ref = run
+    assert EarthshineParams().stops >= 20
+    res, *_ = stack_earthshine(infos, lambda f: mos[f.index], {}, matches, (ref.moon_x, ref.moon_y), MOON_R,
+                               (0, 0, SIZE, SIZE), EarthshineParams())
+    assert sorted(res.frames) == sorted(f.index for f in infos)
+
+
 def test_glare_surface_removes_smooth_gradient():
     h = w = 100
     yy, xx = np.mgrid[0:h, 0:w]

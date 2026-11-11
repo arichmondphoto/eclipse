@@ -889,6 +889,8 @@ def earthshine(project_path, params=None, include_rejected: bool = False, output
     use = [f for f in infos if f.index in matches and matches[f.index].gain >= gmax * 2.0 ** (-p.stops)]
     if not use:
         raise WorkflowError("No frames to use for earthshine.")
+    n_all = sum(1 for f in infos if f.index in matches)
+    say(f"earthshine: {len(use)} of {n_all} frames used (within {p.stops:g} stops of the longest exposure)")
     lights = [frames[f.index] for f in use]
     _locate_frames(path, lights)
     # Calibrate exactly as the HDR stack was, so the two stay in the same units.

@@ -821,7 +821,7 @@ three parts.
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| **Use frames within** (`--stops`) | Only the longer exposures carry earthshine: frames within this many stops of the longest are used. | 6 stops |
+| **Use frames within** (`--stops`) | Frames within this many stops of the longest exposure are used. Each frame counts by how clean its data is, so the short exposures add little where the long ones have good data, and fill in where the long ones are saturated or have no data; leaving them out can leave small holes in the final image. The log says how many frames were used. | 20 stops (every frame) |
 | **Colour channels** (`--channel`) | Which channels the earthshine is made from. **auto** tries green, green + blue and all three, and uses the one with the least glare round the limb (on the test data: green). | auto |
 | **Include frames flagged as off the Moon's track** (`--include-rejected`) | Also use frames Align flagged as shaken. | off |
 
@@ -1381,7 +1381,7 @@ Moon-aligned stack of the long exposures: a layer for the black lunar disc.
 | Option | What it does |
 | --- | --- |
 | `project` | project file (run 'totality stack' on it first) |
-| `--stops` | use frames within this many stops of the longest exposure (default 6) |
+| `--stops` | use frames within this many stops of the longest exposure (default 20: every frame of a real bracket) |
 | `--no-limb-glare` | do not model the steep glare just inside the limb (shows as a bright rim) |
 | `--prominence-glare` | fit and remove the fan of glare (and spikes) round a bright prominence (default off: the fan is shown as the data has it; removing it cannot bring back what is under it) |
 | `--no-prominence-glare` | leave the glare fan in (the default) |
