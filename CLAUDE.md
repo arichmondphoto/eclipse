@@ -112,8 +112,11 @@ carefully against the PyQt6 API. Say so when handing it over.
   6. Done (10 Nov 2026, not seen rendered): settings panels open at their content's width plus the scroll
      bar, at most 60 % of the tab (`viewzoom.settings_panel_width`, on first show).
   7. Done (10 Nov 2026): **WOW** layer (Auchère et al. 2023; `enhance.wow`), plain/edge-aware, n_s 5,2,1.
-     Departures, all in README: noise per scale measured on the stack (not white), no c_S (units), the
-     Moon's disc filled by odd reflection through the limb (`wow_disc_fill`; no white band).
+     Checked against the authors' code (watroo; 11 Nov 2026): scales log2(shorter side) - log2 5, local
+     power before denoising, residual divided by its std, as theirs. Ours differs only in the noise
+     (per-pixel map, per-scale response measured on the stack) and the Moon's disc (odd reflection
+     through the limb, `wow_disc_fill`). B3 kernel slightly square at coarse scales (~1 %): a round
+     Gaussian variant was tried (scratch only), not added.
   8. Done (10 Nov 2026): the Prominences tab removed on the user's go-ahead (tab, `prominences.py`, the
      prominence commands, the hook in Write final image). Red-weight brightness: `docs/FUTURE.md`.
   9. In progress (10 Nov 2026). Recommended order: 4 log timings, 1 ACHF polar resampling once for all

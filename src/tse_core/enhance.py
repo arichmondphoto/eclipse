@@ -1242,9 +1242,15 @@ B3 = (1.0 / 16, 4.0 / 16, 6.0 / 16, 4.0 / 16, 1.0 / 16)  # the cubic B3-spline k
 WOW_DENOISE = WOW_DENOISE_DEFAULT
 
 
-def wow_scales(n: int) -> int:
-    """S, the number of scales: ln N / ln 2 for an image N px across (section 3)."""
-    return max(1, int(math.log(max(int(n), 2)) / math.log(2)))
+def wow_scales(shape) -> int:
+    """S, the number of scales, as the authors' code (watroo) sets it: log2 of the image's shorter
+    side less log2 of the kernel's 5 samples, rounded, so the coarsest smoothing never spans the
+    frame (the paper's text gives ln N / ln 2; on a 45-megapixel frame that was 13 scales against
+    10, and the extra coarse scales showed the kernel's slightly square shape in smooth gradients)."""
+    if isinstance(shape, (int, np.integer)):
+        shape = (int(shape), int(shape))
+    n = max(int(min(shape)), 10)
+    return max(1, int(round(math.log2(n) - math.log2(len(B3)))))
 
 
 def _shifted(a: np.ndarray, step: int, axis: int):
@@ -1350,12 +1356,15 @@ def wow(x: np.ndarray, valid: np.ndarray, noise: Optional[np.ndarray] = None, de
     whitened image (not yet put on a display scale, see :func:`wow_display`).
 
     Each plane w_s is divided by the square root of its local power P_s = w_s^2 * h_s (Eq. 8) and the
-    planes are added back with weight 1, with the coarse residual c_S (Eq. 9). Denoising (Eq. 15):
-    each coefficient first multiplied by erf(|w_s| / (n_s sigma_s)) (Eq. 12), sigma_s = sigma(k)
-    sigma'_s, sigma(k) the stack's measured noise ``noise`` and sigma'_s from white noise; ``denoise``
-    holds n_s from the finest scale (0 or missing: not denoised). ``bilateral``: the edge-aware
-    transform (Eqs. 16-18). ``residual``: add c_S as in Eq. 9. ``measure_noise``: sigma'_s measured
-    on the stack's own noise (see :func:`wow_measured_response`) instead of white noise's."""
+    planes are added back with weight 1, with the coarse residual c_S (Eq. 9) divided by its own
+    standard deviation, as the authors' code does (so the result does not depend on the stack's
+    units). Denoising (Eq. 15): each coefficient multiplied by erf(|w_s| / (n_s sigma_s)) (Eq. 12),
+    sigma_s = sigma(k) sigma'_s, sigma(k) the stack's measured noise ``noise`` and sigma'_s from
+    white noise; ``denoise`` holds n_s from the finest scale (0 or missing: not denoised). As in the
+    authors' code, P_s is measured on the plane before it is denoised, so the denoised plane is not
+    scaled back up. ``bilateral``: the edge-aware transform (Eqs. 16-18). ``residual``: add c_S.
+    ``measure_noise``: sigma'_s measured on the stack's own noise (see
+    :func:`wow_measured_response`) instead of white noise's."""
     from scipy.special import erf
 
     b = np.asarray(x, np.float32)
@@ -1364,7 +1373,7 @@ def wow(x: np.ndarray, valid: np.ndarray, noise: Optional[np.ndarray] = None, de
         m = valid.astype(np.float32)
         fill = blur(b * m, 8.0) / np.maximum(blur(m, 8.0), 1e-6)
         b = np.where(valid, b, fill).astype(np.float32)
-    S = wow_scales(max(b.shape)) if n_scales is None else int(n_scales)
+    S = wow_scales(b.shape) if n_scales is None else int(n_scales)
     planes = atrous(b, S, bilateral)
     resp = wow_noise_response(min(S, len(denoise)), bilateral) if noise is not None and len(denoise) else []
     if resp and measure_noise:
@@ -1372,15 +1381,19 @@ def wow(x: np.ndarray, valid: np.ndarray, noise: Optional[np.ndarray] = None, de
         if say is not None:
             say("WOW: noise at each denoised scale, measured on the stack's faint half: " +
                 ", ".join(f"{m:.3g}" for m in resp) + " x the pixel noise")
-    out = planes[-1].copy() if residual else np.zeros_like(b)
+    out = np.zeros_like(b)
+    if residual:
+        sd = float(np.std(planes[-1]))
+        if sd > 0:
+            out += planes[-1] / np.float32(sd)
     for s, w in enumerate(planes[:-1]):
+        power = atrous_smooth(w * w, s)  # P_s = w_s^2 * h_s, the same kernel as that scale, before denoising
         ns = float(denoise[s]) if s < len(denoise) else 0.0
         if ns > 0 and noise is not None and s < len(resp):
             sig = (ns * resp[s]) * np.asarray(noise, np.float32)
             with np.errstate(divide="ignore", invalid="ignore"):
                 alpha = np.where(sig > 0, erf(np.abs(w) / sig), 1.0).astype(np.float32)
             w = alpha * w
-        power = atrous_smooth(w * w, s)  # P_s = w_s^2 * h_s, the same kernel as that scale
         out += np.where(power > 0, w / np.sqrt(np.maximum(power, 1e-30)), 0.0).astype(np.float32)
     return out
 
@@ -1846,9 +1859,9 @@ def render(frame: Frame, params: Optional[EnhanceParams] = None, box: Optional[t
                 y = to_linear(fnrgf(lum, r, phi, rvalid, stats, mean_att, std_att, p.noise_m), FNRGF_N_SPREAD)
         elif name_l == "wow":
             say("WOW (Auchère et al. 2023)" + (", edge-aware" if p.wow_edge_aware else "") +
-                f": {wow_scales(max(shape))} scales; noise thresholds {', '.join(f'{v:g}' for v in p.wow_denoise)}")
+                f": {wow_scales(shape)} scales; noise thresholds {', '.join(f'{v:g}' for v in p.wow_denoise)}")
             xin, vin = wow_disc_fill(lum, rvalid, g, frame.moon_margin_px, origin)
-            y = wow_display(wow(xin, vin, frame.noise[reg], list(p.wow_denoise), p.wow_edge_aware, residual=False,
+            y = wow_display(wow(xin, vin, frame.noise[reg], list(p.wow_denoise), p.wow_edge_aware, residual=True,
                                 measure_noise=True, say=say), rvalid)
         elif name_l == "achf":
             # Raw (before Contrast), so a Contrast change needs no filtering: see below.

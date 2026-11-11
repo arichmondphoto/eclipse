@@ -628,15 +628,20 @@ stays flat.
 
 WOW follows Auchère, Soubrié, Pelouze & Buchlin (2023), "Image enhancement
 with wavelet-optimized whitening", A&A 670, A66 (equation numbers are
-theirs). The linear stack is split by the à trous transform with the
-B3-spline kernel into ln N / ln 2 planes (N the image's width in pixels:
-every scale from 1 px to the whole frame), which add up exactly to the
-image (eqs. 4-5). Each plane is divided by the square root of its local
-power, the squared plane smoothed with that scale's own kernel (eq. 8), and
-the planes are added back with weight 1 (eq. 9): every scale gets the same
-local contrast, so there are no scale strengths to set. The result is put
-on 0..1 with black and white at the 0.1 and 99.9 percentiles, as the paper
-displays it. **Linear** in the Blend box is the paper's own combination
+theirs), and has been checked against the authors' own code (watroo,
+github.com/frederic-auchere/wavelets). The linear stack is split by the à
+trous transform with the B3-spline kernel into planes that add up exactly
+to the image (eqs. 4-5). As in the authors' code, the number of scales is
+log2 of the image's shorter side less log2 of the kernel's 5 samples
+(10 on a 45-megapixel frame), so the coarsest smoothing never spans the
+frame. Each plane's local power is the squared plane smoothed with that
+scale's own kernel (eq. 8), measured before the plane is denoised; the
+plane, denoised, is divided by its square root. The planes are added back
+with weight 1, and the coarse residual divided by its own standard
+deviation (eq. 9, as the authors' code does, which keeps WOW independent of
+the stack's units). Every scale gets the same local contrast, so there are
+no scale strengths to set. The result is put on 0..1 with black and white
+at the 0.1 and 99.9 percentiles, as the paper displays it. **Linear** in the Blend box is the paper's own combination
 with a stretched image (eq. 19, as Morgan & Druckmüller's for MGN).
 
 | Setting | What it does | Default |
@@ -644,8 +649,9 @@ with a stretched image (eq. 19, as Morgan & Druckmüller's for MGN).
 | **Transform** (`--wow-edge-aware`) | **Plain**: the paper's standard transform. **Edge-aware**: its bilateral version (eqs. 16-18), each smoothing step weighting a neighbour by how close its brightness is, on that scale's own local spread, so a sharp edge (a prominence) gets no halo; smoother, fine rays come out as thin lines, about 5 times slower | Plain |
 | **Noise threshold, scale 1-3** (`--wow-denoise`) | The paper's soft threshold (eqs. 12, 15): each coefficient multiplied by erf(\|w\| / (n σ)), σ the noise at that scale; higher is smoother, lower keeps more faint fine detail and more grain; 0 leaves a scale alone | 5, 2, 1 (the paper's) |
 
-Three choices are this toolkit's, for an eclipse stack rather than the
-paper's space-telescope images, and none depends on one camera or eclipse:
+Two choices are this toolkit's, for an eclipse stack rather than the
+paper's space-telescope images, and neither depends on one camera or
+eclipse:
 
 * **The noise at each scale is measured on the stack.** The paper computes
   it as the pixel noise (here the stack's noise map, from its weights)
@@ -655,12 +661,9 @@ paper's space-telescope images, and none depends on one camera or eclipse:
   the thresholds acted at half the strength asked for. So each scale's
   response is measured on the faintest half of the image (never below white
   noise's), and the log gives it ("WOW: noise at each denoised scale,
-  measured on the stack's faint half: ...").
-* **The coarse residual is left out.** At ln N / ln 2 scales it is nearly
-  constant over the frame (on the test data its spread was 1/200 000 of the
-  whitened planes'), but eq. 9 adds it in the image's own units, which are
-  arbitrary for a stack: scaled 1000 times, it changed the picture by up to
-  0.4 %. Without it, WOW is the same whatever the stack's units.
+  measured on the stack's faint half: ..."). The authors' code instead uses
+  one noise level for the whole image; the stack's noise map follows how
+  many frames cover each pixel.
 * **The Moon's disc.** It has no data. Filled with the limb's own
   brightness, every scale read the limb as the top of a ridge: a white band
   about 3 px wide on the test data binned 8 times. WOW sees the corona
@@ -675,7 +678,17 @@ computes it only when it is ticked, blended or shown. On a 3000 px crop of
 the test data: 12 s plain, 27 s edge-aware (Adaptive (MGN): 9 s). In areas
 holding only noise, the whitening gives the noise the same contrast as
 structure elsewhere, as in the paper: lower the blend strength or raise the
-thresholds if the outer corona looks mottled.
+thresholds if the outer corona looks mottled. The edge-aware transform
+treats noise much like fine edges and keeps more of it at the coarser
+scales, which the thresholds do not reach (the paper notes that its
+denoising is less pronounced).
+
+The B3-spline kernel is not perfectly round: smoothing along rows and then
+columns makes its widest scales bulge slightly towards the diagonals (about
+1 % of the layer's range on a simulated circular corona). With WOW blended
+at a high strength, smooth circular gradients can then look a little square
+in a reduced view. Blending WOW with the natural layer, as the paper does,
+hides it.
 
 ### Adaptive layer (ACHF)
 
