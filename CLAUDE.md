@@ -82,7 +82,8 @@ carefully against the PyQt6 API. Say so when handing it over.
   option needs help text. The GUI tab table in README is updated by hand.
 - **Settings shown in the GUI need hover help** (`_tip(...)`) explaining what they do and when
   to change them.
-- **Before pushing:** run the full suite and the GUI smoke script.
+- **Before pushing:** when code or tests change, run the full suite and the GUI smoke script. For
+  documentation only, run `tests/test_readme.py` if README.md changed, and nothing otherwise.
 
 ## Work in progress
 
@@ -130,7 +131,7 @@ carefully against the PyQt6 API. Say so when handing it over.
      polar resampling would only work per part and needs one grid for all scales, so not bit-identical;
      do not propose it again. Step 3 done: `final_with_moon` keeps the last preview's prepared frame
      (`_FINAL_PREVIEW`) while only the strength changes; frame 9: 13.4 s, then 1.8 s per strength.
-- `docs/FUTURE.md`: future additions, if needed or requested (several cameras and focal lengths in one stack; astronomy cameras such as ZWO:
+- `docs/FUTURE.md`: future additions, if needed or requested (several cameras and focal lengths in one stack; GPU acceleration for ACHF and WOW; astronomy cameras such as ZWO:
   FITS and SER frames, gain, mono; prominence brightness by red weight while stacking). Not to be
   started unless the user asks; read it when they do. Astronomy cameras: route decided (FITS read
   directly, Siril converts SER to FITS, not TIFF); waiting for real files from his future camera.

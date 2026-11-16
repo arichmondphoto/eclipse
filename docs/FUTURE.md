@@ -158,6 +158,49 @@ steps 1–4 checkable before any change to stacking.
 (the long-lens version for the inner corona and prominences, the short-lens version for the
 outer corona), matching their tones where they meet.
 
+## GPU acceleration for ACHF and WOW
+
+Pinned 16 Nov 2026 at the user's request. Not to be started until he asks.
+
+**Aim:** real-time editing of the ACHF and WOW settings in the detail box, and ideally on the
+whole frame. The other layers are already fast enough.
+
+**Decided so far:**
+- **Scope:** only ACHF (its ring work) and WOW (its scales and the edge-aware filter). Everything
+  else stays in NumPy and SciPy.
+- **A toggle:** a "Use the GPU" setting, used only when the hardware allows. The current CPU code
+  stays as the reference and the fallback, so a machine without a suitable GPU behaves as today.
+- **Any OS and any GPU:** Apple, NVIDIA, AMD and Intel GPUs, on macOS, Windows and Linux.
+
+- **WebGPU** (decided by the user, 16 Nov 2026), through the `wgpu` Python package. It runs on
+  Metal, Vulkan and DirectX 12, is actively developed, and installs into Siril's Python as a
+  normal package.
+- **The cost:** it is low level, so the blurs, à trous scales, edge-aware filter and ring
+  resampling are each written as small GPU programs (shaders); there is no ready-made FFT.
+- **Ruled out or weaker:**
+  - OpenCL is deprecated on macOS.
+  - Taichi's development has slowed; check its state before relying on it.
+  - PyTorch is a very large install for a Siril script.
+  - CuPy and JAX are in practice NVIDIA and AMD only.
+
+**Precision:** most GPUs, including all Apple Silicon GPUs, have no double precision in hardware.
+- **The images:** they are already single precision, so the GPU keeps their precision.
+- **Measurements needing double precision:** these stay on the CPU.
+- **Bit-identical results:** not possible, because GPUs sum in a different order and their built-in
+  maths functions differ slightly. Tests compare the GPU and CPU versions within a tight tolerance
+  instead of exactly, as the multi-core tests do between thread counts.
+
+**Do first, without the GPU** (the user agreed these were the first steps for speed):
+1. Time each part of ACHF and WOW on a full frame with the existing log timings.
+2. Keep each scale's result, so that changing a strength, a WOW noise threshold or the blend only
+   reweights what is kept. Changing a scale's size, or WOW's Transform, still recomputes.
+3. While a setting is changing, show a quick half-resolution preview, then fill in at full
+   resolution.
+4. Compute the coarse scales once for the whole frame and the fine scales only over the detail box
+   and its margin. The box must still match the full-size result.
+
+The GPU then makes the recomputations that remain fast.
+
 ## Wavelet-optimized whitening (WOW)
 
 Done 10 Nov 2026: the **WOW** layer on the Enhance tab (see README, "WOW").
